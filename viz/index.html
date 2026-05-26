@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgenVantage — Policy Explorer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1117;
+        --panel: #171a22;
+        --border: #2a2f3a;
+        --text: #e8eaed;
+        --muted: #9aa3b2;
+        --accent: #4c8dff;
+        --success: #3ecf8e;
+        --danger: #f07178;
+        --warning: #e6b450;
+        --full: #4c8dff;
+        --cache: #a78bfa;
+        --budget: #3ecf8e;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+      }
+      header {
+        padding: 1.5rem 2rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+      }
+      header h1 {
+        margin: 0 0 0.35rem;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+      header p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 52rem;
+      }
+      main {
+        padding: 1.5rem 2rem 3rem;
+        max-width: 1100px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding: 1rem;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .toolbar label {
+        font-size: 0.875rem;
+        color: var(--muted);
+      }
+      input[type="file"] {
+        font-size: 0.875rem;
+        color: var(--text);
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+      .stat {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .stat .value {
+        font-size: 1.75rem;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+      .stat .label {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 0.25rem;
+      }
+      section {
+        margin-bottom: 2rem;
+      }
+      section h2 {
+        font-size: 1.1rem;
+        margin: 0 0 0.75rem;
+        font-weight: 600;
+      }
+      .caption {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 0.35rem;
+      }
+      .chart-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.25rem;
+      }
+      .chart-box {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+      }
+      .bars {
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+        margin-top: 0.5rem;
+      }
+      .bar-row {
+        display: grid;
+        grid-template-columns: 7.5rem 1fr 3rem;
+        gap: 0.5rem;
+        align-items: center;
+        font-size: 0.85rem;
+      }
+      .bar-track {
+        height: 10px;
+        background: var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.3s ease;
+      }
+      .bar-fill.full {
+        background: var(--full);
+      }
+      .bar-fill.cache_aligned {
+        background: var(--cache);
+      }
+      .bar-fill.budgeted {
+        background: var(--budget);
+      }
+      .usage-bar {
+        height: 18px;
+        display: flex;
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--border);
+        margin: 0.5rem 0;
+      }
+      .usage-stable {
+        background: var(--full);
+      }
+      .usage-variable {
+        background: var(--warning);
+      }
+      .usage-remainder {
+        background: transparent;
+        flex: 1;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .legend span::before {
+        content: "";
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        margin-right: 0.35rem;
+        vertical-align: middle;
+      }
+      .legend .stable::before {
+        background: var(--full);
+      }
+      .legend .variable::before {
+        background: var(--warning);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 0.55rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+        background: #1c2029;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      tr.excluded td {
+        color: var(--danger);
+      }
+      tr.included-required td:first-child {
+        color: var(--success);
+      }
+      .pill {
+        display: inline-block;
+        padding: 0.1rem 0.45rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+      .pill.included {
+        background: rgba(62, 207, 142, 0.15);
+        color: var(--success);
+      }
+      .pill.excluded {
+        background: rgba(240, 113, 120, 0.15);
+        color: var(--danger);
+      }
+      details {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+      }
+      summary {
+        cursor: pointer;
+        padding: 0.75rem 1rem;
+        font-weight: 500;
+        list-style: none;
+      }
+      summary::-webkit-details-marker {
+        display: none;
+      }
+      summary::before {
+        content: "▸ ";
+        color: var(--muted);
+      }
+      details[open] summary::before {
+        content: "▾ ";
+      }
+      details .inner {
+        padding: 0 1rem 1rem;
+      }
+      .callout {
+        padding: 0.75rem 1rem;
+        border-left: 3px solid var(--accent);
+        background: rgba(76, 141, 255, 0.08);
+        border-radius: 0 6px 6px 0;
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>AgenVantage policy explorer</h1>
+      <p id="scenario-desc">Loading…</p>
+    </header>
+    <main>
+      <div class="toolbar">
+        <label for="report-file">Load a JSON report from <code>agenvantage run --output …</code></label>
+        <input id="report-file" type="file" accept="application/json,.json" />
+      </div>
+
+      <div class="callout">
+        Policies assemble the same scenario differently. Stable-prefix tokens measure ordering for
+        future cache experiments — not actual provider cache hits.
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <section>
+        <h2>Token metrics by policy</h2>
+        <div class="chart-row">
+          <div class="chart-box">
+            <strong>Assembled input tokens</strong>
+            <div class="bars" id="chart-input"></div>
+            <p class="caption">Length of assembled context per policy</p>
+          </div>
+          <div class="chart-box">
+            <strong>Stable-prefix tokens</strong>
+            <div class="bars" id="chart-stable"></div>
+            <p class="caption">Tokens before the first dynamic component</p>
+          </div>
+          <div class="chart-box">
+            <strong>Reduction vs full baseline</strong>
+            <div class="bars" id="chart-savings"></div>
+            <p class="caption">Percent fewer tokens than the full policy</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="budget-section">
+        <h2>Budgeted policy: token budget usage</h2>
+        <p id="budget-caption" class="caption"></p>
+        <div class="usage-bar" id="usage-bar"></div>
+        <div class="legend">
+          <span class="stable">Stable prefix</span>
+          <span class="variable">Variable context</span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Policy comparison</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Policy</th>
+              <th>Input tokens</th>
+              <th>Stable prefix</th>
+              <th>Included</th>
+              <th>Excluded</th>
+              <th>Saved vs full</th>
+            </tr>
+          </thead>
+          <tbody id="policy-table"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Per-policy assembly</h2>
+        <div id="policy-details"></div>
+      </section>
+    </main>
+
+    <script>
+      const POLICY_LABELS = {
+        full: "Full (baseline)",
+        cache_aligned: "Cache aligned",
+        budgeted: "Budgeted",
+      };
+
+      const DEFAULT_REPORT = {
+        project: "AgenVantage",
+        scenario_id: "synthetic-checkout-latency-incident",
+        scenario_description:
+          "Synthetic on-call assistant context for diagnosing checkout latency without customer or employer data.",
+        tokenizer: { model: "gpt-4o-mini", encoding: "o200k_base" },
+        policies: [
+          {
+            policy: "full",
+            input_tokens: 388,
+            stable_prefix_tokens: 108,
+            budget: null,
+            included_components: [
+              "assistant-policy",
+              "tool-schemas",
+              "user-request",
+              "runbook-latency",
+              "metric-snapshot",
+              "deployment-event",
+              "log-evidence",
+              "older-unrelated-incident",
+            ],
+            excluded_components: [],
+            tokens_saved_vs_full: 0,
+            token_reduction_percent_vs_full: 0,
+          },
+          {
+            policy: "cache_aligned",
+            input_tokens: 388,
+            stable_prefix_tokens: 163,
+            budget: null,
+            included_components: [
+              "assistant-policy",
+              "tool-schemas",
+              "runbook-latency",
+              "user-request",
+              "metric-snapshot",
+              "deployment-event",
+              "log-evidence",
+              "older-unrelated-incident",
+            ],
+            excluded_components: [],
+            tokens_saved_vs_full: 0,
+            token_reduction_percent_vs_full: 0,
+          },
+          {
+            policy: "budgeted",
+            input_tokens: 348,
+            stable_prefix_tokens: 163,
+            budget: 360,
+            included_components: [
+              "assistant-policy",
+              "tool-schemas",
+              "runbook-latency",
+              "user-request",
+              "metric-snapshot",
+              "deployment-event",
+              "log-evidence",
+            ],
+            excluded_components: [
+              { id: "older-unrelated-incident", reason: "exceeds token budget" },
+            ],
+            tokens_saved_vs_full: 40,
+            token_reduction_percent_vs_full: 10.31,
+          },
+        ],
+      };
+
+      function label(policy) {
+        return POLICY_LABELS[policy] || policy;
+      }
+
+      function allComponentIds(report) {
+        const ids = new Set();
+        for (const p of report.policies) {
+          p.included_components.forEach((id) => ids.add(id));
+          p.excluded_components.forEach((row) => ids.add(row.id));
+        }
+        return [...ids];
+      }
+
+      function renderBar(container, policies, valueFn, maxValue) {
+        container.innerHTML = "";
+        for (const p of policies) {
+          const value = valueFn(p);
+          const pct = maxValue ? Math.round((value / maxValue) * 100) : 0;
+          const row = document.createElement("div");
+          row.className = "bar-row";
+          row.innerHTML = `
+            <span>${label(p.policy)}</span>
+            <div class="bar-track"><div class="bar-fill ${p.policy}" style="width:${pct}%"></div></div>
+            <span style="text-align:right">${value}</span>
+          `;
+          container.appendChild(row);
+        }
+      }
+
+      function render(report) {
+        const policies = report.policies;
+        const baseline = policies[0];
+        const budgeted = policies.find((p) => p.policy === "budgeted") || policies[policies.length - 1];
+        const componentIds = allComponentIds(report);
+
+        document.getElementById("scenario-desc").textContent =
+          report.scenario_description +
+          ` · tokenizer ${report.tokenizer.model} (${report.tokenizer.encoding})`;
+
+        const stats = document.getElementById("stats");
+        stats.innerHTML = `
+          <div class="stat"><div class="value">${componentIds.length}</div><div class="label">Unique components</div></div>
+          <div class="stat"><div class="value">${baseline.input_tokens}</div><div class="label">Full baseline tokens</div></div>
+          <div class="stat"><div class="value">${budgeted.token_reduction_percent_vs_full}%</div><div class="label">Budgeted savings vs full</div></div>
+          <div class="stat"><div class="value">${budgeted.stable_prefix_tokens - baseline.stable_prefix_tokens}</div><div class="label">Extra stable-prefix (cache aligned)</div></div>
+        `;
+
+        const maxInput = Math.max(...policies.map((p) => p.input_tokens));
+        const maxStable = Math.max(...policies.map((p) => p.stable_prefix_tokens));
+        const maxPct = Math.max(...policies.map((p) => p.token_reduction_percent_vs_full), 1);
+
+        renderBar(
+          document.getElementById("chart-input"),
+          policies,
+          (p) => p.input_tokens,
+          maxInput,
+        );
+        renderBar(
+          document.getElementById("chart-stable"),
+          policies,
+          (p) => p.stable_prefix_tokens,
+          maxStable,
+        );
+        renderBar(
+          document.getElementById("chart-savings"),
+          policies,
+          (p) => p.token_reduction_percent_vs_full,
+          maxPct,
+        );
+
+        const budgetCap = budgeted.budget || baseline.input_tokens;
+        const variable = budgeted.input_tokens - budgeted.stable_prefix_tokens;
+        const headroom = budgetCap - budgeted.input_tokens;
+        document.getElementById("budget-caption").textContent =
+          `${budgeted.input_tokens} / ${budgetCap} tokens used · ${headroom} tokens headroom`;
+        const usage = document.getElementById("usage-bar");
+        usage.innerHTML = `
+          <div class="usage-stable" style="width:${(budgeted.stable_prefix_tokens / budgetCap) * 100}%"></div>
+          <div class="usage-variable" style="width:${(variable / budgetCap) * 100}%"></div>
+          <div class="usage-remainder"></div>
+        `;
+
+        const policyTable = document.getElementById("policy-table");
+        policyTable.innerHTML = policies
+          .map(
+            (p) => `<tr>
+            <td>${label(p.policy)}</td>
+            <td>${p.input_tokens}</td>
+            <td>${p.stable_prefix_tokens}</td>
+            <td>${p.included_components.length}</td>
+            <td>${p.excluded_components.length}</td>
+            <td>${p.tokens_saved_vs_full > 0 ? "−" + p.tokens_saved_vs_full : "—"}</td>
+          </tr>`,
+          )
+          .join("");
+
+        const detailsRoot = document.getElementById("policy-details");
+        detailsRoot.innerHTML = policies
+          .map((p) => {
+            const rows = componentIds
+              .map((id) => {
+                const included = p.included_components.includes(id);
+                const excluded = p.excluded_components.find((r) => r.id === id);
+                const status = included ? "included" : excluded ? "excluded" : "n/a";
+                const note = excluded ? excluded.reason : "";
+                const rowClass =
+                  status === "excluded"
+                    ? "excluded"
+                    : included
+                      ? "included-required"
+                      : "";
+                return `<tr class="${rowClass}">
+                  <td>${id}</td>
+                  <td><span class="pill ${status}">${status}</span></td>
+                  <td>${note}</td>
+                </tr>`;
+              })
+              .join("");
+            return `<details>
+              <summary>${label(p.policy)} — ${p.input_tokens} tokens · ${p.included_components.length} included</summary>
+              <div class="inner">
+                <table>
+                  <thead><tr><th>Component</th><th>Status</th><th>Notes</th></tr></thead>
+                  <tbody>${rows}</tbody>
+                </table>
+              </div>
+            </details>`;
+          })
+          .join("");
+      }
+
+      document.getElementById("report-file").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            render(JSON.parse(reader.result));
+          } catch (err) {
+            alert("Could not parse report JSON: " + err.message);
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      render(DEFAULT_REPORT);
+    </script>
+  </body>
+</html>

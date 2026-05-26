@@ -2,19 +2,31 @@
 
 **Measure the context behind every agent decision.**
 
-AgenVantage started as a way to understand and reduce token usage in personal
-LLM workflows. Agent requests rarely contain only a user message: they carry
-instructions, tool schemas, retrieved documents, memory, and conversation
-history.
+AgenVantage started as a way to understand and reduce token usage in my own
+AI-assisted development workflows. Coding requests rarely contain only a
+question: they carry source files, diffs, test failures, documentation, tool
+schemas, instructions, and conversation history.
 
-This project treats that context as measurable infrastructure. Its first
-milestone assembles alternative context packages under token budgets and
-traces policy-level token metrics, creating a reproducible foundation for
-future latency, caching, quality, and security evaluations.
+This project treats that context as measurable input. It builds token-budgeted
+context packages from local repositories before a model call occurs, showing
+what was selected, what was omitted, and why. A secondary experiment harness
+compares synthetic context policies as a foundation for future API-backed
+latency, caching, cost, and quality measurements.
 
 ## Current Scope
 
-The v0 experiment harness provides:
+The current local workflow provides:
+
+- an `agenvantage pack` command for real coding questions over local
+  repositories;
+- tracked-source scanning that avoids dependency folders and `.env` files;
+- line-addressable source chunk ranking using task terms;
+- Markdown context packages and JSON decision manifests under a token budget;
+- local candidate-context reduction metrics that do not pretend to be API
+  savings; and
+- a typed context-policy experiment harness for controlled synthetic cases.
+
+The experiment harness also provides:
 
 - a typed context-component format for instructions, tools, memory, retrieved
   evidence, and user requests;
@@ -26,8 +38,9 @@ The v0 experiment harness provides:
 - optional OpenTelemetry spans for policy runs; and
 - a synthetic on-call incident scenario, with no private or employer data.
 
-It does **not** yet make model calls, measure real provider cache hits, assess
-answer quality, or represent a production enterprise system.
+It does **not** yet make model calls, measure real provider cache hits or
+billed cost, assess generated-answer quality, or represent a production
+enterprise system.
 
 ## Quick Start
 
@@ -37,6 +50,17 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 agenvantage run --fixture examples/synthetic_oncall_context.json --budget 360
 pytest
+```
+
+Build a context package for a coding task in one of your own repositories:
+
+```powershell
+agenvantage pack `
+  --repo C:\Users\nicho\GithubRepos\UF-SASE-Website `
+  --task "Explain the Redis-backed rate limiter, including fail-open behavior and tests." `
+  --budget 1800 `
+  --output artifacts/rate-limiter-context.md `
+  --manifest artifacts/rate-limiter-manifest.json
 ```
 
 Write a report and display OpenTelemetry spans locally:
@@ -49,18 +73,29 @@ agenvantage run `
   --output artifacts/oncall-report.json
 ```
 
+Open the visual policy explorer (bar charts, budget usage, per-component inclusion):
+
+```powershell
+agenvantage view
+```
+
+After generating a report, load it in the dashboard via the file picker, or open the
+dashboard path printed by `agenvantage view --report artifacts/oncall-report.json`.
+
 ## Why This Project
 
-Repeated context has operational consequences. Official provider
-documentation describes prompt caching around reusable prefixes and token
-usage metadata; OpenTelemetry defines developing GenAI conventions for model,
-tool, MCP, and token telemetry; Datadog LLM Observability consumes token and
-trace information for cost and evaluation analysis.
+The immediate use case is practical: send less irrelevant repository text
+when asking an LLM to explain, debug, or review code. Provider documentation
+also establishes a future measurement path: repeated stable prefixes can be
+cached, response metadata can reveal cached tokens, and OpenTelemetry can
+represent real GenAI usage once provider calls exist.
 
-AgenVantage begins before a provider call: it makes context composition and
-policy tradeoffs inspectable. See [docs/research.md](docs/research.md) for
-source-based design decisions and [docs/roadmap.md](docs/roadmap.md) for the
-measured path from personal utility to portfolio-ready infrastructure.
+AgenVantage begins before a provider call: it makes context composition
+inspectable in real coding workflows. See
+[docs/context-planning-layer.md](docs/context-planning-layer.md) for the
+pre-inference design, [docs/real-token-tradeoff-experiment.md](docs/real-token-tradeoff-experiment.md)
+for the eventual API validation plan, and [docs/roadmap.md](docs/roadmap.md)
+for the measured build sequence.
 
 ## Example Experiment
 
@@ -82,8 +117,8 @@ hit or provider cost reduction.
 
 ```text
 src/agenvantage/     Context model, policies, tracing, and CLI
-examples/             Synthetic context scenarios
+examples/             Secondary synthetic context scenarios
+viz/                  Browser dashboard for experiment reports
 tests/                Deterministic policy tests
 docs/                 Research basis and implementation roadmap
 ```
-
