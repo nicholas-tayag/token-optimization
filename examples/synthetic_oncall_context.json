@@ -1,0 +1,78 @@
+{
+  "scenario_id": "synthetic-checkout-latency-incident",
+  "description": "Synthetic on-call assistant context for diagnosing checkout latency without customer or employer data.",
+  "components": [
+    {
+      "id": "assistant-policy",
+      "kind": "instruction",
+      "required": true,
+      "stable": true,
+      "priority": 100,
+      "relevance": 1.0,
+      "text": "You are an incident-assistance agent. Ground every conclusion in supplied evidence. Never expose secrets, invent customer impact, or recommend production changes without an approval step. Return a suspected cause, evidence cited by component id, and safe next actions."
+    },
+    {
+      "id": "tool-schemas",
+      "kind": "tools",
+      "required": true,
+      "stable": true,
+      "priority": 95,
+      "relevance": 1.0,
+      "text": "Available read-only tools: query_metrics(service, metric, window), search_logs(service, query, window), get_deployment(service, deployment_id). Mutation tools are unavailable. Do not propose tool arguments that contain credentials or personal data."
+    },
+    {
+      "id": "user-request",
+      "kind": "request",
+      "required": true,
+      "stable": false,
+      "priority": 100,
+      "relevance": 1.0,
+      "text": "Investigate why checkout-api latency increased during the last 30 minutes and recommend the safest next step."
+    },
+    {
+      "id": "runbook-latency",
+      "kind": "runbook",
+      "required": false,
+      "stable": true,
+      "priority": 85,
+      "relevance": 0.9,
+      "text": "Checkout latency triage: confirm p95 and error-rate change; correlate onset with a deployment; inspect database pool wait time and upstream timeout rate; recommend rollback only after evidence identifies a suspect deployment and an approver confirms action."
+    },
+    {
+      "id": "metric-snapshot",
+      "kind": "retrieval",
+      "required": false,
+      "stable": false,
+      "priority": 90,
+      "relevance": 0.98,
+      "text": "At 14:05 UTC, checkout-api p95 latency increased from 240 ms to 1.8 s. Error rate increased from 0.4% to 3.1%. Database connection-pool wait time increased from 12 ms to 940 ms at the same time."
+    },
+    {
+      "id": "deployment-event",
+      "kind": "retrieval",
+      "required": false,
+      "stable": false,
+      "priority": 88,
+      "relevance": 0.96,
+      "text": "Deployment checkout-api build synthetic-184 completed at 14:02 UTC. Change summary: payment retry client now permits up to three in-request retry attempts when an upstream call times out."
+    },
+    {
+      "id": "log-evidence",
+      "kind": "retrieval",
+      "required": false,
+      "stable": false,
+      "priority": 75,
+      "relevance": 0.83,
+      "text": "Synthetic log aggregation: upstream payment timeout warnings rose from 2/min to 64/min after 14:04 UTC. Database acquisition timeout messages rose after repeated retry attempts began."
+    },
+    {
+      "id": "older-unrelated-incident",
+      "kind": "memory",
+      "required": false,
+      "stable": false,
+      "priority": 20,
+      "relevance": 0.12,
+      "text": "Two months ago, a catalog indexing job increased search-api CPU utilization. Resolution was to decrease indexing concurrency. No checkout-api or payment behavior was involved."
+    }
+  ]
+}
