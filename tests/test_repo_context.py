@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from agenvantage.repo_context import build_context_package, source_files
 from agenvantage.tokenizer import TokenCounter
@@ -30,6 +31,27 @@ def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> 
     assert "src/rateLimiter.ts" in files
     assert ".env" not in files
     assert "node_modules/library.ts" not in files
+
+
+def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    (tmp_path / ".gitignore").write_text("ignored.ts\n", encoding="utf-8")
+    (tmp_path / "tracked.ts").write_text("export const tracked = true;\n", encoding="utf-8")
+    (tmp_path / "draft.ts").write_text("export const draft = true;\n", encoding="utf-8")
+    (tmp_path / "ignored.ts").write_text("export const ignored = true;\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", ".gitignore", "tracked.ts"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert "tracked.ts" in files
+    assert "draft.ts" in files
+    assert "ignored.ts" not in files
 
 
 def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:

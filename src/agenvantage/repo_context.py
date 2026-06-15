@@ -181,8 +181,20 @@ def source_files(repo: Path, max_file_bytes: int = 300_000) -> tuple[Path, ...]:
         check=False,
         text=True,
     )
-    if tracked.returncode == 0 and tracked.stdout:
-        candidates = (repo / item for item in tracked.stdout.split("\0") if item)
+    untracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if tracked.returncode == 0 and untracked.returncode == 0:
+        git_paths = {
+            repo / item
+            for output in (tracked.stdout, untracked.stdout)
+            for item in output.split("\0")
+            if item
+        }
+        candidates = iter(git_paths)
     else:
         candidates = (path for path in repo.rglob("*") if path.is_file())
 
@@ -361,7 +373,7 @@ def build_context_package(
         "measurement_notes": [
             "This compares local packaged context with the scanned eligible source corpus.",
             "It does not measure provider API tokens, cache hits, response quality, or cost savings.",
-            "Only tracked source/configuration/documentation files are scanned when the target is a Git repository.",
+            "Tracked files plus untracked, non-ignored worktree files are scanned when the target is a Git repository.",
         ],
     }
     return rendered.rstrip() + "\n", report

@@ -19,7 +19,8 @@ The current local workflow provides:
 
 - an `agenvantage pack` command for real coding questions over local
   repositories;
-- tracked-source scanning that avoids dependency folders and `.env` files;
+- git-aware source scanning that includes tracked files plus untracked,
+  non-ignored worktree files while still avoiding dependency folders and `.env` files;
 - line-addressable source chunk ranking using task terms;
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
