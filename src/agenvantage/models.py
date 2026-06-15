@@ -1,7 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off"}:
+            return False
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+    return bool(value)
+
+
+def _clean_labels(values: Iterable[Any]) -> tuple[str, ...]:
+    labels: list[str] = []
+    for value in values:
+        label = str(value).strip()
+        if label:
+            labels.append(label)
+    return tuple(labels)
 
 
 @dataclass(frozen=True)
@@ -17,19 +38,19 @@ class ContextComponent:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ContextComponent":
-        component_id = str(raw["id"]).strip()
-        text = str(raw["text"]).strip()
+        component_id = str(raw.get("id", "")).strip()
+        text = str(raw.get("text", "")).strip()
         if not component_id or not text:
             raise ValueError("Context components require non-empty id and text fields.")
         return cls(
             component_id=component_id,
             kind=str(raw.get("kind", "context")).strip() or "context",
             text=text,
-            required=bool(raw.get("required", False)),
-            stable=bool(raw.get("stable", False)),
+            required=_coerce_bool(raw.get("required", False)),
+            stable=_coerce_bool(raw.get("stable", False)),
             priority=int(raw.get("priority", 0)),
             relevance=float(raw.get("relevance", 0.0)),
-            labels=tuple(str(label) for label in raw.get("labels", [])),
+            labels=_clean_labels(raw.get("labels", [])),
         )
 
     def render(self) -> str:
@@ -44,11 +65,19 @@ class ContextScenario:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ContextScenario":
-        components = tuple(ContextComponent.from_dict(item) for item in raw["components"])
+        scenario_id = str(raw.get("scenario_id", raw.get("id", ""))).strip()
+        if not scenario_id:
+            raise ValueError("Scenarios require a non-empty scenario_id or id field.")
+
+        raw_components = raw.get("components")
+        if not isinstance(raw_components, list):
+            raise ValueError("Scenarios require a components list.")
+
+        components = tuple(ContextComponent.from_dict(item) for item in raw_components)
         if not components:
             raise ValueError("A scenario must contain at least one context component.")
         return cls(
-            scenario_id=str(raw["scenario_id"]),
+            scenario_id=scenario_id,
             description=str(raw.get("description", "")),
             components=components,
         )
@@ -84,4 +113,3 @@ class ContextPackage:
             "excluded_components": [item.to_dict() for item in self.excluded],
             "metadata": self.metadata,
         }
-
