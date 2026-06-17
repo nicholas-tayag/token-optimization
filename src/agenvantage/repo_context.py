@@ -26,6 +26,7 @@ _SUPPORTED_SUFFIXES = {
     ".mjs",
     ".py",
     ".rs",
+    ".sh",
     ".sql",
     ".toml",
     ".ts",

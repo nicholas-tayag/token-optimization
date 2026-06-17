@@ -33,6 +33,17 @@ def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> 
     assert "node_modules/library.ts" not in files
 
 
+def test_source_files_include_shell_scripts(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm run build\n", encoding="utf-8"
+    )
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert "scripts/deploy.sh" in files
+
+
 def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     (tmp_path / ".gitignore").write_text("ignored.ts\n", encoding="utf-8")
@@ -126,6 +137,23 @@ def test_context_package_matches_natural_language_to_code_variants(tmp_path: Pat
         counter=TokenCounter(),
     )
     assert report["selected_chunks"][0]["path"] == "limiter.ts"
+
+
+def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm test\nnpm run release\n", encoding="utf-8"
+    )
+    (tmp_path / "notes.md").write_text("General project notes.\n", encoding="utf-8")
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain the deploy script and CI release steps",
+        budget=280,
+        counter=TokenCounter(),
+    )
+
+    assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
 
 
 def test_context_package_retains_short_registration_chunk(tmp_path: Path) -> None:
