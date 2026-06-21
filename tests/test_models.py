@@ -17,6 +17,22 @@ def test_component_parses_boolean_like_flags_and_cleans_labels() -> None:
     assert component.labels == ("policy", "security", "7")
 
 
+def test_component_accepts_scalar_labels_and_blank_numeric_fields() -> None:
+    component = ContextComponent.from_dict(
+        {
+            "id": "memory",
+            "text": "Keep prior context.",
+            "priority": " ",
+            "relevance": "",
+            "labels": "memory",
+        }
+    )
+
+    assert component.priority == 0
+    assert component.relevance == 0.0
+    assert component.labels == ("memory",)
+
+
 def test_scenario_accepts_id_alias_and_strips_whitespace() -> None:
     scenario = ContextScenario.from_dict(
         {

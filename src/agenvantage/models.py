@@ -16,7 +16,33 @@ def _coerce_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _clean_labels(values: Iterable[Any]) -> tuple[str, ...]:
+def _coerce_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        return int(stripped)
+    return int(value)
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        return float(stripped)
+    return float(value)
+
+
+def _clean_labels(values: Iterable[Any] | Any) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        values = [values]
     labels: list[str] = []
     for value in values:
         label = str(value).strip()
@@ -48,8 +74,8 @@ class ContextComponent:
             text=text,
             required=_coerce_bool(raw.get("required", False)),
             stable=_coerce_bool(raw.get("stable", False)),
-            priority=int(raw.get("priority", 0)),
-            relevance=float(raw.get("relevance", 0.0)),
+            priority=_coerce_int(raw.get("priority", 0)),
+            relevance=_coerce_float(raw.get("relevance", 0.0)),
             labels=_clean_labels(raw.get("labels", [])),
         )
 
