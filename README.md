@@ -25,6 +25,8 @@ The current local workflow provides:
   imports outside the worktree for reuse across runs;
 - optional git diff and recent commit-log provenance sections for changed-
   behavior and review-style tasks;
+- optional include and exclude path globs for narrowing eligible repository
+  files before ranking;
 - line-addressable source chunk ranking using task terms;
 - chunk-local anchor symbols plus file-level symbol and import boosts layered
   onto chunk ranking, with a diversity-aware candidate pool and
@@ -80,6 +82,8 @@ agenvantage pack `
   --repo C:\Users\nicho\GithubRepos\mesh `
   --repo C:\Users\nicho\GithubRepos\signalfoundry `
   --task "Compare the local static server hardening in both apps." `
+  --include-glob "scripts/*" `
+  --exclude-glob "docs/*" `
   --budget 2200 `
   --output artifacts/multi-repo-context.md `
   --manifest artifacts/multi-repo-manifest.json

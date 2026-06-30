@@ -125,6 +125,8 @@ Measured reason this still matters:
 
 ### Backlog 3: Task-Shaped Selection Controls
 
+Status: partially implemented.
+
 Why this is third:
 
 - the core packer works, but task-specific controls are still weak;
@@ -153,6 +155,13 @@ Current measured gap:
 - the remaining partial case shows that `explain`-style tasks can still miss a
   needed configuration excerpt even when the right file is selected, so task
   presets should still control what evidence types must be present.
+
+Current state:
+
+- `agenvantage pack` now supports repeated `--include-glob` and
+  `--exclude-glob` filters and records the active filters in the manifest;
+- task presets, stdin path lists, and alternate output formats are still future
+  work.
 
 ### Backlog 4: Incremental Indexing And Search Contexts
 

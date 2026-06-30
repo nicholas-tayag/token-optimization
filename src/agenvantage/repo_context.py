@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -271,7 +272,17 @@ def _repo_inputs(repos: Iterable[Path]) -> tuple[RepositoryInput, ...]:
     )
 
 
-def source_files(repo: Path, max_file_bytes: int = 300_000) -> tuple[Path, ...]:
+def _matches_any_glob(relative_path: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(relative_path, pattern) for pattern in patterns)
+
+
+def source_files(
+    repo: Path,
+    max_file_bytes: int = 300_000,
+    *,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> tuple[Path, ...]:
     repo = repo.resolve()
     if not repo.is_dir():
         raise ValueError(f"Repository path does not exist: {repo}")
@@ -301,10 +312,13 @@ def source_files(repo: Path, max_file_bytes: int = 300_000) -> tuple[Path, ...]:
 
     files = []
     for path in candidates:
+        relative_path = path.relative_to(repo).as_posix()
         if (
             path.is_file()
             and _eligible_file(path, repo)
             and path.stat().st_size <= max_file_bytes
+            and (not include_globs or _matches_any_glob(relative_path, include_globs))
+            and not _matches_any_glob(relative_path, exclude_globs)
         ):
             files.append(path)
     return tuple(sorted(files))
@@ -474,6 +488,8 @@ def build_multi_repo_context_package(
     instructions: str = _DEFAULT_INSTRUCTIONS,
     include_diff: bool = False,
     include_log: bool = False,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
 ) -> tuple[str, dict[str, Any]]:
     if budget <= 0:
         raise ValueError("Token budget must be positive.")
@@ -496,7 +512,11 @@ def build_multi_repo_context_package(
         "import_count": 0,
     }
     for repo_input in repo_inputs:
-        files = source_files(repo_input.root)
+        files = source_files(
+            repo_input.root,
+            include_globs=include_globs,
+            exclude_globs=exclude_globs,
+        )
         index_result = build_repository_index(repo_input.root, files)
         repo_provenance = build_repo_provenance_sections(
             repo_input.root,
@@ -627,6 +647,10 @@ def build_multi_repo_context_package(
         "task": task,
         "tokenizer": {"model": counter.model, "encoding": counter.encoding_name},
         "budget": budget,
+        "path_filters": {
+            "include_globs": list(include_globs),
+            "exclude_globs": list(exclude_globs),
+        },
         "repo_count": len(repo_inputs),
         "repos": repo_summaries,
         "scanned_files": sum(repo["scanned_files"] for repo in repo_summaries),
@@ -678,6 +702,8 @@ def build_context_package(
     instructions: str = _DEFAULT_INSTRUCTIONS,
     include_diff: bool = False,
     include_log: bool = False,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
 ) -> tuple[str, dict[str, Any]]:
     return build_multi_repo_context_package(
         [repo],
@@ -688,6 +714,8 @@ def build_context_package(
         instructions=instructions,
         include_diff=include_diff,
         include_log=include_log,
+        include_globs=include_globs,
+        exclude_globs=exclude_globs,
     )
 
 

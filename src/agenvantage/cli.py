@@ -71,6 +71,18 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include recent git commit-log provenance in the packaged context.",
     )
+    pack.add_argument(
+        "--include-glob",
+        action="append",
+        default=[],
+        help="Restrict eligible repository files to paths matching this glob. Repeat as needed.",
+    )
+    pack.add_argument(
+        "--exclude-glob",
+        action="append",
+        default=[],
+        help="Exclude eligible repository files whose paths match this glob. Repeat as needed.",
+    )
     pack.add_argument("--output", type=Path, help="Optional Markdown context-package output.")
     pack.add_argument("--manifest", type=Path, help="Optional JSON decision-manifest output.")
     return parser
@@ -109,6 +121,8 @@ def main() -> None:
                 args.top_k,
                 include_diff=args.include_diff,
                 include_log=args.include_log,
+                include_globs=tuple(args.include_glob),
+                exclude_globs=tuple(args.exclude_glob),
             )
         else:
             markdown, report = build_multi_repo_context_package(
@@ -119,6 +133,8 @@ def main() -> None:
                 args.top_k,
                 include_diff=args.include_diff,
                 include_log=args.include_log,
+                include_globs=tuple(args.include_glob),
+                exclude_globs=tuple(args.exclude_glob),
             )
         write_package_outputs(markdown, report, args.output, args.manifest)
         print(json.dumps(report, indent=2))

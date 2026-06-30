@@ -52,6 +52,31 @@ def test_source_files_include_shell_scripts(tmp_path: Path) -> None:
     assert "scripts/deploy.sh" in files
 
 
+def test_source_files_respect_include_globs(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    files = {
+        path.relative_to(tmp_path).as_posix()
+        for path in source_files(tmp_path, include_globs=("scripts/*.sh",))
+    }
+
+    assert files == {"scripts/deploy.sh"}
+
+
+def test_source_files_respect_exclude_globs(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+
+    files = {
+        path.relative_to(tmp_path).as_posix()
+        for path in source_files(tmp_path, exclude_globs=("src/mapView.ts",))
+    }
+
+    assert "src/rateLimiter.ts" in files
+    assert "src/mapView.ts" not in files
+
+
 def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     (tmp_path / ".gitignore").write_text("ignored.ts\n", encoding="utf-8")
@@ -420,6 +445,29 @@ def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> N
         counter=TokenCounter(),
     )
 
+    assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
+
+
+def test_context_package_records_active_path_filters(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm run build\n", encoding="utf-8"
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain deploy script",
+        budget=260,
+        counter=TokenCounter(),
+        include_globs=("scripts/*.sh",),
+        exclude_globs=("src/*",),
+    )
+
+    assert report["path_filters"] == {
+        "include_globs": ["scripts/*.sh"],
+        "exclude_globs": ["src/*"],
+    }
     assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
 
 

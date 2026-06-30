@@ -113,6 +113,8 @@ External grounding:
 
 Recommended implementation:
 
+- keep the new include/exclude glob controls as the basic scope-constraining
+  layer;
 - add task presets such as `explain`, `compare`, `review`, and `change`;
 - expand queries differently for tests, routes, uploads, storage, and
   provenance-style tasks;
