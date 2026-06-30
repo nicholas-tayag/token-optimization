@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,12 @@ DEFAULT_OUTPUT_MD = REPO_ROOT / "artifacts" / "use-case-validation.md"
 
 
 @dataclass(frozen=True)
+class RequiredObservation:
+    label: str
+    any_of: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
 class ValidationCase:
     case_id: str
     category: str
@@ -28,6 +35,7 @@ class ValidationCase:
     description: str
     requires_change_provenance: bool = False
     top_k: int = 20
+    required_observations: tuple[RequiredObservation, ...] = ()
 
 
 def _ordered_unique(items: list[str]) -> list[str]:
@@ -62,18 +70,28 @@ def _first_hit_rank(selected_paths: list[str], expected_paths: tuple[str, ...]) 
 def _verdict(
     expected_path_recall: float,
     repo_recall: float,
+    required_observation_recall: float,
     requires_change_provenance: bool,
     supports_change_provenance: bool,
 ) -> str:
     if requires_change_provenance:
-        if expected_path_recall == 1.0 and repo_recall == 1.0 and supports_change_provenance:
+        if (
+            expected_path_recall == 1.0
+            and repo_recall == 1.0
+            and required_observation_recall == 1.0
+            and supports_change_provenance
+        ):
             return "pass"
-        if expected_path_recall >= 0.5 and repo_recall == 1.0:
+        if (
+            expected_path_recall >= 0.5
+            and repo_recall == 1.0
+            and required_observation_recall >= 0.5
+        ):
             return "partial"
         return "fail"
-    if expected_path_recall == 1.0 and repo_recall == 1.0:
+    if expected_path_recall == 1.0 and repo_recall == 1.0 and required_observation_recall == 1.0:
         return "pass"
-    if expected_path_recall >= 0.5 and repo_recall == 1.0:
+    if expected_path_recall >= 0.5 and repo_recall == 1.0 and required_observation_recall >= 0.5:
         return "partial"
     return "fail"
 
@@ -110,6 +128,63 @@ def _report_selected_paths(report: dict[str, Any]) -> list[str]:
 
 def _report_selected_repos(report: dict[str, Any]) -> list[str]:
     return sorted(report.get("selected_repo_labels", []))
+
+
+def _normalize_for_match(text: str) -> str:
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text).replace("_", " ")
+    return re.sub(r"[^a-z0-9]+", " ", split.lower()).strip()
+
+
+def _selected_file_texts(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    selected: dict[str, dict[str, Any]] = {}
+    for chunk in report["selected_chunks"]:
+        absolute_path = Path(chunk["repo_path"]) / chunk["relative_path"]
+        try:
+            lines = absolute_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        snippet = "\n".join(lines[chunk["start_line"] - 1 : chunk["end_line"]])
+        current = selected.setdefault(
+            chunk["path"],
+            {
+                "path": chunk["path"],
+                "repo_label": chunk["repo_label"],
+                "text_parts": [],
+                "chunk_ids": [],
+            },
+        )
+        current["text_parts"].append(snippet)
+        current["chunk_ids"].append(chunk["id"])
+    for current in selected.values():
+        current["text"] = "\n".join(current.pop("text_parts"))
+        current["normalized_text"] = _normalize_for_match(current["text"])
+    return selected
+
+
+def _evaluate_required_observations(
+    case: ValidationCase, report: dict[str, Any]
+) -> tuple[list[str], list[str], dict[str, list[str]]]:
+    selected_file_texts = _selected_file_texts(report)
+    observed: list[str] = []
+    missing: list[str] = []
+    citations: dict[str, list[str]] = {}
+
+    for observation in case.required_observations:
+        matched_paths = [
+            path
+            for path, payload in selected_file_texts.items()
+            if any(
+                all(_normalize_for_match(term) in payload["normalized_text"] for term in pattern)
+                for pattern in observation.any_of
+            )
+        ]
+        if matched_paths:
+            observed.append(observation.label)
+            citations[observation.label] = matched_paths
+        else:
+            missing.append(observation.label)
+
+    return observed, missing, citations
 
 
 def _meets_grounding(case: ValidationCase, report: dict[str, Any]) -> bool:
@@ -188,10 +263,22 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
     repo_recall = round(
         (len(repo_hits) / len(expected_repo_labels)) if expected_repo_labels else 1.0, 2
     )
+    observed_observations, missing_observations, observation_citations = (
+        _evaluate_required_observations(case, report)
+    )
+    required_observation_recall = round(
+        (
+            len(observed_observations) / len(case.required_observations)
+            if case.required_observations
+            else 1.0
+        ),
+        2,
+    )
     supports_change_provenance = bool(report.get("provenance", {}).get("section_count", 0))
     verdict = _verdict(
         expected_path_recall,
         repo_recall,
+        required_observation_recall,
         case.requires_change_provenance,
         supports_change_provenance,
     )
@@ -203,6 +290,9 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
         expected_path_recall == 1.0
         and repo_recall == 1.0
         and (supports_change_provenance if case.requires_change_provenance else True)
+    )
+    answer_rubric_sufficient_for_context = (
+        grounding_sufficient_for_context and required_observation_recall == 1.0
     )
 
     return {
@@ -231,11 +321,17 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
         "repo_hits": repo_hits,
         "expected_path_recall": expected_path_recall,
         "repo_recall": repo_recall,
+        "required_observation_count": len(case.required_observations),
+        "observed_observations": observed_observations,
+        "missing_required_observations": missing_observations,
+        "required_observation_recall": required_observation_recall,
+        "observation_citations": observation_citations,
         "grounding_file_density": round(
             (len(path_hits) / len(selected_paths)) if selected_paths else 0.0, 2
         ),
         "first_expected_path_rank": _first_hit_rank(selected_paths, case.expected_paths),
         "grounding_sufficient_for_context": grounding_sufficient_for_context,
+        "answer_rubric_sufficient_for_context": answer_rubric_sufficient_for_context,
         "minimum_budget_for_grounding": minimum_budget_for_grounding,
         "minimum_selected_tokens_for_grounding": minimum_budget_report["selected_context_tokens"]
         if minimum_budget_report
@@ -293,6 +389,23 @@ def _build_cases() -> list[ValidationCase]:
             repos=(mesh,),
             budget=3200,
             expected_paths=("lib/extraction.js", "scripts/app.js", "server.js"),
+            required_observations=(
+                RequiredObservation(
+                    label="mesh_gemini_fallback",
+                    any_of=(
+                        ("gemini api key is not configured", "fallback true"),
+                        ("gemini extraction failed", "fallback true"),
+                    ),
+                ),
+                RequiredObservation(
+                    label="mesh_live_log_endpoint",
+                    any_of=(("api live log", "segments", "speaker"),),
+                ),
+                RequiredObservation(
+                    label="mesh_live_ui_posts_segments",
+                    any_of=(("fetch", "api live log", "state live segments"),),
+                ),
+            ),
         ),
         ValidationCase(
             case_id="explain-signalfoundry-upload-smoke-test",
@@ -302,6 +415,23 @@ def _build_cases() -> list[ValidationCase]:
             repos=(signalfoundry,),
             budget=3600,
             expected_paths=("tools/server-smoke-test.js", "tools/serve.js", "app.js"),
+            required_observations=(
+                RequiredObservation(
+                    label="signalfoundry_upload_limit_config",
+                    any_of=(("max upload bytes", "default max upload bytes"),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_empty_upload_rejected",
+                    any_of=(("upload body is empty",),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_cleaning_and_export_states",
+                    any_of=(
+                        ("payload clean", "clean status"),
+                        ("cleaned export ready", "cleaning plan"),
+                    ),
+                ),
+            ),
         ),
         ValidationCase(
             case_id="validate-application-tracker-private-storage",
@@ -315,6 +445,20 @@ def _build_cases() -> list[ValidationCase]:
                 "server.mjs",
                 "lib/tracker-store.mjs",
             ),
+            required_observations=(
+                RequiredObservation(
+                    label="application_tracker_private_directory_defaults",
+                    any_of=(("private directory", "tracker state json"),),
+                ),
+                RequiredObservation(
+                    label="application_tracker_atomic_tracker_write",
+                    any_of=(("rename temporary this path", "revision"),),
+                ),
+                RequiredObservation(
+                    label="application_tracker_static_and_private_paths_blocked",
+                    any_of=(("git response status", "private response status", "api response status"),),
+                ),
+            ),
         ),
         ValidationCase(
             case_id="recommend-signalfoundry-edge-tests",
@@ -324,6 +468,20 @@ def _build_cases() -> list[ValidationCase]:
             repos=(signalfoundry,),
             budget=3200,
             expected_paths=("tools/server-smoke-test.js", "tools/serve.js", "app.js"),
+            required_observations=(
+                RequiredObservation(
+                    label="signalfoundry_empty_upload_smoke_test",
+                    any_of=(("empty upload", "upload body is empty"),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_oversize_upload_smoke_test",
+                    any_of=(("max upload bytes", "oversized upload status code", "413"),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_ui_clean_statuses",
+                    any_of=(("clean status", "payload cleaning plan"),),
+                ),
+            ),
         ),
         ValidationCase(
             case_id="compare-cross-repo-server-hardening",
@@ -337,6 +495,20 @@ def _build_cases() -> list[ValidationCase]:
                 "signalfoundry/tools/server-smoke-test.js",
                 "application-tracker/tests/server-security.test.mjs",
                 "application-tracker/server.mjs",
+            ),
+            required_observations=(
+                RequiredObservation(
+                    label="mesh_static_hardening",
+                    any_of=(("hidden git", "hidden env", "403"), ("api health", "hidden git", "hidden env")),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_static_hardening",
+                    any_of=(("hidden git", "hidden env", "403"), ("health payload", "max upload bytes")),
+                ),
+                RequiredObservation(
+                    label="application_tracker_static_hardening",
+                    any_of=(("git response status", "private response status", "api response status"),),
+                ),
             ),
         ),
         ValidationCase(
@@ -352,6 +524,20 @@ def _build_cases() -> list[ValidationCase]:
                 "application-tracker/lib/form-autofill.mjs",
                 "application-tracker/lib/resume-agent.mjs",
             ),
+            required_observations=(
+                RequiredObservation(
+                    label="mesh_live_transcript_flow",
+                    any_of=(("api live log", "state live segments"),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_upload_processing_flow",
+                    any_of=(("clean status", "payload clean"), ("server saved upload", "clean status")),
+                ),
+                RequiredObservation(
+                    label="application_tracker_resume_guardrails",
+                    any_of=(("may submit false", "review boundary"), ("this plan never submits an application", "review every proposed value")),
+                ),
+            ),
         ),
         ValidationCase(
             case_id="changed-behavior-signalfoundry-upload-limit",
@@ -362,6 +548,16 @@ def _build_cases() -> list[ValidationCase]:
             budget=3200,
             expected_paths=("README.md", "tools/serve.js", "tools/server-smoke-test.js"),
             requires_change_provenance=True,
+            required_observations=(
+                RequiredObservation(
+                    label="signalfoundry_upload_limit_changed_in_server",
+                    any_of=(("max upload bytes", "default max upload bytes"),),
+                ),
+                RequiredObservation(
+                    label="signalfoundry_upload_limit_changed_in_test",
+                    any_of=(("max upload bytes", "oversized upload status code", "413"),),
+                ),
+            ),
         ),
     ]
 
@@ -373,6 +569,9 @@ def _summarize(cases: list[dict[str, Any]], synthetic: dict[str, Any]) -> dict[s
     total_expected = sum(len(case["expected_paths"]) for case in cases)
     total_hits = sum(len(case["path_hits"]) for case in cases)
     sufficient_cases = sum(1 for case in cases if case["grounding_sufficient_for_context"])
+    answer_ready_cases = sum(1 for case in cases if case["answer_rubric_sufficient_for_context"])
+    total_required_observations = sum(case["required_observation_count"] for case in cases)
+    total_observed_observations = sum(len(case["observed_observations"]) for case in cases)
     verdict_counts: dict[str, int] = {}
     for case in cases:
         verdict_counts[case["verdict"]] = verdict_counts.get(case["verdict"], 0) + 1
@@ -396,6 +595,18 @@ def _summarize(cases: list[dict[str, Any]], synthetic: dict[str, Any]) -> dict[s
             2,
         ),
         "grounding_sufficiency_pass_rate": round(sufficient_cases / len(cases), 2),
+        "average_required_observation_recall": round(
+            statistics.mean(case["required_observation_recall"] for case in cases), 2
+        ),
+        "weighted_required_observation_recall": round(
+            (
+                total_observed_observations / total_required_observations
+                if total_required_observations
+                else 1.0
+            ),
+            2,
+        ),
+        "answer_rubric_pass_rate": round(answer_ready_cases / len(cases), 2),
         "synthetic_experiment": synthetic,
     }
 
@@ -414,8 +625,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         "",
         "## What It Does Not Yet Do",
         "",
-        "- It does not call a model, grade answer quality, or measure real provider cost or latency.",
-        "- It does not include git diff or commit-log context in `pack`, so true changed-behavior provenance is not solved yet.",
+        "- It does not call a model, grade generated answers from an LLM, or measure real provider cost or latency.",
+        "- It can package git diff and recent commit-log provenance, but it does not yet score generated changed-behavior explanations end-to-end.",
         "- It does not use embeddings, BM25, or semantic reranking; relevance is deterministic term matching.",
         "",
         "## Overall Result",
@@ -427,8 +638,11 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Average expected-file recall: `{summary['average_expected_path_recall']}`",
         f"- Weighted expected-file recall: `{summary['weighted_expected_path_recall']}`",
         f"- Grounding sufficiency pass rate: `{summary['grounding_sufficiency_pass_rate']}`",
+        f"- Average required-observation recall: `{summary['average_required_observation_recall']}`",
+        f"- Weighted required-observation recall: `{summary['weighted_required_observation_recall']}`",
+        f"- Answer-rubric pass rate: `{summary['answer_rubric_pass_rate']}`",
         "",
-        "AgenVantage solves the narrow pre-inference context-packaging problem for most explanation, review, and cross-repo comparison tasks tested here. It does not yet solve real API-token savings, latency reduction, answer-quality retention, or changed-behavior provenance end-to-end.",
+        "AgenVantage solves the narrow pre-inference context-packaging problem for most explanation, review, and cross-repo comparison tasks tested here. The benchmark now also checks whether the selected excerpts contain the required behavioral observations for each task, not just the right file paths. It still does not solve real API-token savings, latency reduction, answer-quality retention, or generated-answer quality end-to-end.",
         "",
         "## Synthetic Experiment Validation",
         "",
@@ -438,12 +652,12 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         "",
         "## Case Results",
         "",
-        "| Case | Category | Verdict | Reduction | File Recall | Min Budget | Min Top-K | First Hit |",
+        "| Case | Category | Verdict | Reduction | File Recall | Obs Recall | Min Budget | First Hit |",
         "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for case in cases:
         lines.append(
-            f"| `{case['case_id']}` | `{case['category']}` | `{case['verdict']}` | `{case['local_reduction_percent_vs_candidate_context']}%` | `{case['expected_path_recall']}` | `{case['minimum_budget_for_grounding'] or '-'}` | `{case['minimum_top_k_for_grounding_at_budget'] or '-'}` | `{case['first_expected_path_rank'] or '-'}` |"
+            f"| `{case['case_id']}` | `{case['category']}` | `{case['verdict']}` | `{case['local_reduction_percent_vs_candidate_context']}%` | `{case['expected_path_recall']}` | `{case['required_observation_recall']}` | `{case['minimum_budget_for_grounding'] or '-'}` | `{case['first_expected_path_rank'] or '-'}` |"
         )
 
     lines.extend(["", "## Detailed Notes", ""])
@@ -457,6 +671,9 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Expected file hits: `{case['path_hits']}`",
                 f"- Selected repos: `{case['selected_repo_labels']}`",
                 f"- Grounding sufficient at tested budget: `{case['grounding_sufficient_for_context']}`",
+                f"- Answer-rubric sufficient at tested budget: `{case['answer_rubric_sufficient_for_context']}`",
+                f"- Observed rubric items: `{case['observed_observations']}`",
+                f"- Missing rubric items: `{case['missing_required_observations']}`",
                 f"- Minimum budget for grounding: `{case['minimum_budget_for_grounding']}`",
                 f"- Grounding budget headroom: `{case['grounding_budget_headroom_tokens']}`",
                 f"- Minimum top-k for grounding at tested budget: `{case['minimum_top_k_for_grounding_at_budget']}`",
@@ -466,6 +683,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Top selected files: `{case['selected_unique_paths'][:6]}`",
             ]
         )
+        if case["observation_citations"]:
+            lines.append(f"- Rubric citations: `{case['observation_citations']}`")
         if case["requires_change_provenance"]:
             if case["supports_change_provenance"]:
                 lines.append(

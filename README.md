@@ -32,6 +32,8 @@ The current local workflow provides:
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and
+- a use-case benchmark that scores required behavioral observations against the
+  selected excerpts, not just file recall; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:

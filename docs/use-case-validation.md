@@ -24,12 +24,17 @@ reduction, latency reduction, or end-task answer quality.
 
 ## How To Verify The Grounded Content Is Still Sufficient
 
-For this project, a grounded context package is sufficient only when all of the
-following are true:
+For this project there are now two validation bars, not one:
 
 1. `expected_path_recall == 1.0`
 2. `repo_recall == 1.0`
 3. `grounding_sufficient_for_context == true`
+4. `required_observation_recall == 1.0`
+5. `answer_rubric_sufficient_for_context == true`
+
+The first three checks answer "did the pack include the right repositories and
+files?" The last two answer the stricter question: "did the selected excerpts
+actually include the behavioral evidence needed to answer the task?"
 
 The supporting metrics explain how robust that sufficiency is:
 
@@ -41,6 +46,10 @@ The supporting metrics explain how robust that sufficiency is:
 - `grounding_budget_headroom_tokens` shows how much slack the tested budget had.
 - `minimum_top_k_for_grounding_at_budget` shows whether the ranking policy only
   works because the candidate pool is large.
+- `required_observation_recall` shows whether the selected excerpts contain the
+  required facts for the task, not just the right file names.
+- `observation_citations` shows which selected files actually grounded those
+  required observations.
 
 For changed-behavior tasks, file recall alone is not enough. Those tasks also
 need git diff or commit-history evidence, so sufficiency now depends on both
@@ -53,41 +62,54 @@ Source of truth:
 - benchmark runner: [`/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py`](/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py)
 - generated snapshot: `artifacts/use-case-validation.json`
 
-Validation run on June 30, 2026 after provenance and import-neighbor expansion:
+Validation run on June 30, 2026 after adding answer-rubric scoring against the
+selected excerpts:
 
 - cases run: `7`
-- verdicts: `7 pass`, `0 partial`, `0 fail`
-- average candidate-context reduction: `94.27%`
-- weighted candidate-context reduction: `96.21%`
+- verdicts: `5 pass`, `1 partial`, `1 fail`
+- average candidate-context reduction: `94.26%`
+- weighted candidate-context reduction: `96.2%`
 - average expected-file recall: `1.0`
 - weighted expected-file recall: `1.0`
 - grounding sufficiency pass rate: `1.0`
+- average required-observation recall: `0.86`
+- weighted required-observation recall: `0.85`
+- answer-rubric pass rate: `0.71`
 - synthetic experiment stable-prefix gain: `+55` tokens
 - synthetic experiment budgeted reduction: `388 -> 348` tokens (`10.31%`)
 
 ### Case Table
 
-| Case | Verdict | Candidate -> Selected | Reduction | File Recall | Min Budget | Min Top-K |
+| Case | Verdict | Candidate -> Selected | Reduction | File Recall | Obs Recall | Min Budget |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 3,090` | `92.42%` | `1.0` | `1,864` | `20` |
-| `explain-signalfoundry-upload-smoke-test` | `pass` | `39,063 -> 3,597` | `90.79%` | `1.0` | `1,292` | `20` |
-| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,116` | `97.41%` | `1.0` | `1,432` | `20` |
-| `recommend-signalfoundry-edge-tests` | `pass` | `39,069 -> 3,103` | `92.06%` | `1.0` | `1,684` | `20` |
-| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,921` | `97.56%` | `1.0` | `2,917` | `20` |
-| `compare-cross-repo-input-flows` | `pass` | `201,587 -> 4,865` | `97.59%` | `1.0` | `4,865` | `20` |
-| `changed-behavior-signalfoundry-upload-limit` | `pass` | `39,374 -> 3,138` | `92.03%` | `1.0` | `-` | `-` |
+| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 3,090` | `92.42%` | `1.0` | `1.0` | `1,864` |
+| `explain-signalfoundry-upload-smoke-test` | `partial` | `39,063 -> 3,597` | `90.79%` | `1.0` | `0.67` | `1,292` |
+| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,116` | `97.41%` | `1.0` | `1.0` | `1,432` |
+| `recommend-signalfoundry-edge-tests` | `pass` | `39,069 -> 3,103` | `92.06%` | `1.0` | `1.0` | `1,684` |
+| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,921` | `97.56%` | `1.0` | `1.0` | `2,917` |
+| `compare-cross-repo-input-flows` | `fail` | `201,587 -> 4,865` | `97.59%` | `1.0` | `0.33` | `4,865` |
+| `changed-behavior-signalfoundry-upload-limit` | `pass` | `39,374 -> 3,138` | `92.03%` | `1.0` | `1.0` | `-` |
 
 ## What The Results Mean
 
-The project now has hard evidence that it can reduce large local candidate
-repository context by roughly `90%` to `98%` while still grounding most of the
-tested explanation and comparison tasks.
+The stronger benchmark changed the story in an important way:
 
-The current implementation now includes both a persistent metadata index and
-optional git provenance. After adding import-neighbor expansion, the latest
-June 30, 2026 validation run reached `7 pass / 0 partial`, improved the
-remaining cross-repo input-flow case to a pass, and kept changed-behavior as a
-pass when provenance was enabled.
+- retrieval-level grounding still looks excellent;
+- answer-ready evidence is weaker than file recall alone suggests.
+
+The latest run still shows that AgenVantage can reduce large local candidate
+repository context by roughly `90%` to `98%` while preserving all expected
+files across the seven hand-authored tasks. But once the benchmark asks
+whether the selected excerpts contain the required observations, the pass rate
+drops from `1.0` grounding sufficiency to `0.71` answer-rubric sufficiency.
+
+That gap is useful evidence, not a regression in measurement:
+
+- the SignalFoundry upload smoke-test case selects the right files but misses
+  the upload-limit configuration evidence inside the chosen excerpts;
+- the cross-repo input-flow case selects all expected files, but the chosen
+  snippets do not contain the key Signalfoundry upload-processing and
+  Application Tracker autofill-guardrail observations.
 
 That evidence does not justify broader claims yet:
 
@@ -103,7 +125,9 @@ packaging for many real coding tasks, including a changed-behavior use case
 when git provenance is enabled.
 
 No, it does not yet solve the full "agent context overload" problem end-to-end.
-The benchmark results support that more precise claim.
+The stronger answer-rubric benchmark makes that boundary easier to explain:
+the system can often find the right files, but it still sometimes chooses the
+wrong excerpt within those files.
 
 ## How To Reproduce
 
@@ -112,5 +136,7 @@ The benchmark results support that more precise claim.
   --output-json artifacts/use-case-validation.json \
   --output-md artifacts/use-case-validation.md
 
-/tmp/agenvantage-venv/bin/python -m pytest tests/test_repo_context.py
+/tmp/agenvantage-venv/bin/python -m pytest \
+  tests/test_repo_context.py \
+  tests/test_use_case_validation.py
 ```

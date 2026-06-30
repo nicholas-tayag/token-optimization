@@ -161,6 +161,79 @@ Sources:
 - "SWE-bench: Can Language Models Resolve Real-World GitHub Issues?"
   <https://arxiv.org/abs/2310.06770>
 
+### 8. Cross-File Benchmarks Are Closer To The Real Failure Mode
+
+CrossCodeEval and RepoQA both focus on repository-scale reasoning where the
+critical problem is often not "find a vaguely related file" but "recover the
+right cross-file evidence span."
+
+Implication for AgenVantage:
+
+- do not stop at whole-file recall metrics;
+- add line- or excerpt-level validation;
+- prioritize symbol-to-line and route-to-line anchors over generic semantic
+  similarity work.
+
+Sources:
+
+- "CrossCodeEval"
+  <https://arxiv.org/abs/2310.11248>
+- "RepoQA"
+  <https://arxiv.org/abs/2411.11505>
+
+### 9. Code-RAG Evaluation Should Separate Retrieval From Answering
+
+CodeRAG-Bench reinforces that retrieval quality and generated-answer quality
+must be measured separately. Strong retrieval can still produce weak answers if
+the packed evidence is incomplete or badly localized.
+
+Implication for AgenVantage:
+
+- keep the current deterministic excerpt-rubric layer;
+- add generated-answer scoring only after excerpt-level sufficiency is stable;
+- report retrieval wins and answer wins as separate metrics.
+
+Source:
+
+- "CodeRAG-Bench"
+  <https://arxiv.org/abs/2508.10389>
+
+### 10. Exploration Can Be Split From Solving
+
+Recent agent work such as FastContext argues that repository exploration can be
+handled by a specialized fast agent that returns file-line citations before a
+separate coding agent attempts the final task.
+
+Implication for AgenVantage:
+
+- add an explicit exploration phase before final context assembly;
+- keep that exploration phase measurable and inspectable;
+- treat final packing as the second stage rather than the only stage.
+
+Source:
+
+- "FastContext"
+  <https://arxiv.org/abs/2508.01142>
+
+### 11. Static Context Files Are Not The Whole Answer
+
+The recent study on developer-provided context files shows that static context
+artifacts such as AGENTS-style files can help in some settings, but they do not
+replace dynamic repository retrieval and sometimes add little or no benefit.
+
+Implication for AgenVantage:
+
+- support context files as one evidence input, not the primary solution;
+- avoid claiming that a single generated context file can generally solve repo
+  overload;
+- keep dynamic retrieval as the core architecture.
+
+Source:
+
+- "Do AI Coding Assistants Need to Read Entire Codebase Context? A Preliminary
+  Study on the Utility of Developer-Provided Context Files"
+  <https://arxiv.org/abs/2508.21731>
+
 ## Additional Facets AgenVantage Should Cover
 
 These are the implementation dimensions that go beyond the current roadmap
@@ -233,7 +306,8 @@ Implementation ideas:
 
 - leave-one-file-out ablation on selected packs;
 - minimum-budget and minimum-top-k search, already started;
-- future required-observation rubrics for generated answers;
+- required-observation rubrics against selected excerpts, now implemented;
+- future generated-answer scoring with expected citations;
 - unsupported-claim checks for answer validation.
 
 ### Privacy And Safety Plane
@@ -299,8 +373,9 @@ Why third:
 
 Build after retrieval is stable:
 
+- required-observation evaluation against packed excerpts, now implemented;
 - answer-generation evaluation using packed context only;
-- required-observation and unsupported-claim rubrics;
+- unsupported-claim and expected-citation rubrics;
 - benchmark tasks mapped to real repository behaviors.
 
 Why fourth:
@@ -312,12 +387,12 @@ Why fourth:
 
 If the next future runs should maximize real progress, the order should be:
 
-1. add a persistent lexical and metadata index
-2. add git diff and commit-log provenance
-3. add symbol-aware and graph-aware expansion
-4. add task presets and iterative retrieval
+1. add symbol-to-line and route-to-line anchors
+2. add explicit exploration before final packing
+3. add task-shaped query planning for compare and change tasks
+4. add a local lexical and structured index query layer
 5. add optional embedding-backed reranking
-6. add answer-level sufficiency evaluation
+6. expand excerpt-rubric evaluation into generated-answer evaluation
 
 That sequence best matches the current benchmark evidence and the external
 research.

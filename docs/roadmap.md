@@ -110,8 +110,15 @@ Current state:
 - local import-target resolution now allows imported-helper expansion during
   selection, which was enough to make the current cross-repo input-flow
   benchmark pass;
-- a deeper structural graph, reverse-reference expansion, and test-to-
-  implementation expansion layer is still future work.
+- a deeper structural graph, reverse-reference expansion, test-to-
+  implementation expansion, and symbol-to-line anchoring layer is still future
+  work.
+
+Measured reason this still matters:
+
+- the stronger answer-rubric benchmark now shows one remaining hard failure
+  where all expected files are selected but the wrong excerpt is chosen inside
+  at least two of those files.
 
 ### Backlog 3: Task-Shaped Selection Controls
 
@@ -135,6 +142,14 @@ Additional research-backed facets:
   `change`;
 - add explicit stopping checks once required grounding files and repos are
   present.
+- add per-task excerpt rules such as "for compare, require at least one cited
+  evidence span per repository."
+
+Current measured gap:
+
+- the cross-repo input-flow case currently achieves file recall `1.0` but
+  answer-rubric recall `0.33`, which means selection logic still treats
+  "compare multiple flows" too much like a generic explanation task.
 
 ### Backlog 4: Incremental Indexing And Search Contexts
 
@@ -205,6 +220,12 @@ Additional research-backed facets:
 - reserve stronger "task solved" claims for future answer-level evaluation
   milestones.
 
+Current state:
+
+- retrieval sufficiency and answer-rubric sufficiency are now reported
+  separately in the use-case benchmark;
+- generated-answer and unsupported-claim scoring is still future work.
+
 ## Milestone 1: Provider-Reported Usage
 
 - Add an OpenAI Responses API adapter for selected repository-context tasks.
@@ -221,12 +242,22 @@ Exit evidence:
 
 ## Milestone 2: Coding Task Evaluations
 
+Status: partially implemented.
+
 - Add a human-authored set of tasks drawn from completed public repository
   behavior: locating an implementation, explaining a known test case,
   identifying changed behavior, and recommending edge-case tests.
 - Evaluate expected file citations, required behavioral observations, and
   unsupported-claim avoidance.
 - Gate input-cost reduction against a declared answer-correctness tolerance.
+
+Current state:
+
+- the repository now has seven real local validation cases;
+- expected-file recall, repository recall, and minimum-budget grounding are
+  implemented;
+- required-observation scoring against selected excerpts is implemented;
+- unsupported-claim scoring for generated answers is still not implemented.
 
 Success rule:
 
