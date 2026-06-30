@@ -1,7 +1,11 @@
 from pathlib import Path
 import subprocess
 
-from agenvantage.repo_context import build_context_package, source_files
+from agenvantage.repo_context import (
+    build_context_package,
+    build_multi_repo_context_package,
+    source_files,
+)
 from agenvantage.tokenizer import TokenCounter
 
 
@@ -156,6 +160,23 @@ def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> N
     assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
 
 
+def test_context_package_matches_plural_path_terms_for_concise_tasks(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm run release\n", encoding="utf-8"
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain deploy script",
+        budget=260,
+        counter=TokenCounter(),
+    )
+
+    assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
+    assert "script" in report["covered_query_terms"]
+
+
 def test_context_package_retains_short_registration_chunk(tmp_path: Path) -> None:
     (tmp_path / "index.ts").write_text(
         "if (SERVER_ENV.RATE_LIMIT_ENABLED) app.use('*', rateLimiter);\n",
@@ -168,3 +189,72 @@ def test_context_package_retains_short_registration_chunk(tmp_path: Path) -> Non
         counter=TokenCounter(),
     )
     assert report["selected_chunks"][0]["path"] == "index.ts"
+
+
+def test_multi_repo_context_package_selects_relevant_chunks_across_repositories(
+    tmp_path: Path,
+) -> None:
+    api_repo = tmp_path / "api-service"
+    ops_repo = tmp_path / "ops-service"
+    ui_repo = tmp_path / "ui-service"
+    (api_repo / "src").mkdir(parents=True)
+    (ops_repo / "scripts").mkdir(parents=True)
+    (ui_repo / "src").mkdir(parents=True)
+
+    (api_repo / "src" / "rateLimiter.ts").write_text(
+        "export async function rateLimiter(redis) {\n"
+        "  // fail open when Redis is unavailable\n"
+        "  return redis.consume('requests');\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (ops_repo / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "kubectl rollout status deploy/api\n"
+        "kubectl rollout undo deploy/api\n",
+        encoding="utf-8",
+    )
+    (ui_repo / "src" / "dashboard.ts").write_text(
+        "export function renderDashboard() { return 'ok'; }\n",
+        encoding="utf-8",
+    )
+
+    markdown, report = build_multi_repo_context_package(
+        [api_repo, ops_repo, ui_repo],
+        "Explain the Redis rate limiter fail open behavior and deploy rollback flow",
+        budget=420,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "api-service/src/rateLimiter.ts" in selected_paths
+    assert "ops-service/scripts/deploy.sh" in selected_paths
+    assert report["repo_count"] == 3
+    assert report["selected_repo_labels"] == ["api-service", "ops-service"]
+    assert "api-service/src/rateLimiter.ts" in markdown
+    assert "ops-service/scripts/deploy.sh" in markdown
+
+
+def test_multi_repo_context_package_disambiguates_same_relative_paths(tmp_path: Path) -> None:
+    frontend_repo = tmp_path / "frontend"
+    backend_repo = tmp_path / "backend"
+    (frontend_repo / "src").mkdir(parents=True)
+    (backend_repo / "src").mkdir(parents=True)
+
+    (frontend_repo / "src" / "index.ts").write_text(
+        "export const signupFlow = () => 'signup';\n", encoding="utf-8"
+    )
+    (backend_repo / "src" / "index.ts").write_text(
+        "export const webhookRetry = () => 'retry';\n", encoding="utf-8"
+    )
+
+    _, report = build_multi_repo_context_package(
+        [frontend_repo, backend_repo],
+        "Explain the signup flow and webhook retry flow",
+        budget=320,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "frontend/src/index.ts" in selected_paths
+    assert "backend/src/index.ts" in selected_paths

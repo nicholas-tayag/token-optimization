@@ -18,7 +18,7 @@ latency, caching, cost, and quality measurements.
 The current local workflow provides:
 
 - an `agenvantage pack` command for real coding questions over local
-  repositories;
+  repositories, including multi-repository tasks with repeated `--repo` flags;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
 - line-addressable source chunk ranking using task terms;
@@ -62,6 +62,18 @@ agenvantage pack `
   --budget 1800 `
   --output artifacts/rate-limiter-context.md `
   --manifest artifacts/rate-limiter-manifest.json
+```
+
+Build a shared context package across multiple local repositories:
+
+```powershell
+agenvantage pack `
+  --repo C:\Users\nicho\GithubRepos\mesh `
+  --repo C:\Users\nicho\GithubRepos\signalfoundry `
+  --task "Compare the local static server hardening in both apps." `
+  --budget 2200 `
+  --output artifacts/multi-repo-context.md `
+  --manifest artifacts/multi-repo-manifest.json
 ```
 
 Write a report and display OpenTelemetry spans locally:

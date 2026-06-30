@@ -6,7 +6,11 @@ import webbrowser
 from pathlib import Path
 
 from agenvantage.experiment import load_scenario, run_experiment
-from agenvantage.repo_context import build_context_package, write_package_outputs
+from agenvantage.repo_context import (
+    build_context_package,
+    build_multi_repo_context_package,
+    write_package_outputs,
+)
 from agenvantage.telemetry import configure_console_tracing, flush_tracing
 from agenvantage.tokenizer import TokenCounter
 
@@ -41,7 +45,13 @@ def _parser() -> argparse.ArgumentParser:
     pack = subparsers.add_parser(
         "pack", help="Build a token-budgeted context package from a local repository."
     )
-    pack.add_argument("--repo", type=Path, required=True, help="Repository to inspect.")
+    pack.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        required=True,
+        help="Repository to inspect. Repeat to package multiple repositories together.",
+    )
     pack.add_argument("--task", required=True, help="Coding task or question to prepare context for.")
     pack.add_argument("--budget", type=int, required=True, help="Maximum packaged input tokens.")
     pack.add_argument("--model", default="gpt-4o-mini", help="Tokenizer model identifier.")
@@ -80,9 +90,14 @@ def main() -> None:
         _open_dashboard(args.report, open_browser=not args.no_browser)
         return
     if args.command == "pack":
-        markdown, report = build_context_package(
-            args.repo, args.task, args.budget, TokenCounter(args.model), args.top_k
-        )
+        if len(args.repo) == 1:
+            markdown, report = build_context_package(
+                args.repo[0], args.task, args.budget, TokenCounter(args.model), args.top_k
+            )
+        else:
+            markdown, report = build_multi_repo_context_package(
+                args.repo, args.task, args.budget, TokenCounter(args.model), args.top_k
+            )
         write_package_outputs(markdown, report, args.output, args.manifest)
         print(json.dumps(report, indent=2))
         if args.output:
