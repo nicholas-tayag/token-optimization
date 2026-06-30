@@ -31,6 +31,117 @@ Exit evidence:
 - tests cover repository selection and policy behavior;
 - real runs package relevant context from a public personal repository.
 
+## Prioritized Backlog From June 30, 2026 Validation
+
+These are the next implementation tasks for future runs. They are ordered by
+measured impact, not by generic feature parity.
+
+### Backlog 1: Git Provenance In Pack Output
+
+Why this is first:
+
+- the current changed-behavior validation case remains partial even with full
+  file recall;
+- the missing capability is repository-change provenance, not more file text.
+
+Tasks:
+
+- add optional `--include-diff` support to `agenvantage pack`;
+- add optional `--include-log` support to `agenvantage pack`;
+- store diff and log sections separately from repository file chunks in the
+  manifest;
+- track provenance token counts independently from repository-context token
+  counts;
+- add changed-behavior benchmark cases that only pass when provenance is
+  present;
+- document that changed-behavior tasks are unsupported unless provenance is
+  packaged.
+
+References:
+
+- [`/Users/nicky/GithubRepos/token-optimization/docs/context-tooling-landscape.md`](/Users/nicky/GithubRepos/token-optimization/docs/context-tooling-landscape.md)
+- [`/Users/nicky/GithubRepos/token-optimization/docs/use-case-validation.md`](/Users/nicky/GithubRepos/token-optimization/docs/use-case-validation.md)
+
+### Backlog 2: Symbol-Aware Retrieval
+
+Why this is second:
+
+- one cross-repo hardening benchmark still misses
+  `application-tracker/server.mjs`;
+- the present ranker is still mostly term-based and path-based.
+
+Tasks:
+
+- extract top-level exported symbols, route handlers, test names, and likely
+  entrypoint identifiers from eligible files;
+- expand query matching with identifier-aware signals instead of plain task
+  terms alone;
+- bias ranking toward files that define matched symbols and files referenced by
+  matched tests;
+- preserve deterministic ranking as the baseline for comparison;
+- add benchmark cases that require symbol-aware retrieval to ground correctly.
+
+### Backlog 3: Task-Shaped Selection Controls
+
+Why this is third:
+
+- the core packer works, but task-specific controls are still weak;
+- benchmarking is easier when the pack command can constrain eligible context.
+
+Tasks:
+
+- add include-glob and exclude-glob filters to `agenvantage pack`;
+- add task presets such as `explain`, `review`, `compare`, and `change`;
+- allow preselected path lists from stdin or a file;
+- optionally emit line-number-heavy and XML-style context outputs;
+- record active filters and preset choice in the manifest.
+
+### Backlog 4: Incremental Indexing And Search Contexts
+
+Why this is fourth:
+
+- repeated scans will become wasteful as repository sets grow;
+- multi-repo tasks will benefit from named reusable groups.
+
+Tasks:
+
+- cache file hashes and chunk metadata locally;
+- skip unchanged files between runs when rebuilding chunk candidates;
+- add named search-context or repo-group configuration for recurring tasks;
+- expose freshness metadata in the manifest;
+- benchmark scan-time improvements separately from retrieval-quality changes.
+
+### Backlog 5: Optional Hybrid Retrieval
+
+Why this is fifth:
+
+- semantic retrieval may help, but it is not the clearest fix for the current
+  measured failures;
+- provenance and symbol retrieval should land first.
+
+Tasks:
+
+- keep deterministic term ranking as the default baseline;
+- add optional BM25-style retrieval and compare it against the benchmark suite;
+- add optional embedding-based reranking behind an explicit feature flag;
+- only promote a hybrid retriever after measured benchmark improvement.
+
+### Backlog 6: Richer Reporting And Safety Metrics
+
+Why this is sixth:
+
+- better reporting improves diagnosis and trust;
+- it does not by itself fix the current retrieval limitations.
+
+Tasks:
+
+- report per-file and per-repo token share in the manifest;
+- report why high-ranked chunks lost budget slots;
+- add token-tree style summaries for selected versus omitted context;
+- add sensitive-content screening for packed files and future provenance
+  sections;
+- graph covered versus uncovered task concepts in the report output.
+
 ## Milestone 1: Provider-Reported Usage
 
 - Add an OpenAI Responses API adapter for selected repository-context tasks.
