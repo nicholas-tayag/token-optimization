@@ -107,8 +107,11 @@ Current state:
 
 - file-level symbol and import metadata is now cached persistently outside the
   worktree and used as a ranking boost;
-- a deeper structural graph and test-to-implementation expansion layer is still
-  future work.
+- local import-target resolution now allows imported-helper expansion during
+  selection, which was enough to make the current cross-repo input-flow
+  benchmark pass;
+- a deeper structural graph, reverse-reference expansion, and test-to-
+  implementation expansion layer is still future work.
 
 ### Backlog 3: Task-Shaped Selection Controls
 

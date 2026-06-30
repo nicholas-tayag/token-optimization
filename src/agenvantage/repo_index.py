@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-_INDEX_FORMAT_VERSION = 1
+_INDEX_FORMAT_VERSION = 2
 _SYMBOL_LIMIT = 40
 _IMPORT_LIMIT = 40
+_LOCAL_IMPORT_LIMIT = 40
+_LOCAL_IMPORT_SUFFIXES = (".js", ".mjs", ".ts", ".tsx", ".jsx", ".py")
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,7 @@ class RepositoryFileIndexEntry:
     content_hash: str
     symbols: tuple[str, ...]
     imports: tuple[str, ...]
+    local_import_paths: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +33,7 @@ class RepositoryFileIndexEntry:
             "content_hash": self.content_hash,
             "symbols": list(self.symbols),
             "imports": list(self.imports),
+            "local_import_paths": list(self.local_import_paths),
         }
 
     @classmethod
@@ -41,6 +45,7 @@ class RepositoryFileIndexEntry:
             content_hash=str(payload["content_hash"]),
             symbols=tuple(str(item) for item in payload.get("symbols", [])),
             imports=tuple(str(item) for item in payload.get("imports", [])),
+            local_import_paths=tuple(str(item) for item in payload.get("local_import_paths", [])),
         )
 
 
@@ -188,15 +193,43 @@ def _extract_imports(text: str) -> tuple[str, ...]:
     return _ordered_unique(values, _IMPORT_LIMIT)
 
 
+def _resolve_local_imports(
+    relative_path: str, imports: tuple[str, ...], candidate_paths: set[str]
+) -> tuple[str, ...]:
+    base_dir = Path(relative_path).parent
+    resolved: list[str] = []
+    for value in imports:
+        if not value.startswith(("./", "../")):
+            continue
+        raw_target = (base_dir / value).as_posix()
+        target_path = Path(raw_target)
+        candidates = [target_path]
+        if target_path.suffix:
+            candidates.append(target_path.with_suffix(target_path.suffix))
+        else:
+            candidates.extend(target_path.with_suffix(suffix) for suffix in _LOCAL_IMPORT_SUFFIXES)
+            candidates.extend(
+                (target_path / f"index{suffix}") for suffix in _LOCAL_IMPORT_SUFFIXES
+            )
+        for candidate in candidates:
+            normalized = candidate.as_posix()
+            if normalized in candidate_paths:
+                resolved.append(normalized)
+                break
+    return _ordered_unique(resolved, _LOCAL_IMPORT_LIMIT)
+
+
 def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndexBuildResult:
     repo = repo.resolve()
+    file_list = tuple(files)
+    candidate_paths = {path.relative_to(repo).as_posix() for path in file_list}
     cache_path = repository_index_path(repo)
     cached_entries = _read_cache(cache_path)
     entries: dict[str, RepositoryFileIndexEntry] = {}
     reused_files = 0
     rebuilt_files = 0
     skipped_files = 0
-    for path in files:
+    for path in file_list:
         relative_path = path.relative_to(repo).as_posix()
         stat = path.stat()
         cached_entry = cached_entries.get(relative_path)
@@ -220,9 +253,22 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
             symbols=_extract_symbols(path, text),
             imports=_extract_imports(text),
+            local_import_paths=(),
         )
         entries[relative_path] = entry
         rebuilt_files += 1
+    for relative_path, entry in tuple(entries.items()):
+        entries[relative_path] = RepositoryFileIndexEntry(
+            relative_path=entry.relative_path,
+            size_bytes=entry.size_bytes,
+            mtime_ns=entry.mtime_ns,
+            content_hash=entry.content_hash,
+            symbols=entry.symbols,
+            imports=entry.imports,
+            local_import_paths=_resolve_local_imports(
+                entry.relative_path, entry.imports, candidate_paths
+            ),
+        )
     _write_cache(cache_path, repo, entries)
     stats = {
         "cache_path": str(cache_path),
@@ -233,5 +279,6 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
         "skipped_files": skipped_files,
         "symbol_count": sum(len(entry.symbols) for entry in entries.values()),
         "import_count": sum(len(entry.imports) for entry in entries.values()),
+        "local_import_count": sum(len(entry.local_import_paths) for entry in entries.values()),
     }
     return RepositoryIndexBuildResult(entries=entries, stats=stats)

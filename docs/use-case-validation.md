@@ -12,7 +12,8 @@ AgenVantage currently solves a narrow but real pre-inference problem:
   imports;
 - split eligible files into line-addressable chunks;
 - rank chunks with deterministic task-term matching, file-level metadata boosts,
-  and light diversity penalties across files and repositories;
+  import-neighbor expansion, and light diversity penalties across files and
+  repositories;
 - optionally include git diff and recent commit-log provenance inside the same
   token budget for changed-behavior tasks;
 - assemble a token-budgeted Markdown context package and JSON manifest; and
@@ -52,15 +53,15 @@ Source of truth:
 - benchmark runner: [`/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py`](/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py)
 - generated snapshot: `artifacts/use-case-validation.json`
 
-Validation run on June 30, 2026 after provenance support:
+Validation run on June 30, 2026 after provenance and import-neighbor expansion:
 
 - cases run: `7`
-- verdicts: `6 pass`, `1 partial`, `0 fail`
-- average candidate-context reduction: `94.23%`
-- weighted candidate-context reduction: `96.18%`
-- average expected-file recall: `0.93`
-- weighted expected-file recall: `0.91`
-- grounding sufficiency pass rate: `0.86`
+- verdicts: `7 pass`, `0 partial`, `0 fail`
+- average candidate-context reduction: `94.27%`
+- weighted candidate-context reduction: `96.21%`
+- average expected-file recall: `1.0`
+- weighted expected-file recall: `1.0`
+- grounding sufficiency pass rate: `1.0`
 - synthetic experiment stable-prefix gain: `+55` tokens
 - synthetic experiment budgeted reduction: `388 -> 348` tokens (`10.31%`)
 
@@ -68,12 +69,12 @@ Validation run on June 30, 2026 after provenance support:
 
 | Case | Verdict | Candidate -> Selected | Reduction | File Recall | Min Budget | Min Top-K |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 3,175` | `92.21%` | `1.0` | `1,864` | `20` |
+| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 3,090` | `92.42%` | `1.0` | `1,864` | `20` |
 | `explain-signalfoundry-upload-smoke-test` | `pass` | `39,063 -> 3,597` | `90.79%` | `1.0` | `1,292` | `20` |
-| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,120` | `97.41%` | `1.0` | `1,951` | `20` |
+| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,116` | `97.41%` | `1.0` | `1,432` | `20` |
 | `recommend-signalfoundry-edge-tests` | `pass` | `39,069 -> 3,103` | `92.06%` | `1.0` | `1,684` | `20` |
-| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,937` | `97.55%` | `1.0` | `2,917` | `20` |
-| `compare-cross-repo-input-flows` | `partial` | `201,587 -> 4,987` | `97.53%` | `0.5` | `-` | `-` |
+| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,921` | `97.56%` | `1.0` | `2,917` | `20` |
+| `compare-cross-repo-input-flows` | `pass` | `201,587 -> 4,865` | `97.59%` | `1.0` | `4,865` | `20` |
 | `changed-behavior-signalfoundry-upload-limit` | `pass` | `39,374 -> 3,138` | `92.03%` | `1.0` | `-` | `-` |
 
 ## What The Results Mean
@@ -83,19 +84,17 @@ repository context by roughly `90%` to `98%` while still grounding most of the
 tested explanation and comparison tasks.
 
 The current implementation now includes both a persistent metadata index and
-optional git provenance. In the latest June 30, 2026 validation run, that
-raised the benchmark to `6 pass / 1 partial`, improved the previously partial
-cross-repo server-hardening case to a pass, and converted the changed-behavior
-case into a pass when provenance was enabled.
+optional git provenance. After adding import-neighbor expansion, the latest
+June 30, 2026 validation run reached `7 pass / 0 partial`, improved the
+remaining cross-repo input-flow case to a pass, and kept changed-behavior as a
+pass when provenance was enabled.
 
 That evidence does not justify broader claims yet:
 
 - The project does not currently prove end-to-end answer quality retention.
 - The project does not currently prove real API-token savings or latency gains.
-- One multi-repo input-flow case still misses
-  `application-tracker/lib/form-autofill.mjs` and
-  `application-tracker/lib/resume-agent.mjs`, which shows the present ranker is not yet
-  strong enough for every cross-repo reasoning task.
+- The current benchmark suite is still small and hand-authored, so broader
+  retrieval robustness is not yet proven outside these validated cases.
 
 ## Practical Verdict
 

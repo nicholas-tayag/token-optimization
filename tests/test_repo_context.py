@@ -8,6 +8,7 @@ from agenvantage.repo_context import (
     rank_chunks,
     source_files,
 )
+from agenvantage.repo_index import build_repository_index
 from agenvantage.tokenizer import TokenCounter
 
 
@@ -123,6 +124,66 @@ def test_context_package_can_include_git_provenance(tmp_path: Path) -> None:
     assert provenance["selected_provenance_tokens"] > 0
     assert "## Repository Provenance" in markdown
     assert "Working tree changes" in markdown or "Add upload limit" in markdown
+
+
+def test_repository_index_resolves_local_import_targets(tmp_path: Path) -> None:
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "server.mjs").write_text(
+        'import { buildAutofillPlan } from "./lib/form-autofill.mjs";\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "form-autofill.mjs").write_text(
+        "export function buildAutofillPlan() { return []; }\n",
+        encoding="utf-8",
+    )
+
+    files = source_files(tmp_path)
+    index_result = build_repository_index(tmp_path, files)
+
+    assert (
+        "lib/form-autofill.mjs"
+        in index_result.entries["server.mjs"].local_import_paths
+    )
+
+
+def test_context_package_graph_expands_to_imported_helpers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_root = tmp_path.parent / "agenvantage-cache-graph"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+    (tmp_path / "lib").mkdir(parents=True)
+    (tmp_path / "server.mjs").write_text(
+        'import { buildAutofillPlan } from "./lib/form-autofill.mjs";\n'
+        'import { analyzeResume } from "./lib/resume-agent.mjs";\n'
+        "export async function handleResumeUpload() {\n"
+        "  return buildAutofillPlan(await analyzeResume());\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app.js").write_text(
+        "export async function submitResumeUpload() { return fetch('/api/resume'); }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "form-autofill.mjs").write_text(
+        "export function buildAutofillPlan(profile) { return profile.fields ?? []; }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "resume-agent.mjs").write_text(
+        "export async function analyzeResume() { return { fields: [] }; }\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Compare resume upload and autofill planning flow",
+        budget=700,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "server.mjs" in selected_paths
+    assert "lib/form-autofill.mjs" in selected_paths
+    assert "lib/resume-agent.mjs" in selected_paths
 
 
 def test_context_package_builds_and_reuses_repository_index(

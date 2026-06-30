@@ -114,6 +114,7 @@ class CodeChunk:
     tokens: int
     file_symbols: tuple[str, ...] = ()
     file_imports: tuple[str, ...] = ()
+    file_local_import_paths: tuple[str, ...] = ()
     score: float = 0.0
     matched_terms: tuple[str, ...] = ()
 
@@ -308,6 +309,7 @@ def chunks_for_repo(
                     counter.count(rendered),
                     indexed_entry.symbols if indexed_entry is not None else (),
                     indexed_entry.imports if indexed_entry is not None else (),
+                    indexed_entry.local_import_paths if indexed_entry is not None else (),
                 )
             )
             if end_line == len(lines):
@@ -359,6 +361,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.tokens,
                 chunk.file_symbols,
                 chunk.file_imports,
+                chunk.file_local_import_paths,
                 score,
                 matches,
             )
@@ -494,6 +497,7 @@ def build_multi_repo_context_package(
     selected_paths: Counter[str] = Counter()
     selected_repos: Counter[str] = Counter()
     selected_terms: set[str] = set()
+    selected_dependency_targets: Counter[tuple[str, str]] = Counter()
     multiple_repos = len(repo_inputs) > 1
     while candidate_pool:
         chunk = max(
@@ -501,6 +505,13 @@ def build_multi_repo_context_package(
             key=lambda candidate: (
                 candidate.score
                 * (1 + (0.25 * len(set(candidate.matched_terms) - selected_terms)))
+                * (
+                    1
+                    + (
+                        0.45
+                        * selected_dependency_targets[(candidate.repo_label, candidate.relative_path)]
+                    )
+                )
                 / (
                     1
                     + (0.5 * selected_paths[candidate.display_path])
@@ -525,6 +536,8 @@ def build_multi_repo_context_package(
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
             selected_terms.update(chunk.matched_terms)
+            for local_import_path in chunk.file_local_import_paths:
+                selected_dependency_targets[(chunk.repo_label, local_import_path)] += 1
             rendered += addition
         else:
             excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
