@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from agenvantage.repo_index import RepositoryFileIndexEntry, build_repository_index
+from agenvantage.repo_index import (
+    RepositoryFileIndexEntry,
+    build_repository_index,
+    extract_symbol_occurrences,
+)
 from agenvantage.repo_provenance import ProvenanceSection, build_repo_provenance_sections
 from agenvantage.tokenizer import TokenCounter
 
@@ -86,12 +90,21 @@ _STOP_WORDS = {
     "what",
 }
 _MIN_RELEVANCE_SCORE = 6.0
+_CHUNK_SYMBOL_LOOKBACK_LINES = 120
+_CHUNK_SYMBOL_LIMIT = 8
 _TERM_EXPANSIONS = {
     "expiration": ("expire", "ttl"),
     "expiry": ("expire", "ttl"),
-    "limit": ("limiter", "limiting"),
+    "limit": ("limiter", "limiting", "max", "maximum"),
     "limiter": ("limit", "limiting"),
     "limiting": ("limit", "limiter"),
+    "max": ("limit", "maximum"),
+    "maximum": ("max", "limit"),
+    "plan": ("planning",),
+    "planning": ("plan",),
+    "size": ("byte", "bytes"),
+    "byte": ("bytes", "size"),
+    "bytes": ("byte", "size"),
 }
 _DEFAULT_INSTRUCTIONS = (
     "You are helping with a software engineering task. Base conclusions on the "
@@ -112,6 +125,7 @@ class CodeChunk:
     end_line: int
     text: str
     tokens: int
+    chunk_symbols: tuple[str, ...] = ()
     file_symbols: tuple[str, ...] = ()
     file_imports: tuple[str, ...] = ()
     file_local_import_paths: tuple[str, ...] = ()
@@ -188,6 +202,41 @@ def _query_concepts(value: str) -> tuple[tuple[str, set[str]], ...]:
             continue
         concepts.append((label, set(_term_variants(label))))
     return tuple(concepts)
+
+
+def _ordered_unique(values: Iterable[str], limit: int) -> tuple[str, ...]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+        if len(ordered) >= limit:
+            break
+    return tuple(ordered)
+
+
+def _chunk_local_symbols(
+    symbol_occurrences: tuple[tuple[int, str, str], ...],
+    *,
+    start_line: int,
+    end_line: int,
+) -> tuple[str, ...]:
+    window_start = max(1, start_line - _CHUNK_SYMBOL_LOOKBACK_LINES)
+    nearby = [
+        (name, kind)
+        for line_number, name, kind in symbol_occurrences
+        if window_start <= line_number <= end_line
+    ]
+    prioritized = [
+        name
+        for name, kind in reversed(nearby)
+        if kind in {"function", "type", "route", "export"}
+    ]
+    fallback = [name for name, _ in reversed(nearby)]
+    return _ordered_unique([*prioritized, *fallback], _CHUNK_SYMBOL_LIMIT)
 
 
 def _eligible_file(path: Path, repo: Path) -> bool:
@@ -282,6 +331,7 @@ def chunks_for_repo(
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             continue
+        symbol_occurrences = extract_symbol_occurrences(path, "\n".join(lines))
         relative = path.relative_to(repo).as_posix()
         display_path = f"{repo_label}/{relative}" if repo_label else relative
         indexed_entry = file_index.get(relative) if file_index is not None else None
@@ -307,6 +357,11 @@ def chunks_for_repo(
                     end_line,
                     text,
                     counter.count(rendered),
+                    _chunk_local_symbols(
+                        symbol_occurrences,
+                        start_line=start + 1,
+                        end_line=end_line,
+                    ),
                     indexed_entry.symbols if indexed_entry is not None else (),
                     indexed_entry.imports if indexed_entry is not None else (),
                     indexed_entry.local_import_paths if indexed_entry is not None else (),
@@ -324,6 +379,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
         path_counts = Counter(_terms(chunk.relative_path))
         repo_counts = Counter(_terms(chunk.repo_label))
         text_counts = Counter(_terms(chunk.text))
+        chunk_symbol_counts = Counter(_terms(" ".join(chunk.chunk_symbols)))
         symbol_counts = Counter(_terms(" ".join(chunk.file_symbols)))
         import_counts = Counter(_terms(" ".join(chunk.file_imports)))
         matches = tuple(
@@ -332,12 +388,16 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
             if path_counts.get(term, 0)
             or repo_counts.get(term, 0)
             or text_counts.get(term, 0)
+            or chunk_symbol_counts.get(term, 0)
             or symbol_counts.get(term, 0)
             or import_counts.get(term, 0)
         )
         path_score = sum(query_counts[term] * min(path_counts[term], 3) * 5 for term in matches)
         repo_score = sum(query_counts[term] * min(repo_counts[term], 2) for term in matches)
         text_score = sum(query_counts[term] * min(text_counts[term], 5) for term in matches)
+        chunk_symbol_score = sum(
+            query_counts[term] * min(chunk_symbol_counts[term], 2) * 4 for term in matches
+        )
         symbol_score = sum(
             query_counts[term] * min(symbol_counts[term], 2) * 2 for term in matches
         )
@@ -346,7 +406,13 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
         )
         coverage_bonus = 2 * len(matches)
         score = float(
-            path_score + repo_score + text_score + symbol_score + import_score + coverage_bonus
+            path_score
+            + repo_score
+            + text_score
+            + chunk_symbol_score
+            + symbol_score
+            + import_score
+            + coverage_bonus
         )
         ranked.append(
             CodeChunk(
@@ -359,6 +425,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.end_line,
                 chunk.text,
                 chunk.tokens,
+                chunk.chunk_symbols,
                 chunk.file_symbols,
                 chunk.file_imports,
                 chunk.file_local_import_paths,

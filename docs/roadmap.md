@@ -107,6 +107,9 @@ Current state:
 
 - file-level symbol and import metadata is now cached persistently outside the
   worktree and used as a ranking boost;
+- chunk-local anchor symbols now prioritize nearby function/route-style
+  definitions so later chunks inside large files can inherit the right local
+  intent;
 - local import-target resolution now allows imported-helper expansion during
   selection, which was enough to make the current cross-repo input-flow
   benchmark pass;
@@ -116,9 +119,9 @@ Current state:
 
 Measured reason this still matters:
 
-- the stronger answer-rubric benchmark now shows one remaining hard failure
-  where all expected files are selected but the wrong excerpt is chosen inside
-  at least two of those files.
+- the chunk-local anchor change removed the previous cross-repo input-flow
+  failure, but one upload explanation case still misses a specific
+  configuration excerpt.
 
 ### Backlog 3: Task-Shaped Selection Controls
 
@@ -147,9 +150,9 @@ Additional research-backed facets:
 
 Current measured gap:
 
-- the cross-repo input-flow case currently achieves file recall `1.0` but
-  answer-rubric recall `0.33`, which means selection logic still treats
-  "compare multiple flows" too much like a generic explanation task.
+- the remaining partial case shows that `explain`-style tasks can still miss a
+  needed configuration excerpt even when the right file is selected, so task
+  presets should still control what evidence types must be present.
 
 ### Backlog 4: Incremental Indexing And Search Contexts
 
@@ -224,6 +227,8 @@ Current state:
 
 - retrieval sufficiency and answer-rubric sufficiency are now reported
   separately in the use-case benchmark;
+- the latest measured result is `6 pass / 1 partial / 0 fail` with
+  `0.86` answer-rubric pass rate;
 - generated-answer and unsupported-claim scoring is still future work.
 
 ## Milestone 1: Provider-Reported Usage
@@ -257,6 +262,8 @@ Current state:
 - expected-file recall, repository recall, and minimum-budget grounding are
   implemented;
 - required-observation scoring against selected excerpts is implemented;
+- chunk-local anchor-symbol scoring improved the measured answer-rubric pass
+  rate from `0.71` to `0.86`;
 - unsupported-claim scoring for generated answers is still not implemented.
 
 Success rule:

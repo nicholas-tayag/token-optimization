@@ -11,9 +11,9 @@ AgenVantage currently solves a narrow but real pre-inference problem:
 - build and reuse a persistent local metadata index with file-level symbols and
   imports;
 - split eligible files into line-addressable chunks;
-- rank chunks with deterministic task-term matching, file-level metadata boosts,
-  import-neighbor expansion, and light diversity penalties across files and
-  repositories;
+- rank chunks with deterministic task-term matching, chunk-local anchor-symbol
+  boosts, file-level metadata boosts, import-neighbor expansion, and light
+  diversity penalties across files and repositories;
 - optionally include git diff and recent commit-log provenance inside the same
   token budget for changed-behavior tasks;
 - assemble a token-budgeted Markdown context package and JSON manifest; and
@@ -62,19 +62,19 @@ Source of truth:
 - benchmark runner: [`/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py`](/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py)
 - generated snapshot: `artifacts/use-case-validation.json`
 
-Validation run on June 30, 2026 after adding answer-rubric scoring against the
-selected excerpts:
+Validation run on June 30, 2026 after adding answer-rubric scoring and
+chunk-local anchor-symbol boosts:
 
 - cases run: `7`
-- verdicts: `5 pass`, `1 partial`, `1 fail`
-- average candidate-context reduction: `94.26%`
-- weighted candidate-context reduction: `96.2%`
+- verdicts: `6 pass`, `1 partial`, `0 fail`
+- average candidate-context reduction: `94.28%`
+- weighted candidate-context reduction: `96.23%`
 - average expected-file recall: `1.0`
 - weighted expected-file recall: `1.0`
 - grounding sufficiency pass rate: `1.0`
-- average required-observation recall: `0.86`
-- weighted required-observation recall: `0.85`
-- answer-rubric pass rate: `0.71`
+- average required-observation recall: `0.95`
+- weighted required-observation recall: `0.95`
+- answer-rubric pass rate: `0.86`
 - synthetic experiment stable-prefix gain: `+55` tokens
 - synthetic experiment budgeted reduction: `388 -> 348` tokens (`10.31%`)
 
@@ -82,34 +82,35 @@ selected excerpts:
 
 | Case | Verdict | Candidate -> Selected | Reduction | File Recall | Obs Recall | Min Budget |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 3,090` | `92.42%` | `1.0` | `1.0` | `1,864` |
-| `explain-signalfoundry-upload-smoke-test` | `partial` | `39,063 -> 3,597` | `90.79%` | `1.0` | `0.67` | `1,292` |
-| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,116` | `97.41%` | `1.0` | `1.0` | `1,432` |
-| `recommend-signalfoundry-edge-tests` | `pass` | `39,069 -> 3,103` | `92.06%` | `1.0` | `1.0` | `1,684` |
-| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,921` | `97.56%` | `1.0` | `1.0` | `2,917` |
-| `compare-cross-repo-input-flows` | `fail` | `201,587 -> 4,865` | `97.59%` | `1.0` | `0.33` | `4,865` |
-| `changed-behavior-signalfoundry-upload-limit` | `pass` | `39,374 -> 3,138` | `92.03%` | `1.0` | `1.0` | `-` |
+| `locate-mesh-extraction-flow` | `pass` | `40,747 -> 2,986` | `92.67%` | `1.0` | `1.0` | `2,986` |
+| `explain-signalfoundry-upload-smoke-test` | `partial` | `39,063 -> 3,548` | `90.92%` | `1.0` | `0.67` | `1,273` |
+| `validate-application-tracker-private-storage` | `pass` | `120,484 -> 3,114` | `97.42%` | `1.0` | `1.0` | `1,432` |
+| `recommend-signalfoundry-edge-tests` | `pass` | `39,069 -> 3,189` | `91.84%` | `1.0` | `1.0` | `1,791` |
+| `compare-cross-repo-server-hardening` | `pass` | `201,600 -> 4,731` | `97.65%` | `1.0` | `1.0` | `3,903` |
+| `compare-cross-repo-input-flows` | `pass` | `201,587 -> 4,954` | `97.54%` | `1.0` | `1.0` | `4,954` |
+| `changed-behavior-signalfoundry-upload-limit` | `pass` | `39,374 -> 3,193` | `91.89%` | `1.0` | `1.0` | `-` |
 
 ## What The Results Mean
 
-The stronger benchmark changed the story in an important way:
+The stronger benchmark still changed the story in an important way:
 
 - retrieval-level grounding still looks excellent;
-- answer-ready evidence is weaker than file recall alone suggests.
+- answer-ready evidence is now stronger than the first rubric run, but still
+  not identical to file recall.
 
 The latest run still shows that AgenVantage can reduce large local candidate
 repository context by roughly `90%` to `98%` while preserving all expected
-files across the seven hand-authored tasks. But once the benchmark asks
-whether the selected excerpts contain the required observations, the pass rate
-drops from `1.0` grounding sufficiency to `0.71` answer-rubric sufficiency.
+files across the seven hand-authored tasks. After adding chunk-local anchor
+symbols, the answer-rubric pass rate improved from `0.71` to `0.86` and the
+remaining cross-repo input-flow failure became a pass.
 
 That gap is useful evidence, not a regression in measurement:
 
 - the SignalFoundry upload smoke-test case selects the right files but misses
   the upload-limit configuration evidence inside the chosen excerpts;
-- the cross-repo input-flow case selects all expected files, but the chosen
-  snippets do not contain the key Signalfoundry upload-processing and
-  Application Tracker autofill-guardrail observations.
+- the remaining weakness is narrower than before: excerpt selection is now
+  strong enough for six of the seven rubric-scored cases, but one upload
+  explanation case still misses a specific configuration excerpt.
 
 That evidence does not justify broader claims yet:
 
@@ -126,8 +127,8 @@ when git provenance is enabled.
 
 No, it does not yet solve the full "agent context overload" problem end-to-end.
 The stronger answer-rubric benchmark makes that boundary easier to explain:
-the system can often find the right files, but it still sometimes chooses the
-wrong excerpt within those files.
+the system can often find the right files and now usually finds the right
+excerpt within those files, but it still misses some task-specific evidence.
 
 ## How To Reproduce
 

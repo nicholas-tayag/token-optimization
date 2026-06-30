@@ -26,9 +26,9 @@ The current local workflow provides:
 - optional git diff and recent commit-log provenance sections for changed-
   behavior and review-style tasks;
 - line-addressable source chunk ranking using task terms;
-- file-level symbol and import boosts layered onto chunk ranking, with a
-  diversity-aware candidate pool and imported-helper expansion before budget
-  selection;
+- chunk-local anchor symbols plus file-level symbol and import boosts layered
+  onto chunk ranking, with a diversity-aware candidate pool and
+  imported-helper expansion before budget selection;
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and

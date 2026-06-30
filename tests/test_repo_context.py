@@ -5,6 +5,7 @@ from agenvantage.repo_context import (
     CodeChunk,
     build_context_package,
     build_multi_repo_context_package,
+    chunks_for_repo,
     rank_chunks,
     source_files,
 )
@@ -254,6 +255,66 @@ def test_rank_chunks_uses_file_level_symbol_metadata() -> None:
     assert "limit" in ranked[0].matched_terms
 
 
+def test_rank_chunks_uses_chunk_local_symbol_metadata() -> None:
+    task = "Compare resume upload autofill planning"
+    chunks = (
+        CodeChunk(
+            chunk_id="lib/form-autofill.mjs#L1-L20",
+            relative_path="lib/form-autofill.mjs",
+            display_path="lib/form-autofill.mjs",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=20,
+            text="const SAFE = true;\n",
+            tokens=18,
+            chunk_symbols=("buildAutofillPlan",),
+            file_symbols=("classifyFormField", "buildAutofillPlan"),
+            file_imports=(),
+        ),
+        CodeChunk(
+            chunk_id="lib/form-autofill.mjs#L21-L40",
+            relative_path="lib/form-autofill.mjs",
+            display_path="lib/form-autofill.mjs",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=21,
+            end_line=40,
+            text="const SAFE = true;\n",
+            tokens=18,
+            chunk_symbols=(),
+            file_symbols=("classifyFormField", "buildAutofillPlan"),
+            file_imports=(),
+        ),
+    )
+
+    ranked = rank_chunks(chunks, task)
+
+    assert ranked[0].chunk_id == "lib/form-autofill.mjs#L1-L20"
+    assert "autofill" in ranked[0].matched_terms
+
+
+def test_chunks_for_repo_carries_nearby_symbol_anchors_across_large_function_bodies(
+    tmp_path: Path,
+) -> None:
+    content = (
+        "export function handleUpload(file) {\n"
+        + "".join(f"  const step{index} = file && {index};\n" for index in range(95))
+        + "  const cleanStatus = 'complete';\n"
+        + "  return cleanStatus;\n"
+        + "}\n"
+    )
+    (tmp_path / "app.js").write_text(content, encoding="utf-8")
+
+    files = source_files(tmp_path)
+    index_result = build_repository_index(tmp_path, files)
+    chunks = chunks_for_repo(tmp_path, TokenCounter(), files=files, file_index=index_result.entries)
+
+    later_chunk = next(chunk for chunk in chunks if chunk.start_line >= 85)
+
+    assert "handleUpload" in later_chunk.chunk_symbols
+
+
 def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     create_sample_repo(tmp_path)
     markdown, report = build_context_package(
@@ -326,6 +387,23 @@ def test_context_package_matches_natural_language_to_code_variants(tmp_path: Pat
         counter=TokenCounter(),
     )
     assert report["selected_chunks"][0]["path"] == "limiter.ts"
+
+
+def test_context_package_matches_size_limit_language_to_byte_caps(tmp_path: Path) -> None:
+    (tmp_path / "upload.js").write_text(
+        "const defaultMaxUploadBytes = 750 * 1024;\n"
+        "const maxUploadBytes = defaultMaxUploadBytes;\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain configurable upload size limits",
+        budget=260,
+        counter=TokenCounter(),
+    )
+
+    assert report["selected_chunks"][0]["path"] == "upload.js"
 
 
 def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> None:

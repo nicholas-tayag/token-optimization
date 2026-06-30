@@ -37,16 +37,17 @@ and more on "can it return the right evidence span with high precision?"
 
 ## Ranked Improvements
 
-### 1. Add Symbol-To-Line And Route-To-Line Anchors
+### 1. Deepen Symbol-To-Line And Route-To-Line Anchors
 
 Priority: Highest
 
 Why this is first:
 
-- the remaining failed use case already has `expected_path_recall == 1.0`;
-- the miss is excerpt precision, not repository discovery;
-- line-targeted anchors are the clearest path from "right file" to
-  "right snippet."
+- the first chunk-local anchor implementation already removed the previous
+  cross-repo input-flow failure;
+- the remaining miss is still excerpt precision, not repository discovery;
+- more explicit line-targeted anchors are still the clearest path from "right
+  file" to "right snippet."
 
 External grounding:
 
@@ -57,7 +58,8 @@ External grounding:
 
 Recommended implementation:
 
-- store symbol definitions with line ranges in the persistent index;
+- keep the new chunk-local anchor scoring and extend it to stored symbol
+  definitions with line ranges in the persistent index;
 - extract route handlers, exported functions, CLI commands, and tests as
   line-addressed anchors;
 - boost chunks that actually contain matched anchors instead of only boosting

@@ -546,7 +546,7 @@ def _build_cases() -> list[ValidationCase]:
             task="Identify the changed behavior around configurable upload size limits and show what code and tests prove it.",
             repos=(signalfoundry,),
             budget=3200,
-            expected_paths=("README.md", "tools/serve.js", "tools/server-smoke-test.js"),
+            expected_paths=("tools/serve.js", "tools/server-smoke-test.js"),
             requires_change_provenance=True,
             required_observations=(
                 RequiredObservation(

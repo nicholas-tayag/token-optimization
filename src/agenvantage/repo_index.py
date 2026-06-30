@@ -55,6 +55,10 @@ class RepositoryIndexBuildResult:
     stats: dict[str, Any]
 
 
+def _line_number_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
 def _ordered_unique(values: Iterable[str], limit: int) -> tuple[str, ...]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -117,55 +121,40 @@ def _write_cache(path: Path, repo: Path, entries: dict[str, RepositoryFileIndexE
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _extract_symbols(path: Path, text: str) -> tuple[str, ...]:
-    values: list[str] = []
-    values.extend(
-        match.group(1)
-        for match in re.finditer(
-            r"\b(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\b",
-            text,
-        )
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(
-            r"\b(?:class|interface|enum|struct)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
-            text,
-        )
-    )
-    values.extend(
-        match.group(2)
-        for match in re.finditer(
-            r"\b(const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
-            text,
-        )
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(
-            r"^\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
-            text,
-            re.MULTILINE,
-        )
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\b", text)
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(
+def extract_symbol_occurrences(path: Path, text: str) -> tuple[tuple[int, str, str], ...]:
+    occurrences: list[tuple[int, str, str]] = []
+    patterns = (
+        (r"\b(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "function"),
+        (r"\b(?:class|interface|enum|struct)\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "type"),
+        (r"\b(const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=", 2, 0, "variable"),
+        (r"^\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, re.MULTILINE, "function"),
+        (r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "function"),
+        (
             r"\b(?:app|router)\.(?:get|post|put|patch|delete|use)\(\s*['\"]([^'\"]+)",
-            text,
-        )
+            1,
+            0,
+            "route",
+        ),
     )
+    for pattern, group_index, flags, kind in patterns:
+        for match in re.finditer(pattern, text, flags):
+            occurrences.append(
+                (_line_number_for_offset(text, match.start()), match.group(group_index), kind)
+            )
     for export_match in re.finditer(r"\bexport\s*\{([^}]+)\}", text):
+        line_number = _line_number_for_offset(text, export_match.start())
         for piece in export_match.group(1).split(","):
             candidate = piece.strip().split(" as ")[0].strip()
             if candidate:
-                values.append(candidate)
-    values.append(path.stem)
-    return _ordered_unique(values, _SYMBOL_LIMIT)
+                occurrences.append((line_number, candidate, "export"))
+    return tuple(occurrences)
+
+
+def _extract_symbols(path: Path, text: str) -> tuple[str, ...]:
+    return _ordered_unique(
+        [name for _, name, _ in extract_symbol_occurrences(path, text)] + [path.stem],
+        _SYMBOL_LIMIT,
+    )
 
 
 def _extract_imports(text: str) -> tuple[str, ...]:
