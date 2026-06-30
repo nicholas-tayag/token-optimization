@@ -2,8 +2,10 @@ from pathlib import Path
 import subprocess
 
 from agenvantage.repo_context import (
+    CodeChunk,
     build_context_package,
     build_multi_repo_context_package,
+    rank_chunks,
     source_files,
 )
 from agenvantage.tokenizer import TokenCounter
@@ -67,6 +69,74 @@ def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) ->
     assert "tracked.ts" in files
     assert "draft.ts" in files
     assert "ignored.ts" not in files
+
+
+def test_context_package_builds_and_reuses_repository_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    create_sample_repo(tmp_path)
+    cache_root = tmp_path.parent / "agenvantage-cache"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+
+    _, first_report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=TokenCounter(),
+    )
+    first_index = first_report["repos"][0]["index"]
+    assert Path(first_index["cache_path"]).is_file()
+    assert first_index["rebuilt_files"] == first_index["indexed_files"]
+    assert first_index["reused_files"] == 0
+
+    _, second_report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=TokenCounter(),
+    )
+    second_index = second_report["repos"][0]["index"]
+    assert second_index["reused_files"] == second_index["indexed_files"]
+    assert second_index["rebuilt_files"] == 0
+
+
+def test_rank_chunks_uses_file_level_symbol_metadata() -> None:
+    task = "Explain upload limit configuration"
+    generic_text = "const maxBytes = 10_000;\nreturn maxBytes;\n"
+    chunks = (
+        CodeChunk(
+            chunk_id="src/runtime.ts#L1-L2",
+            relative_path="src/runtime.ts",
+            display_path="src/runtime.ts",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=2,
+            text=generic_text,
+            tokens=20,
+            file_symbols=("configureUploadLimit",),
+            file_imports=(),
+        ),
+        CodeChunk(
+            chunk_id="src/noise.ts#L1-L2",
+            relative_path="src/noise.ts",
+            display_path="src/noise.ts",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=2,
+            text="const notes = 'configuration';\n",
+            tokens=18,
+            file_symbols=(),
+            file_imports=(),
+        ),
+    )
+
+    ranked = rank_chunks(chunks, task)
+
+    assert ranked[0].chunk_id == "src/runtime.ts#L1-L2"
+    assert "upload" in ranked[0].matched_terms
+    assert "limit" in ranked[0].matched_terms
 
 
 def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:

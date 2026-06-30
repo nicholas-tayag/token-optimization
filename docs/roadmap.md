@@ -64,6 +64,8 @@ References:
 
 ### Backlog 2: Symbol-Aware Retrieval
 
+Status: partially implemented.
+
 Why this is second:
 
 - one cross-repo hardening benchmark still misses
@@ -89,6 +91,13 @@ Additional research-backed facets:
   from anchor files to implementation neighbors;
 - keep explicit evidence-type diversity so the pack is not dominated by only
   tests or only implementation files.
+
+Current state:
+
+- file-level symbol and import metadata is now cached persistently outside the
+  worktree and used as a ranking boost;
+- a deeper structural graph and test-to-implementation expansion layer is still
+  future work.
 
 ### Backlog 3: Task-Shaped Selection Controls
 

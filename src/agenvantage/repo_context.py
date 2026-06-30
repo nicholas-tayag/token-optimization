@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from agenvantage.repo_index import RepositoryFileIndexEntry, build_repository_index
 from agenvantage.tokenizer import TokenCounter
 
 _SUPPORTED_SUFFIXES = {
@@ -110,6 +111,8 @@ class CodeChunk:
     end_line: int
     text: str
     tokens: int
+    file_symbols: tuple[str, ...] = ()
+    file_imports: tuple[str, ...] = ()
     score: float = 0.0
     matched_terms: tuple[str, ...] = ()
 
@@ -264,6 +267,7 @@ def chunks_for_repo(
     *,
     files: Iterable[Path] | None = None,
     repo_label: str | None = None,
+    file_index: dict[str, RepositoryFileIndexEntry] | None = None,
 ) -> tuple[CodeChunk, ...]:
     if chunk_lines <= 0 or overlap_lines < 0 or overlap_lines >= chunk_lines:
         raise ValueError("Chunk settings require chunk_lines > overlap_lines >= 0.")
@@ -278,6 +282,7 @@ def chunks_for_repo(
             continue
         relative = path.relative_to(repo).as_posix()
         display_path = f"{repo_label}/{relative}" if repo_label else relative
+        indexed_entry = file_index.get(relative) if file_index is not None else None
         for start in range(0, len(lines), stride):
             content_lines = lines[start : start + chunk_lines]
             if not any(line.strip() for line in content_lines):
@@ -300,6 +305,8 @@ def chunks_for_repo(
                     end_line,
                     text,
                     counter.count(rendered),
+                    indexed_entry.symbols if indexed_entry is not None else (),
+                    indexed_entry.imports if indexed_entry is not None else (),
                 )
             )
             if end_line == len(lines):
@@ -311,17 +318,33 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
     query_counts = Counter(_terms(task))
     ranked: list[CodeChunk] = []
     for chunk in chunks:
-        path_counts = Counter(_terms(chunk.display_path))
+        path_counts = Counter(_terms(chunk.relative_path))
+        repo_counts = Counter(_terms(chunk.repo_label))
         text_counts = Counter(_terms(chunk.text))
+        symbol_counts = Counter(_terms(" ".join(chunk.file_symbols)))
+        import_counts = Counter(_terms(" ".join(chunk.file_imports)))
         matches = tuple(
             term
             for term in query_counts
-            if path_counts.get(term, 0) or text_counts.get(term, 0)
+            if path_counts.get(term, 0)
+            or repo_counts.get(term, 0)
+            or text_counts.get(term, 0)
+            or symbol_counts.get(term, 0)
+            or import_counts.get(term, 0)
         )
         path_score = sum(query_counts[term] * min(path_counts[term], 3) * 5 for term in matches)
+        repo_score = sum(query_counts[term] * min(repo_counts[term], 2) for term in matches)
         text_score = sum(query_counts[term] * min(text_counts[term], 5) for term in matches)
+        symbol_score = sum(
+            query_counts[term] * min(symbol_counts[term], 2) * 2 for term in matches
+        )
+        import_score = sum(
+            query_counts[term] * min(import_counts[term], 2) for term in matches
+        )
         coverage_bonus = 2 * len(matches)
-        score = float(path_score + text_score + coverage_bonus)
+        score = float(
+            path_score + repo_score + text_score + symbol_score + import_score + coverage_bonus
+        )
         ranked.append(
             CodeChunk(
                 chunk.chunk_id,
@@ -333,6 +356,8 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.end_line,
                 chunk.text,
                 chunk.tokens,
+                chunk.file_symbols,
+                chunk.file_imports,
                 score,
                 matches,
             )
@@ -340,6 +365,33 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
     return tuple(
         sorted(ranked, key=lambda chunk: (chunk.score, -chunk.tokens, chunk.chunk_id), reverse=True)
     )
+
+
+def _build_candidate_pool(ranked: tuple[CodeChunk, ...], top_k: int) -> list[CodeChunk]:
+    grouped: dict[str, list[CodeChunk]] = {}
+    ordered_paths: list[str] = []
+    for chunk in ranked:
+        if chunk.display_path not in grouped:
+            grouped[chunk.display_path] = []
+            ordered_paths.append(chunk.display_path)
+        grouped[chunk.display_path].append(chunk)
+
+    candidate_pool: list[CodeChunk] = []
+    offset = 0
+    while len(candidate_pool) < top_k:
+        added_any = False
+        for path in ordered_paths:
+            file_chunks = grouped[path]
+            if offset >= len(file_chunks):
+                continue
+            candidate_pool.append(file_chunks[offset])
+            added_any = True
+            if len(candidate_pool) >= top_k:
+                break
+        if not added_any:
+            break
+        offset += 1
+    return candidate_pool
 
 
 def build_multi_repo_context_package(
@@ -361,13 +413,23 @@ def build_multi_repo_context_package(
     repo_inputs = _repo_inputs(repos)
     repo_summaries: list[dict[str, Any]] = []
     candidate_chunks: list[CodeChunk] = []
+    index_totals = {
+        "indexed_files": 0,
+        "reused_files": 0,
+        "rebuilt_files": 0,
+        "skipped_files": 0,
+        "symbol_count": 0,
+        "import_count": 0,
+    }
     for repo_input in repo_inputs:
         files = source_files(repo_input.root)
+        index_result = build_repository_index(repo_input.root, files)
         chunks = chunks_for_repo(
             repo_input.root,
             counter,
             files=files,
             repo_label=repo_input.label if len(repo_inputs) > 1 else None,
+            file_index=index_result.entries,
         )
         repo_summaries.append(
             {
@@ -375,8 +437,11 @@ def build_multi_repo_context_package(
                 "path": str(repo_input.root),
                 "scanned_files": len(files),
                 "candidate_chunks": len(chunks),
+                "index": index_result.stats,
             }
         )
+        for key in index_totals:
+            index_totals[key] += int(index_result.stats[key])
         candidate_chunks.extend(chunks)
 
     if not candidate_chunks:
@@ -407,18 +472,21 @@ def build_multi_repo_context_package(
     selected: list[CodeChunk] = []
     excluded: list[dict[str, Any]] = []
     rendered = prefix
-    candidate_pool = list(ranked[:top_k])
+    candidate_pool = _build_candidate_pool(ranked, top_k)
     selected_paths: Counter[str] = Counter()
     selected_repos: Counter[str] = Counter()
+    selected_terms: set[str] = set()
     multiple_repos = len(repo_inputs) > 1
     while candidate_pool:
         chunk = max(
             candidate_pool,
             key=lambda candidate: (
                 candidate.score
+                * (1 + (0.25 * len(set(candidate.matched_terms) - selected_terms)))
                 / (
                     1
                     + (0.5 * selected_paths[candidate.display_path])
+                    + (0.12 * len(set(candidate.matched_terms) & selected_terms))
                     + (
                         0.2 * selected_repos[candidate.repo_label]
                         if multiple_repos
@@ -438,6 +506,7 @@ def build_multi_repo_context_package(
             selected.append(chunk)
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
+            selected_terms.update(chunk.matched_terms)
             rendered += addition
         else:
             excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
@@ -476,10 +545,11 @@ def build_multi_repo_context_package(
         "selected_repo_labels": sorted(selected_repos),
         "selected_chunks": [chunk.to_dict() for chunk in selected],
         "excluded_ranked_chunks": excluded,
+        "index": index_totals,
         "selection_strategy": (
-            "term-ranked chunks with a moderate per-file diversity penalty"
+            "term-ranked chunks with file-level symbol and import boosts plus a moderate per-file diversity penalty"
             if not multiple_repos
-            else "term-ranked chunks with moderate per-file and light per-repository diversity penalties"
+            else "term-ranked chunks with file-level symbol and import boosts, moderate per-file, and light per-repository diversity penalties"
         ),
         "measurement_notes": [
             "This compares local packaged context with the scanned eligible source corpus.",

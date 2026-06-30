@@ -21,7 +21,11 @@ The current local workflow provides:
   repositories, including multi-repository tasks with repeated `--repo` flags;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
+- a persistent local repository-metadata index that caches per-file symbols and
+  imports outside the worktree for reuse across runs;
 - line-addressable source chunk ranking using task terms;
+- file-level symbol and import boosts layered onto chunk ranking, with a
+  diversity-aware candidate pool before budget selection;
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and

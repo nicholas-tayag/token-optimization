@@ -8,9 +8,11 @@ AgenVantage currently solves a narrow but real pre-inference problem:
 
 - scan local repositories, including tracked files and untracked non-ignored
   worktree files;
+- build and reuse a persistent local metadata index with file-level symbols and
+  imports;
 - split eligible files into line-addressable chunks;
-- rank chunks with deterministic task-term matching plus light diversity
-  penalties across files and repositories;
+- rank chunks with deterministic task-term matching, file-level metadata boosts,
+  and light diversity penalties across files and repositories;
 - assemble a token-budgeted Markdown context package and JSON manifest; and
 - report how much candidate repository context was omitted locally.
 
@@ -77,6 +79,11 @@ Validation run on June 30, 2026:
 The project now has hard evidence that it can reduce large local candidate
 repository context by roughly `90%` to `98%` while still grounding most of the
 tested explanation and comparison tasks.
+
+The current implementation also now includes a persistent metadata index and
+file-level symbol/import-aware ranking. In the June 30, 2026 validation run,
+that change preserved the overall `5 pass / 2 partial` result while improving
+the previously partial cross-repo server-hardening case to a pass.
 
 That evidence does not justify broader claims yet:
 
