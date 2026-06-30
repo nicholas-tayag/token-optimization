@@ -81,6 +81,15 @@ Tasks:
 - preserve deterministic ranking as the baseline for comparison;
 - add benchmark cases that require symbol-aware retrieval to ground correctly.
 
+Additional research-backed facets:
+
+- build a persistent symbol table rather than deriving symbols ad hoc on each
+  run;
+- index import links and test-to-code relationships so retrieval can expand
+  from anchor files to implementation neighbors;
+- keep explicit evidence-type diversity so the pack is not dominated by only
+  tests or only implementation files.
+
 ### Backlog 3: Task-Shaped Selection Controls
 
 Why this is third:
@@ -95,6 +104,14 @@ Tasks:
 - allow preselected path lists from stdin or a file;
 - optionally emit line-number-heavy and XML-style context outputs;
 - record active filters and preset choice in the manifest.
+
+Additional research-backed facets:
+
+- add task presets that alter retrieval recipes, not just output formatting;
+- support iterative retrieval for compound tasks such as `compare` and
+  `change`;
+- add explicit stopping checks once required grounding files and repos are
+  present.
 
 ### Backlog 4: Incremental Indexing And Search Contexts
 
@@ -111,6 +128,13 @@ Tasks:
 - expose freshness metadata in the manifest;
 - benchmark scan-time improvements separately from retrieval-quality changes.
 
+Additional research-backed facets:
+
+- store chunk hashes, symbol metadata, and optional embeddings by content hash;
+- add a local lexical index for cheap path, regex, and symbol search before any
+  embedding lookup;
+- keep repository-index build cost separate from prompt-token cost in reports.
+
 ### Backlog 5: Optional Hybrid Retrieval
 
 Why this is fifth:
@@ -125,6 +149,14 @@ Tasks:
 - add optional BM25-style retrieval and compare it against the benchmark suite;
 - add optional embedding-based reranking behind an explicit feature flag;
 - only promote a hybrid retriever after measured benchmark improvement.
+
+Additional research-backed facets:
+
+- prefer hybrid retrieval over semantic-only retrieval;
+- consider late-interaction or reranking designs before replacing lexical
+  retrieval;
+- keep ablation experiments that compare lexical-only, semantic-only, and
+  hybrid retrieval.
 
 ### Backlog 6: Richer Reporting And Safety Metrics
 
@@ -141,6 +173,14 @@ Tasks:
 - add sensitive-content screening for packed files and future provenance
   sections;
 - graph covered versus uncovered task concepts in the report output.
+
+Additional research-backed facets:
+
+- add leave-one-file-out ablation to estimate whether each selected file was
+  actually necessary;
+- report retrieval sufficiency separately from answer sufficiency;
+- reserve stronger "task solved" claims for future answer-level evaluation
+  milestones.
 
 ## Milestone 1: Provider-Reported Usage
 
