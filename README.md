@@ -23,6 +23,8 @@ The current local workflow provides:
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
 - a persistent local repository-metadata index that caches per-file symbols and
   imports outside the worktree for reuse across runs;
+- optional git diff and recent commit-log provenance sections for changed-
+  behavior and review-style tasks;
 - line-addressable source chunk ranking using task terms;
 - file-level symbol and import boosts layered onto chunk ranking, with a
   diversity-aware candidate pool before budget selection;

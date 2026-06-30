@@ -60,10 +60,17 @@ def _first_hit_rank(selected_paths: list[str], expected_paths: tuple[str, ...]) 
 
 
 def _verdict(
-    expected_path_recall: float, repo_recall: float, requires_change_provenance: bool
+    expected_path_recall: float,
+    repo_recall: float,
+    requires_change_provenance: bool,
+    supports_change_provenance: bool,
 ) -> str:
     if requires_change_provenance:
-        return "partial"
+        if expected_path_recall == 1.0 and repo_recall == 1.0 and supports_change_provenance:
+            return "pass"
+        if expected_path_recall >= 0.5 and repo_recall == 1.0:
+            return "partial"
+        return "fail"
     if expected_path_recall == 1.0 and repo_recall == 1.0:
         return "pass"
     if expected_path_recall >= 0.5 and repo_recall == 1.0:
@@ -76,11 +83,23 @@ def _build_report(
 ) -> dict[str, Any]:
     if len(case.repos) == 1:
         _, report = build_context_package(
-            case.repos[0], case.task, budget, counter, top_k=top_k
+            case.repos[0],
+            case.task,
+            budget,
+            counter,
+            top_k=top_k,
+            include_diff=case.requires_change_provenance,
+            include_log=case.requires_change_provenance,
         )
     else:
         _, report = build_multi_repo_context_package(
-            case.repos, case.task, budget, counter, top_k=top_k
+            case.repos,
+            case.task,
+            budget,
+            counter,
+            top_k=top_k,
+            include_diff=case.requires_change_provenance,
+            include_log=case.requires_change_provenance,
         )
     return report
 
@@ -97,7 +116,12 @@ def _meets_grounding(case: ValidationCase, report: dict[str, Any]) -> bool:
     selected_paths = set(_report_selected_paths(report))
     selected_repos = set(_report_selected_repos(report))
     expected_repos = set(_repo_labels(case.repos))
-    return all(path in selected_paths for path in case.expected_paths) and expected_repos <= selected_repos
+    has_expected_grounding = all(path in selected_paths for path in case.expected_paths)
+    if not (has_expected_grounding and expected_repos <= selected_repos):
+        return False
+    if case.requires_change_provenance:
+        return bool(report.get("provenance", {}).get("section_count", 0))
+    return True
 
 
 def _find_minimum_budget_for_grounding(
@@ -164,8 +188,12 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
     repo_recall = round(
         (len(repo_hits) / len(expected_repo_labels)) if expected_repo_labels else 1.0, 2
     )
+    supports_change_provenance = bool(report.get("provenance", {}).get("section_count", 0))
     verdict = _verdict(
-        expected_path_recall, repo_recall, case.requires_change_provenance
+        expected_path_recall,
+        repo_recall,
+        case.requires_change_provenance,
+        supports_change_provenance,
     )
     minimum_budget_for_grounding, minimum_budget_report = _find_minimum_budget_for_grounding(
         case, counter
@@ -174,7 +202,7 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
     grounding_sufficient_for_context = (
         expected_path_recall == 1.0
         and repo_recall == 1.0
-        and not case.requires_change_provenance
+        and (supports_change_provenance if case.requires_change_provenance else True)
     )
 
     return {
@@ -219,7 +247,11 @@ def _run_case(case: ValidationCase, counter: TokenCounter) -> dict[str, Any]:
         ),
         "minimum_top_k_for_grounding_at_budget": minimum_top_k_for_grounding,
         "requires_change_provenance": case.requires_change_provenance,
-        "supports_change_provenance": False,
+        "supports_change_provenance": supports_change_provenance,
+        "provenance_section_count": report.get("provenance", {}).get("section_count", 0),
+        "selected_provenance_tokens": report.get("provenance", {}).get(
+            "selected_provenance_tokens", 0
+        ),
         "verdict": verdict,
     }
 
@@ -429,13 +461,20 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Grounding budget headroom: `{case['grounding_budget_headroom_tokens']}`",
                 f"- Minimum top-k for grounding at tested budget: `{case['minimum_top_k_for_grounding_at_budget']}`",
                 f"- Grounding file density: `{case['grounding_file_density']}`",
+                f"- Provenance sections: `{case['provenance_section_count']}`",
+                f"- Provenance tokens: `{case['selected_provenance_tokens']}`",
                 f"- Top selected files: `{case['selected_unique_paths'][:6]}`",
             ]
         )
         if case["requires_change_provenance"]:
-            lines.append(
-                "- Limitation: this use case needs git-history or diff context, and `pack` currently only packages repository file content."
-            )
+            if case["supports_change_provenance"]:
+                lines.append(
+                    "- Provenance enabled: this case included git diff/log context in addition to repository file content."
+                )
+            else:
+                lines.append(
+                    "- Limitation: this use case needs git-history or diff context, and no provenance section was available."
+                )
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

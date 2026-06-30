@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from agenvantage.repo_index import RepositoryFileIndexEntry, build_repository_index
+from agenvantage.repo_provenance import ProvenanceSection, build_repo_provenance_sections
 from agenvantage.tokenizer import TokenCounter
 
 _SUPPORTED_SUFFIXES = {
@@ -401,6 +402,8 @@ def build_multi_repo_context_package(
     counter: TokenCounter,
     top_k: int = 20,
     instructions: str = _DEFAULT_INSTRUCTIONS,
+    include_diff: bool = False,
+    include_log: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     if budget <= 0:
         raise ValueError("Token budget must be positive.")
@@ -413,6 +416,7 @@ def build_multi_repo_context_package(
     repo_inputs = _repo_inputs(repos)
     repo_summaries: list[dict[str, Any]] = []
     candidate_chunks: list[CodeChunk] = []
+    provenance_sections: list[ProvenanceSection] = []
     index_totals = {
         "indexed_files": 0,
         "reused_files": 0,
@@ -424,6 +428,13 @@ def build_multi_repo_context_package(
     for repo_input in repo_inputs:
         files = source_files(repo_input.root)
         index_result = build_repository_index(repo_input.root, files)
+        repo_provenance = build_repo_provenance_sections(
+            repo_input.root,
+            repo_input.label,
+            counter=counter,
+            include_diff=include_diff,
+            include_log=include_log,
+        )
         chunks = chunks_for_repo(
             repo_input.root,
             counter,
@@ -438,11 +449,13 @@ def build_multi_repo_context_package(
                 "scanned_files": len(files),
                 "candidate_chunks": len(chunks),
                 "index": index_result.stats,
+                "provenance_sections": [section.to_dict() for section in repo_provenance],
             }
         )
         for key in index_totals:
             index_totals[key] += int(index_result.stats[key])
         candidate_chunks.extend(chunks)
+        provenance_sections.extend(repo_provenance)
 
     if not candidate_chunks:
         raise ValueError("No eligible source files were found in the provided repositories.")
@@ -454,6 +467,10 @@ def build_multi_repo_context_package(
             f"- `{repo_input.label}`: {repo_input.root}" for repo_input in repo_inputs
         )
         repo_section = f"## Repositories\n\n{repo_lines}\n\n"
+    provenance_section = ""
+    if provenance_sections:
+        provenance_rendered = "\n\n".join(section.render() for section in provenance_sections)
+        provenance_section = f"## Repository Provenance\n\n{provenance_rendered}\n\n"
     prefix = (
         "# AgenVantage Context Package\n\n"
         "## Instructions\n\n"
@@ -461,6 +478,7 @@ def build_multi_repo_context_package(
         "## Task\n\n"
         f"{task}\n\n"
         f"{repo_section}"
+        f"{provenance_section}"
         "## Selected Repository Context\n\n"
     )
     required_tokens = counter.count(prefix)
@@ -546,6 +564,14 @@ def build_multi_repo_context_package(
         "selected_chunks": [chunk.to_dict() for chunk in selected],
         "excluded_ranked_chunks": excluded,
         "index": index_totals,
+        "provenance": {
+            "enabled": include_diff or include_log,
+            "include_diff": include_diff,
+            "include_log": include_log,
+            "section_count": len(provenance_sections),
+            "sections": [section.to_dict() for section in provenance_sections],
+            "selected_provenance_tokens": sum(section.tokens for section in provenance_sections),
+        },
         "selection_strategy": (
             "term-ranked chunks with file-level symbol and import boosts plus a moderate per-file diversity penalty"
             if not multiple_repos
@@ -555,6 +581,7 @@ def build_multi_repo_context_package(
             "This compares local packaged context with the scanned eligible source corpus.",
             "It does not measure provider API tokens, cache hits, response quality, or cost savings.",
             "Tracked files plus untracked, non-ignored worktree files are scanned when the target is a Git repository.",
+            "Optional git provenance sections are counted inside the packaged context budget when enabled.",
         ],
     }
     if len(repo_inputs) == 1:
@@ -569,6 +596,8 @@ def build_context_package(
     counter: TokenCounter,
     top_k: int = 20,
     instructions: str = _DEFAULT_INSTRUCTIONS,
+    include_diff: bool = False,
+    include_log: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     return build_multi_repo_context_package(
         [repo],
@@ -577,6 +606,8 @@ def build_context_package(
         counter,
         top_k=top_k,
         instructions=instructions,
+        include_diff=include_diff,
+        include_log=include_log,
     )
 
 

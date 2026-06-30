@@ -71,6 +71,60 @@ def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) ->
     assert "ignored.ts" not in files
 
 
+def test_context_package_can_include_git_provenance(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "app.js").write_text(
+        "export const uploadLimit = 10;\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "add", "app.js"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Add upload limit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "app.js").write_text(
+        "export const uploadLimit = 25;\n", encoding="utf-8"
+    )
+
+    markdown, report = build_context_package(
+        tmp_path,
+        "Identify changed behavior around upload limit configuration",
+        budget=700,
+        counter=TokenCounter(),
+        include_diff=True,
+        include_log=True,
+    )
+
+    provenance = report["provenance"]
+    assert provenance["enabled"] is True
+    assert provenance["section_count"] >= 1
+    assert provenance["selected_provenance_tokens"] > 0
+    assert "## Repository Provenance" in markdown
+    assert "Working tree changes" in markdown or "Add upload limit" in markdown
+
+
 def test_context_package_builds_and_reuses_repository_index(
     tmp_path: Path, monkeypatch
 ) -> None:

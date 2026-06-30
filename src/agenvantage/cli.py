@@ -61,6 +61,16 @@ def _parser() -> argparse.ArgumentParser:
         default=20,
         help="Maximum number of ranked candidate chunks considered for selection.",
     )
+    pack.add_argument(
+        "--include-diff",
+        action="store_true",
+        help="Include staged and working-tree git diff provenance in the packaged context.",
+    )
+    pack.add_argument(
+        "--include-log",
+        action="store_true",
+        help="Include recent git commit-log provenance in the packaged context.",
+    )
     pack.add_argument("--output", type=Path, help="Optional Markdown context-package output.")
     pack.add_argument("--manifest", type=Path, help="Optional JSON decision-manifest output.")
     return parser
@@ -92,11 +102,23 @@ def main() -> None:
     if args.command == "pack":
         if len(args.repo) == 1:
             markdown, report = build_context_package(
-                args.repo[0], args.task, args.budget, TokenCounter(args.model), args.top_k
+                args.repo[0],
+                args.task,
+                args.budget,
+                TokenCounter(args.model),
+                args.top_k,
+                include_diff=args.include_diff,
+                include_log=args.include_log,
             )
         else:
             markdown, report = build_multi_repo_context_package(
-                args.repo, args.task, args.budget, TokenCounter(args.model), args.top_k
+                args.repo,
+                args.task,
+                args.budget,
+                TokenCounter(args.model),
+                args.top_k,
+                include_diff=args.include_diff,
+                include_log=args.include_log,
             )
         write_package_outputs(markdown, report, args.output, args.manifest)
         print(json.dumps(report, indent=2))

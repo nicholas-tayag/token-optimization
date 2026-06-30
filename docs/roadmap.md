@@ -38,10 +38,12 @@ measured impact, not by generic feature parity.
 
 ### Backlog 1: Git Provenance In Pack Output
 
+Status: partially implemented.
+
 Why this is first:
 
-- the current changed-behavior validation case remains partial even with full
-  file recall;
+- changed-behavior tasks require repository-change provenance, not just current
+  file content;
 - the missing capability is repository-change provenance, not more file text.
 
 Tasks:
@@ -56,6 +58,15 @@ Tasks:
   present;
 - document that changed-behavior tasks are unsupported unless provenance is
   packaged.
+
+Current state:
+
+- `agenvantage pack` now supports `--include-diff` and `--include-log`;
+- provenance sections are counted inside the pack budget and recorded
+  separately in the manifest;
+- the changed-behavior benchmark now passes when provenance is enabled;
+- provenance-aware path expansion, recency signals, and blame-level evidence
+  are still future work.
 
 References:
 
