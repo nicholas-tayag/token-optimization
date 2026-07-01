@@ -299,3 +299,16 @@ Reason:
 5. Add a downstream benchmark target using either CodeRAG-Bench repo-level
    tasks or a SWE-bench slice.
 6. Keep production-scoped latency claims separate from local synthetic runs.
+
+## Materialize Locally
+
+To turn the machine-readable manifest into local checkouts under ignored
+workspace storage, run:
+
+```bash
+.venv/bin/python scripts/materialize_proof_resources.py --dry-run
+.venv/bin/python scripts/materialize_proof_resources.py --github-only --priority P0
+```
+
+That writes an index under `external/proof-resources/` and shallow-clones the
+selected GitHub repositories into `external/proof-resources/repos/`.
