@@ -94,6 +94,25 @@ def test_run_command_uses_defaults_and_writes_report(tmp_path: Path) -> None:
     assert _DEFAULT_BUDGET == 360
 
 
+def test_validate_provider_dry_run_summary() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "validate-provider",
+            "--dry-run",
+            "--summary",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage provider-validation fixture" in completed.stdout
+    assert "cache_ready=True" in completed.stdout
+
+
 def test_format_pack_summary_reports_budget_and_files() -> None:
     report = {
         "task": "Explain the rate limiter",

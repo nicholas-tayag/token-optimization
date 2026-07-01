@@ -34,3 +34,47 @@ Run it with:
 
 The generated `artifacts/` files are ignored from git. Commit durable findings
 to `docs/` instead of relying on ignored benchmark output.
+
+## Provider Validation
+
+`agenvantage validate-provider` is the claim-audit path for the stronger
+questions that the repository could not previously answer:
+
+- real provider cost reduction;
+- latency improvement;
+- downstream answer-quality retention; and
+- end-to-end support for the broader "context overload" claim.
+
+It supports three modes:
+
+- `--dry-run`: validate that the synthetic fixture is cache-eligible and that
+  the budgeted policies actually create token-selection pressure before any API
+  call is made.
+- `--replay <report.json>`: summarize previously recorded validation records and
+  re-run the claim audit without another provider call.
+- live mode with `--pricing` plus `OPENAI_API_KEY`: call the OpenAI Responses
+  API, persist raw records, compute request cost from a versioned pricing
+  snapshot, and grade structured JSON answers with deterministic checks.
+
+Run the fixture readiness check with:
+
+```bash
+.venv/bin/python -m agenvantage validate-provider --dry-run --summary
+```
+
+Run a live experiment only after creating a real pricing snapshot and exporting
+an API key:
+
+```bash
+cp examples/openai_pricing_template.json artifacts/openai-pricing.json
+$EDITOR artifacts/openai-pricing.json
+export OPENAI_API_KEY=...
+.venv/bin/python -m agenvantage validate-provider \
+  --pricing artifacts/openai-pricing.json \
+  --records artifacts/provider-validation.json \
+  --summary
+```
+
+The claim audit is intentionally conservative. Without enough measured requests,
+it should continue reporting that latency or broad quality-retention claims are
+not yet supported.

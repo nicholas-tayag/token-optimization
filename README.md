@@ -38,7 +38,11 @@ The current local workflow provides:
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and
 - a use-case benchmark that scores required behavioral observations against the
-  selected excerpts, not just file recall; and
+  selected excerpts, not just file recall;
+- an experimental `agenvantage validate-provider` workflow that can dry-run a
+  cache-eligible synthetic dataset locally, replay recorded provider results,
+  or collect OpenAI Responses API usage, latency, and deterministic grading
+  data when credentials and a pricing snapshot are supplied; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:
@@ -53,9 +57,8 @@ The experiment harness also provides:
 - optional OpenTelemetry spans for policy runs; and
 - a synthetic on-call incident scenario, with no private or employer data.
 
-It does **not** yet make model calls, measure real provider cache hits or
-billed cost, assess generated-answer quality, or represent a production
-enterprise system.
+It does **not** yet include checked-in provider-backed result artifacts, prove
+broad workload quality retention, or represent a production enterprise system.
 
 ## Quick Start
 
@@ -100,9 +103,16 @@ If `python` is not available, install Python 3.10+ or use
 ```bash
 agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
+agenvantage validate-provider --dry-run --summary
 agenvantage view --report artifacts/oncall-report.json
 make test
 ```
+
+`validate-provider --dry-run` now verifies that the synthetic provider-eval
+fixture is actually cache-eligible before any API spend. The current fixture
+contains six synthetic incidents, produces a `1066`-token stable prefix for
+cache-aligned runs, and applies enough budget pressure to reduce selected
+context by about `10.57%` on average in the dry run.
 
 ## Pack: your day-to-day token saver
 

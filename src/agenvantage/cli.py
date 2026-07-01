@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,14 @@ from typing import Any
 from agenvantage import __version__
 from agenvantage.config import PackConfig, load_pack_config
 from agenvantage.experiment import load_scenario, run_experiment
+from agenvantage.provider_validation import (
+    OpenAIResponsesTransport,
+    fixture_readiness_report,
+    load_pricing_snapshot,
+    load_provider_validation_dataset,
+    run_provider_validation,
+    summarize_provider_validation_records,
+)
 from agenvantage.presets import DEFAULT_PRESET, get_preset, preset_names
 from agenvantage.repo_context import (
     build_context_package,
@@ -24,6 +33,7 @@ from agenvantage.tokenizer import TokenCounter
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
 _DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
+_DEFAULT_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "provider_validation_cases.json"
 _DEFAULT_BUDGET = 360
 _DEFAULT_DEMO_OUTPUT = _PACKAGE_ROOT / "artifacts" / "oncall-report.json"
 _DEFAULT_PACK_BUDGET = 6000
@@ -114,6 +124,82 @@ def _parser() -> argparse.ArgumentParser:
         "--summary",
         action="store_true",
         help="Print a human-readable summary instead of raw JSON.",
+    )
+
+    validate_provider = subparsers.add_parser(
+        "validate-provider",
+        help="Run or summarize provider-backed validation for cost, latency, and quality claims.",
+        description=(
+            "Measure provider usage and deterministic answer quality across four policy "
+            "conditions, or summarize previously recorded results."
+        ),
+    )
+    validate_provider.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_PROVIDER_FIXTURE,
+        help=(
+            f"Provider-validation dataset JSON "
+            f"(default: {_DEFAULT_PROVIDER_FIXTURE.relative_to(_PACKAGE_ROOT)})."
+        ),
+    )
+    validate_provider.add_argument(
+        "--pricing",
+        type=Path,
+        help="Versioned pricing snapshot JSON used to compute request cost.",
+    )
+    validate_provider.add_argument(
+        "--records",
+        type=Path,
+        help="Optional JSON output path for raw request records and summary.",
+    )
+    validate_provider.add_argument(
+        "--replay",
+        type=Path,
+        help="Summarize a previously saved validation JSON report instead of calling a provider.",
+    )
+    validate_provider.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate fixture readiness locally without making provider calls.",
+    )
+    validate_provider.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a human-readable summary instead of raw JSON.",
+    )
+    validate_provider.add_argument(
+        "--model",
+        default="gpt-4o-mini",
+        help="Provider model identifier for live validation.",
+    )
+    validate_provider.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="Override the dataset budget for budgeted policy runs.",
+    )
+    validate_provider.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Number of times to run each case/policy combination.",
+    )
+    validate_provider.add_argument(
+        "--max-cases",
+        type=int,
+        default=None,
+        help="Optional limit on the number of dataset cases to run.",
+    )
+    validate_provider.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable holding the OpenAI API key.",
+    )
+    validate_provider.add_argument(
+        "--base-url",
+        default="https://api.openai.com/v1",
+        help="Responses API base URL.",
     )
 
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
@@ -276,6 +362,75 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
         lines.append("Top selected files:")
         for path, tokens in top_files:
             lines.append(f"  {tokens:>5} tok  {path}")
+    return "\n".join(lines)
+
+
+def _format_provider_validation_summary(report: dict[str, Any]) -> str:
+    lines = [
+        "AgenVantage provider validation",
+        "",
+        f"Dataset: {report.get('dataset_id') or 'replay'}",
+        f"Records: {report['record_count']}",
+        "",
+        "Policy metrics:",
+    ]
+    policies = report.get("policies", {})
+    for policy_name in (
+        "full_unaligned",
+        "full_cache_aligned",
+        "budgeted_unaligned",
+        "budgeted_cache_aligned",
+    ):
+        if policy_name not in policies:
+            continue
+        policy = policies[policy_name]
+        lines.append(
+            "  "
+            f"{policy_name:<22} "
+            f"n={policy['request_count']:<3} "
+            f"cost=${policy['mean_request_cost_usd']:.6f} "
+            f"p50={policy['p50_latency_ms']:.2f}ms "
+            f"cache_hit={policy['cache_hit_rate']:.2f} "
+            f"correct={policy['correctness_pass_rate']:.2f} "
+            f"grounded={policy['grounded_citation_pass_rate']:.2f} "
+            f"safe={policy['safety_pass_rate']:.2f}"
+        )
+
+    lines.extend(["", "Claim audit:"])
+    for claim_name, claim in report.get("claim_audit", {}).items():
+        status = "supported" if claim.get("supported") else "not yet supported"
+        lines.append(f"  {claim_name:<28} {status}  {claim.get('reason', '')}")
+
+    return "\n".join(lines)
+
+
+def _format_provider_fixture_summary(report: dict[str, Any]) -> str:
+    lines = [
+        "AgenVantage provider-validation fixture",
+        "",
+        f"Dataset: {report['dataset_id']}",
+        f"Cases: {report['case_count']}",
+        f"Budget: {report['budget']}",
+        (
+            "Cache-ready stable prefix: "
+            f"{report['average_cache_aligned_stable_prefix_tokens']} tokens "
+            f"(minimum target {report['minimum_cacheable_prefix_tokens']})"
+        ),
+        (
+            "Average budgeted reduction vs full: "
+            f"{report['average_budgeted_reduction_percent_vs_full']}%"
+        ),
+        "",
+        "Case readiness:",
+    ]
+    for case in report["cases"]:
+        lines.append(
+            "  "
+            f"{case['case_id']:<34} "
+            f"stable={case['cache_aligned_stable_prefix_tokens']:<7} "
+            f"budgeted={case['budgeted_cache_aligned_tokens']:<5} "
+            f"cache_ready={case['cache_eligible']}"
+        )
     return "\n".join(lines)
 
 
@@ -451,6 +606,63 @@ def _run_pack(args: argparse.Namespace) -> None:
                 print(notice)
 
 
+def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
+    counter = TokenCounter(args.model)
+
+    if args.replay is not None:
+        if not args.replay.is_file():
+            raise SystemExit(f"Replay report not found: {args.replay}")
+        replay_report = json.loads(args.replay.read_text(encoding="utf-8"))
+        report = summarize_provider_validation_records(
+            replay_report.get("records", []),
+            pricing=(
+                load_pricing_snapshot(args.pricing)
+                if args.pricing is not None
+                else None
+            ),
+        )
+    else:
+        if not args.fixture.is_file():
+            raise SystemExit(f"Provider-validation fixture not found: {args.fixture}")
+        dataset = load_provider_validation_dataset(args.fixture)
+        if args.dry_run:
+            report = fixture_readiness_report(dataset, counter, args.budget)
+        else:
+            pricing_path = args.pricing
+            if pricing_path is None:
+                raise SystemExit("Live provider validation requires --pricing.")
+            api_key = os.getenv(args.api_key_env)
+            if not api_key:
+                raise SystemExit(
+                    f"Live provider validation requires {args.api_key_env} to be set."
+                )
+            pricing = load_pricing_snapshot(pricing_path)
+            report = run_provider_validation(
+                dataset,
+                counter,
+                OpenAIResponsesTransport(api_key=api_key, base_url=args.base_url),
+                args.model,
+                pricing,
+                budget=args.budget,
+                repeats=args.repeats,
+                max_cases=args.max_cases,
+            )
+
+    if args.summary:
+        if args.dry_run and args.replay is None:
+            print(_format_provider_fixture_summary(report))
+        else:
+            print(_format_provider_validation_summary(report))
+    else:
+        print(json.dumps(report, indent=2))
+
+    if args.records is not None:
+        _write_report(report, args.records)
+        print(f"\nReport written to {args.records.resolve()}")
+
+    return report
+
+
 def main() -> None:
     args = _parser().parse_args()
     if args.command == "demo":
@@ -470,6 +682,9 @@ def main() -> None:
         return
     if args.command == "pack":
         _run_pack(args)
+        return
+    if args.command == "validate-provider":
+        _run_provider_validation(args)
         return
 
     _run_experiment(
