@@ -1,0 +1,255 @@
+{
+  "resource_pack_id": "agenvantage-proof-resources-2026-07-01",
+  "resources": [
+    {
+      "id": "otel-demo-docs",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenTelemetry Demo Docs",
+      "url": "https://opentelemetry.io/docs/demo/",
+      "why_it_matters": "Public, realistic incident scenarios and telemetry surfaces for end-to-end validation.",
+      "suggested_repo_task": "Expand provider validation from 6 synthetic incidents to 30+ public scenarios."
+    },
+    {
+      "id": "otel-demo-feature-flags",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenTelemetry Demo Feature Flags",
+      "url": "https://opentelemetry.io/docs/demo/feature-flags/",
+      "why_it_matters": "Provides reproducible failure modes for scenario generation.",
+      "suggested_repo_task": "Map feature flags to provider-validation case templates and labels."
+    },
+    {
+      "id": "otel-demo-repo",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P0",
+      "type": "github_repo",
+      "title": "OpenTelemetry Demo Repository",
+      "url": "https://github.com/open-telemetry/opentelemetry-demo",
+      "why_it_matters": "Runnable public workload for tracing and latency experiments.",
+      "suggested_repo_task": "Add local setup guidance or helper scripts for the demo."
+    },
+    {
+      "id": "repobench-paper",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P0",
+      "type": "paper",
+      "title": "RepoBench",
+      "url": "https://proceedings.iclr.cc/paper_files/paper/2024/file/d191ba4c8923ed8fd8935b7c98658b5f-Paper-Conference.pdf",
+      "why_it_matters": "Separates retrieval, completion, and full pipeline evaluation.",
+      "suggested_repo_task": "Mirror retrieval-only, answer-quality, and pipeline-level metrics in reports."
+    },
+    {
+      "id": "swe-bench",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P0",
+      "type": "github_repo",
+      "title": "SWE-bench",
+      "url": "https://github.com/swe-bench/SWE-bench",
+      "why_it_matters": "Recognized end-to-end software engineering benchmark with execution-based evaluation.",
+      "suggested_repo_task": "Test AgenVantage context packaging on a narrow SWE-bench slice."
+    },
+    {
+      "id": "repoqa-paper",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P1",
+      "type": "paper",
+      "title": "RepoQA",
+      "url": "https://arxiv.org/html/2406.06025v1",
+      "why_it_matters": "Long-context repository understanding benchmark for retrieval-style evaluation.",
+      "suggested_repo_task": "Add a retrieval-only benchmark mode modeled on RepoQA."
+    },
+    {
+      "id": "long-code-arena-paper",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P1",
+      "type": "paper",
+      "title": "Long Code Arena",
+      "url": "https://arxiv.org/abs/2406.11612",
+      "why_it_matters": "Project-wide code tasks broader than the current explanation-heavy benchmark.",
+      "suggested_repo_task": "Adopt one or two tasks that fit AgenVantage's scope."
+    },
+    {
+      "id": "long-code-arena-baselines",
+      "claim": "solved_agent_context_overload_end_to_end",
+      "priority": "P1",
+      "type": "github_repo",
+      "title": "Long Code Arena Baselines",
+      "url": "https://github.com/JetBrains-Research/lca-baselines",
+      "why_it_matters": "Baseline code and execution paths for public benchmark tasks.",
+      "suggested_repo_task": "Reuse baseline runners instead of creating custom evaluation loops from scratch."
+    },
+    {
+      "id": "openai-prompt-caching",
+      "claim": "proved_real_api_cost_savings",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Prompt Caching Guide",
+      "url": "https://developers.openai.com/api/docs/guides/prompt-caching",
+      "why_it_matters": "Defines official cache behavior, thresholds, and claim boundaries.",
+      "suggested_repo_task": "Record cached-token usage from live runs and keep fixtures above the threshold."
+    },
+    {
+      "id": "openai-pricing",
+      "claim": "proved_real_api_cost_savings",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Pricing",
+      "url": "https://developers.openai.com/api/docs/pricing",
+      "why_it_matters": "Provides official token prices for experiment cost calculations.",
+      "suggested_repo_task": "Replace the pricing template with dated experiment snapshots."
+    },
+    {
+      "id": "openai-cost-optimization",
+      "claim": "proved_real_api_cost_savings",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Cost Optimization Guide",
+      "url": "https://developers.openai.com/api/docs/guides/cost-optimization",
+      "why_it_matters": "Connects request reduction and token reduction to cost and latency.",
+      "suggested_repo_task": "Report whether savings come from fewer tokens, fewer requests, or both."
+    },
+    {
+      "id": "openai-prompt-caching-201",
+      "claim": "proved_real_api_cost_savings",
+      "priority": "P0",
+      "type": "cookbook",
+      "title": "OpenAI Prompt Caching 201",
+      "url": "https://developers.openai.com/cookbook/examples/prompt_caching_201",
+      "why_it_matters": "Practical cache-hit optimization patterns beyond the basic guide.",
+      "suggested_repo_task": "Compare AgenVantage prompt layout with official cache-hit patterns."
+    },
+    {
+      "id": "openai-costs-api",
+      "claim": "proved_real_api_cost_savings",
+      "priority": "P0",
+      "type": "api_reference",
+      "title": "OpenAI Costs API Reference",
+      "url": "https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs/",
+      "why_it_matters": "Supports reconciliation between experiment-level and organization-level cost records.",
+      "suggested_repo_task": "Add a reconciliation or replay mode for live experiment artifacts."
+    },
+    {
+      "id": "openai-latency-optimization",
+      "claim": "proved_latency_improvements_in_production",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Latency Optimization Guide",
+      "url": "https://developers.openai.com/api/docs/guides/latency-optimization",
+      "why_it_matters": "Defines official latency optimization principles and measurement language.",
+      "suggested_repo_task": "Report measured request latency deltas instead of generic speed claims."
+    },
+    {
+      "id": "openai-production-best-practices",
+      "claim": "proved_latency_improvements_in_production",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Production Best Practices",
+      "url": "https://developers.openai.com/api/docs/guides/production-best-practices",
+      "why_it_matters": "Sets the production bar for deployment, security, and environment handling.",
+      "suggested_repo_task": "Separate local synthetic experiments from production-scoped telemetry."
+    },
+    {
+      "id": "otel-genai-registry",
+      "claim": "proved_latency_improvements_in_production",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenTelemetry GenAI Registry Attributes",
+      "url": "https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/",
+      "why_it_matters": "Defines portable fields for token and cache telemetry.",
+      "suggested_repo_task": "Emit GenAI usage and cache fields in live experiment records."
+    },
+    {
+      "id": "otel-genai-semconv-repo",
+      "claim": "proved_latency_improvements_in_production",
+      "priority": "P0",
+      "type": "github_repo",
+      "title": "OpenTelemetry GenAI Semantic Conventions Repository",
+      "url": "https://github.com/open-telemetry/semantic-conventions-genai",
+      "why_it_matters": "Tracks the evolving telemetry spec for GenAI systems.",
+      "suggested_repo_task": "Pin semantic-convention versions in reports and instrumentation."
+    },
+    {
+      "id": "openai-eval-best-practices",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Evaluation Best Practices",
+      "url": "https://developers.openai.com/api/docs/guides/evaluation-best-practices",
+      "why_it_matters": "Guides eval design for variable model behavior and production workflows.",
+      "suggested_repo_task": "Formalize grader design, tolerances, and sample-size requirements."
+    },
+    {
+      "id": "openai-agent-evals",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Evaluate Agent Workflows",
+      "url": "https://developers.openai.com/api/docs/guides/agent-evals",
+      "why_it_matters": "Focuses on traces, graders, datasets, and eval runs for agent workflows.",
+      "suggested_repo_task": "Map provider validation into an agent-style evaluation surface."
+    },
+    {
+      "id": "openai-evals-guide",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "official_docs",
+      "title": "OpenAI Evals Guide",
+      "url": "https://developers.openai.com/api/docs/guides/evals",
+      "why_it_matters": "Provides the programmatic eval flow on the platform.",
+      "suggested_repo_task": "Decide between hosted evals and fully local reproducible evals."
+    },
+    {
+      "id": "openai-evals-repo",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "github_repo",
+      "title": "OpenAI Evals Repository",
+      "url": "https://github.com/openai/evals",
+      "why_it_matters": "Offers reference patterns for dataset and grader organization.",
+      "suggested_repo_task": "Borrow local eval layout patterns without depending on hosted deprecating surfaces."
+    },
+    {
+      "id": "coderag-bench-paper",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "paper",
+      "title": "CodeRAG-Bench",
+      "url": "https://arxiv.org/abs/2406.14497",
+      "why_it_matters": "Directly studies when retrieval improves downstream code generation and where it fails.",
+      "suggested_repo_task": "Test whether AgenVantage context packaging preserves downstream generation quality."
+    },
+    {
+      "id": "coderag-bench-repo",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P0",
+      "type": "github_repo",
+      "title": "CodeRAG-Bench Repository",
+      "url": "https://github.com/code-rag-bench/code-rag-bench",
+      "why_it_matters": "Includes retrieval, generation, and execution-based evaluation code.",
+      "suggested_repo_task": "Adapt repository-level tasks as downstream AgenVantage validation targets."
+    },
+    {
+      "id": "coderepoqa-paper",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P1",
+      "type": "paper",
+      "title": "CodeRepoQA",
+      "url": "https://arxiv.org/pdf/2412.14764",
+      "why_it_matters": "Repository-level QA benchmark close to AgenVantage's current explanation-heavy scope.",
+      "suggested_repo_task": "Compare current answer-rubric evaluation against larger QA-style benchmarks."
+    },
+    {
+      "id": "swe-bench-verified",
+      "claim": "proved_downstream_model_answer_quality_retention_across_broad_workloads",
+      "priority": "P1",
+      "type": "benchmark_site",
+      "title": "SWE-bench Verified",
+      "url": "https://www.swebench.com/verified.html",
+      "why_it_matters": "Human-filtered end-to-end benchmark for stronger public proof.",
+      "suggested_repo_task": "Use a narrow Verified slice once provider validation is stable."
+    }
+  ]
+}

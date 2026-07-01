@@ -38,3 +38,9 @@
 - Show a better p50 than full_unaligned with enough production requests.
 - Run provider validation across at least 30 distinct cases and 6 or more failure types.
 - Show no material regression in correctness, safety, and grounded citation pass rates.
+
+## Resource Pack
+
+- See [proof-resource-pack.md](./proof-resource-pack.md) for the external docs,
+  papers, and benchmark repositories that most directly unblock these four
+  unsupported claims.

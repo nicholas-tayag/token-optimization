@@ -91,3 +91,9 @@ what the repository can honestly claim today, run:
 That command reads the checked use-case artifact, inspects the provider
 fixture, optionally summarizes a saved provider-validation artifact, and writes
 [docs/claim-status.md](../docs/claim-status.md).
+
+For the external docs, papers, and repositories that most directly unblock the
+currently unsupported claims, see
+[docs/proof-resource-pack.md](../docs/proof-resource-pack.md) and the
+machine-readable manifest
+[examples/proof_resources.json](../examples/proof_resources.json).
