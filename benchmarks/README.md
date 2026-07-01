@@ -62,6 +62,14 @@ Run the fixture readiness check with:
 .venv/bin/python -m agenvantage validate-provider --dry-run --summary
 ```
 
+The checked synthetic fixture now contains `30` distinct cases across `6`
+failure types, which means the broad-workload sample-width precondition is
+available locally before any live provider run. Regenerate it with:
+
+```bash
+.venv/bin/python scripts/generate_provider_validation_cases.py
+```
+
 Run a live experiment only after creating a real pricing snapshot and exporting
 an API key:
 

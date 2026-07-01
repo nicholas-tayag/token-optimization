@@ -65,9 +65,9 @@
   ],
   "cases": [
     {
-      "case_id": "checkout-payment-connectivity",
+      "case_id": "checkout-payment-connectivity-a",
       "failure_type": "payment_service_unreachable",
-      "description": "Checkout latency and payment timeout incident.",
+      "description": "Checkout latency and payment timeout incident. Variant a.",
       "components": [
         {
           "id": "case1-user-request",
@@ -76,7 +76,7 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "Investigate why checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
+          "text": "Investigate the latest incident and identify the first service to inspect. Checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
         },
         {
           "id": "case1-metric-checkout",
@@ -85,7 +85,7 @@
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute."
+          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute. The symptom appeared suddenly during the most recent window."
         },
         {
           "id": "case1-trace-payment",
@@ -94,7 +94,7 @@
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned."
+          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned. The error pattern lines up with the primary suspected cause."
         },
         {
           "id": "case1-distractor-catalog",
@@ -103,23 +103,31 @@
           "stable": false,
           "priority": 15,
           "relevance": 0.12,
-          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency."
+          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency. A prior unrelated incident should not change the diagnosis."
         }
       ],
       "expectation": {
         "affected_service": "checkoutservice",
         "suspected_failure": "payment_service_unreachable",
-        "required_evidence_component_ids": ["case1-metric-checkout", "case1-trace-payment"],
-        "recommended_next_action_any_of": ["verify paymentservice connectivity", "inspect paymentservice endpoint health"],
+        "required_evidence_component_ids": [
+          "case1-metric-checkout",
+          "case1-trace-payment"
+        ],
+        "recommended_next_action_any_of": [
+          "verify paymentservice connectivity",
+          "inspect paymentservice endpoint health"
+        ],
         "requires_approval": true,
         "expected_tool": "query_metrics",
-        "expected_tool_argument_terms": ["paymentservice"]
+        "expected_tool_argument_terms": [
+          "paymentservice"
+        ]
       }
     },
     {
-      "case_id": "storefront-product-catalog-failure",
-      "failure_type": "product_catalog_failure",
-      "description": "Storefront product grid fails because product catalog requests error.",
+      "case_id": "checkout-payment-connectivity-b",
+      "failure_type": "payment_service_unreachable",
+      "description": "Checkout latency and payment timeout incident. Variant b.",
       "components": [
         {
           "id": "case2-user-request",
@@ -128,50 +136,58 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
+          "text": "A responder needs a grounded diagnosis with the safest next step. Checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
         },
         {
-          "id": "case2-frontend-metric",
+          "id": "case2-metric-checkout",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests."
+          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute. The main service metrics changed sharply with stable background traffic."
         },
         {
-          "id": "case2-catalog-log",
+          "id": "case2-trace-payment",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built."
+          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned. Logs and traces both point at the same failure mechanism."
         },
         {
-          "id": "case2-distractor-recommendation",
+          "id": "case2-distractor-catalog",
           "kind": "memory",
           "required": false,
           "stable": false,
-          "priority": 18,
-          "relevance": 0.15,
-          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid."
+          "priority": 15,
+          "relevance": 0.12,
+          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency. Historical noise exists but does not match the timing here."
         }
       ],
       "expectation": {
-        "affected_service": "productcatalogservice",
-        "suspected_failure": "product_catalog_failure",
-        "required_evidence_component_ids": ["case2-frontend-metric", "case2-catalog-log"],
-        "recommended_next_action_any_of": ["inspect productcatalogservice error metrics", "review productcatalogservice dependency errors"],
+        "affected_service": "checkoutservice",
+        "suspected_failure": "payment_service_unreachable",
+        "required_evidence_component_ids": [
+          "case2-metric-checkout",
+          "case2-trace-payment"
+        ],
+        "recommended_next_action_any_of": [
+          "verify paymentservice connectivity",
+          "inspect paymentservice endpoint health"
+        ],
         "requires_approval": true,
-        "expected_tool": "search_logs",
-        "expected_tool_argument_terms": ["productcatalogservice"]
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "paymentservice"
+        ]
       }
     },
     {
-      "case_id": "recommendation-cache-regression",
-      "failure_type": "recommendation_service_cache_failure",
-      "description": "Recommendation latency spike traced to cache behavior.",
+      "case_id": "checkout-payment-connectivity-c",
+      "failure_type": "payment_service_unreachable",
+      "description": "Checkout latency and payment timeout incident. Variant c.",
       "components": [
         {
           "id": "case3-user-request",
@@ -180,50 +196,58 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+          "text": "Summarize the incident packet and choose the best failure label. Checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
         },
         {
-          "id": "case3-cache-metric",
+          "id": "case3-metric-checkout",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s."
+          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute. The onset correlates tightly with a single suspicious shift."
         },
         {
-          "id": "case3-flag-state",
+          "id": "case3-trace-payment",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout."
+          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned. The packet contains direct evidence of the likely source of failure."
         },
         {
-          "id": "case3-distractor-checkout",
+          "id": "case3-distractor-catalog",
           "kind": "memory",
           "required": false,
           "stable": false,
-          "priority": 16,
-          "relevance": 0.14,
-          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet."
+          "priority": 15,
+          "relevance": 0.12,
+          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency. An unrelated subsystem changed recently without matching symptoms."
         }
       ],
       "expectation": {
-        "affected_service": "recommendationservice",
-        "suspected_failure": "recommendation_service_cache_failure",
-        "required_evidence_component_ids": ["case3-cache-metric", "case3-flag-state"],
-        "recommended_next_action_any_of": ["check the recommendation-cache-fallback feature flag", "verify cache behavior for recommendationservice"],
+        "affected_service": "checkoutservice",
+        "suspected_failure": "payment_service_unreachable",
+        "required_evidence_component_ids": [
+          "case3-metric-checkout",
+          "case3-trace-payment"
+        ],
+        "recommended_next_action_any_of": [
+          "verify paymentservice connectivity",
+          "inspect paymentservice endpoint health"
+        ],
         "requires_approval": true,
-        "expected_tool": "get_feature_flag",
-        "expected_tool_argument_terms": ["recommendation-cache-fallback"]
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "paymentservice"
+        ]
       }
     },
     {
-      "case_id": "cart-service-errors",
-      "failure_type": "cart_service_failure",
-      "description": "Cart retrieval and add-to-cart failures isolated to cartservice.",
+      "case_id": "checkout-payment-connectivity-d",
+      "failure_type": "payment_service_unreachable",
+      "description": "Checkout latency and payment timeout incident. Variant d.",
       "components": [
         {
           "id": "case4-user-request",
@@ -232,50 +256,58 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. Checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
         },
         {
-          "id": "case4-frontend-cart-metric",
+          "id": "case4-metric-checkout",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests."
+          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute. Operational metrics show a clear regression in the affected path."
         },
         {
-          "id": "case4-cart-log",
+          "id": "case4-trace-payment",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built."
+          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned. Supporting evidence narrows the likely mechanism rather than the symptom alone."
         },
         {
-          "id": "case4-distractor-kafka",
+          "id": "case4-distractor-catalog",
           "kind": "memory",
           "required": false,
           "stable": false,
-          "priority": 12,
-          "relevance": 0.1,
-          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline."
+          "priority": 15,
+          "relevance": 0.12,
+          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency. A separate earlier event is present only as a distractor."
         }
       ],
       "expectation": {
-        "affected_service": "cartservice",
-        "suspected_failure": "cart_service_failure",
-        "required_evidence_component_ids": ["case4-frontend-cart-metric", "case4-cart-log"],
-        "recommended_next_action_any_of": ["inspect cartservice error logs", "query cartservice failure metrics"],
+        "affected_service": "checkoutservice",
+        "suspected_failure": "payment_service_unreachable",
+        "required_evidence_component_ids": [
+          "case4-metric-checkout",
+          "case4-trace-payment"
+        ],
+        "recommended_next_action_any_of": [
+          "verify paymentservice connectivity",
+          "inspect paymentservice endpoint health"
+        ],
         "requires_approval": true,
-        "expected_tool": "search_logs",
-        "expected_tool_argument_terms": ["cartservice"]
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "paymentservice"
+        ]
       }
     },
     {
-      "case_id": "queue-backlog-kafka",
-      "failure_type": "kafka_queue_problems",
-      "description": "Delayed async processing explained by queue backlog.",
+      "case_id": "checkout-payment-connectivity-e",
+      "failure_type": "payment_service_unreachable",
+      "description": "Checkout latency and payment timeout incident. Variant e.",
       "components": [
         {
           "id": "case5-user-request",
@@ -284,50 +316,58 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+          "text": "Use the packet to choose the most precise grounded explanation. Checkout requests started timing out during the last twenty minutes. Name the first service to inspect, choose the best failure label, cite the strongest packet evidence, and recommend the safest next action."
         },
         {
-          "id": "case5-queue-metric",
+          "id": "case5-metric-checkout",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply."
+          "text": "Metric snapshot: checkoutservice p95 latency rose from 240 ms to 1.9 s at 14:04 UTC. Timeout rate climbed from 0.3% to 7.4% over the same window. paymentservice client timeout count from checkoutservice increased from 1 per minute to 58 per minute. The primary telemetry change isolates the affected behavior cleanly."
         },
         {
-          "id": "case5-broker-log",
+          "id": "case5-trace-payment",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated."
+          "text": "Trace excerpt: checkoutservice span batch shows repeated upstream connect timeout errors when calling paymentservice: Connection timed out after 3s; no paymentservice business error payload returned. Correlated logs, traces, or rollout data reinforce the same conclusion."
         },
         {
-          "id": "case5-distractor-product",
+          "id": "case5-distractor-catalog",
           "kind": "memory",
           "required": false,
           "stable": false,
-          "priority": 10,
-          "relevance": 0.08,
-          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes."
+          "priority": 15,
+          "relevance": 0.12,
+          "text": "Earlier this week a productcatalogservice image resize job raised CPU usage on the storefront search page. That event resolved after lowering batch concurrency. Additional context is intentionally noisy and should not be cited."
         }
       ],
       "expectation": {
-        "affected_service": "event-processing",
-        "suspected_failure": "kafka_queue_problems",
-        "required_evidence_component_ids": ["case5-queue-metric", "case5-broker-log"],
-        "recommended_next_action_any_of": ["inspect Kafka broker health", "query queue lag metrics for the event-processing worker"],
+        "affected_service": "checkoutservice",
+        "suspected_failure": "payment_service_unreachable",
+        "required_evidence_component_ids": [
+          "case5-metric-checkout",
+          "case5-trace-payment"
+        ],
+        "recommended_next_action_any_of": [
+          "verify paymentservice connectivity",
+          "inspect paymentservice endpoint health"
+        ],
         "requires_approval": true,
         "expected_tool": "query_metrics",
-        "expected_tool_argument_terms": ["event-processing"]
+        "expected_tool_argument_terms": [
+          "paymentservice"
+        ]
       }
     },
     {
-      "case_id": "checkout-readiness-rollout",
-      "failure_type": "failed_readiness_probe",
-      "description": "Checkout rollout leaves pods unready after deploy.",
+      "case_id": "storefront-product-catalog-failure-a",
+      "failure_type": "product_catalog_failure",
+      "description": "Storefront product grid fails because product catalog requests error. Variant a.",
       "components": [
         {
           "id": "case6-user-request",
@@ -336,44 +376,1492 @@
           "stable": false,
           "priority": 100,
           "relevance": 1.0,
-          "text": "A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+          "text": "Investigate the latest incident and identify the first service to inspect. The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
         },
         {
-          "id": "case6-deploy-summary",
+          "id": "case6-frontend-metric",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 96,
           "relevance": 0.99,
-          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window."
+          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests. The symptom appeared suddenly during the most recent window."
         },
         {
-          "id": "case6-readiness-log",
+          "id": "case6-catalog-log",
           "kind": "retrieval",
           "required": false,
           "stable": false,
           "priority": 95,
           "relevance": 0.98,
-          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set."
+          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built. The error pattern lines up with the primary suspected cause."
         },
         {
           "id": "case6-distractor-recommendation",
           "kind": "memory",
           "required": false,
           "stable": false,
+          "priority": 18,
+          "relevance": 0.15,
+          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid. A prior unrelated incident should not change the diagnosis."
+        }
+      ],
+      "expectation": {
+        "affected_service": "productcatalogservice",
+        "suspected_failure": "product_catalog_failure",
+        "required_evidence_component_ids": [
+          "case6-frontend-metric",
+          "case6-catalog-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect productcatalogservice error metrics",
+          "review productcatalogservice dependency errors"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "productcatalogservice"
+        ]
+      }
+    },
+    {
+      "case_id": "storefront-product-catalog-failure-b",
+      "failure_type": "product_catalog_failure",
+      "description": "Storefront product grid fails because product catalog requests error. Variant b.",
+      "components": [
+        {
+          "id": "case7-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "A responder needs a grounded diagnosis with the safest next step. The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
+        },
+        {
+          "id": "case7-frontend-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests. The main service metrics changed sharply with stable background traffic."
+        },
+        {
+          "id": "case7-catalog-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case7-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 18,
+          "relevance": 0.15,
+          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid. Historical noise exists but does not match the timing here."
+        }
+      ],
+      "expectation": {
+        "affected_service": "productcatalogservice",
+        "suspected_failure": "product_catalog_failure",
+        "required_evidence_component_ids": [
+          "case7-frontend-metric",
+          "case7-catalog-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect productcatalogservice error metrics",
+          "review productcatalogservice dependency errors"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "productcatalogservice"
+        ]
+      }
+    },
+    {
+      "case_id": "storefront-product-catalog-failure-c",
+      "failure_type": "product_catalog_failure",
+      "description": "Storefront product grid fails because product catalog requests error. Variant c.",
+      "components": [
+        {
+          "id": "case8-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Summarize the incident packet and choose the best failure label. The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
+        },
+        {
+          "id": "case8-frontend-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests. The onset correlates tightly with a single suspicious shift."
+        },
+        {
+          "id": "case8-catalog-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case8-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 18,
+          "relevance": 0.15,
+          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid. An unrelated subsystem changed recently without matching symptoms."
+        }
+      ],
+      "expectation": {
+        "affected_service": "productcatalogservice",
+        "suspected_failure": "product_catalog_failure",
+        "required_evidence_component_ids": [
+          "case8-frontend-metric",
+          "case8-catalog-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect productcatalogservice error metrics",
+          "review productcatalogservice dependency errors"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "productcatalogservice"
+        ]
+      }
+    },
+    {
+      "case_id": "storefront-product-catalog-failure-d",
+      "failure_type": "product_catalog_failure",
+      "description": "Storefront product grid fails because product catalog requests error. Variant d.",
+      "components": [
+        {
+          "id": "case9-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
+        },
+        {
+          "id": "case9-frontend-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests. Operational metrics show a clear regression in the affected path."
+        },
+        {
+          "id": "case9-catalog-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case9-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 18,
+          "relevance": 0.15,
+          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid. A separate earlier event is present only as a distractor."
+        }
+      ],
+      "expectation": {
+        "affected_service": "productcatalogservice",
+        "suspected_failure": "product_catalog_failure",
+        "required_evidence_component_ids": [
+          "case9-frontend-metric",
+          "case9-catalog-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect productcatalogservice error metrics",
+          "review productcatalogservice dependency errors"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "productcatalogservice"
+        ]
+      }
+    },
+    {
+      "case_id": "storefront-product-catalog-failure-e",
+      "failure_type": "product_catalog_failure",
+      "description": "Storefront product grid fails because product catalog requests error. Variant e.",
+      "components": [
+        {
+          "id": "case10-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Use the packet to choose the most precise grounded explanation. The storefront is serving an empty product grid. Determine the most likely root service, select the best failure label, cite evidence ids, and recommend a safe next read-only step."
+        },
+        {
+          "id": "case10-frontend-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy error rate for /api/products rose from 0.2% to 18.6% at 09:11 UTC. Downstream call errors to productcatalogservice account for 96% of the failing requests. The primary telemetry change isolates the affected behavior cleanly."
+        },
+        {
+          "id": "case10-catalog-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from productcatalogservice: failed to load products: upstream storage request returned 500; request aborted before response body was built. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case10-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 18,
+          "relevance": 0.15,
+          "text": "A month ago, recommendationservice returned stale items after a cache warmup issue. That incident did not affect the main product grid. Additional context is intentionally noisy and should not be cited."
+        }
+      ],
+      "expectation": {
+        "affected_service": "productcatalogservice",
+        "suspected_failure": "product_catalog_failure",
+        "required_evidence_component_ids": [
+          "case10-frontend-metric",
+          "case10-catalog-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect productcatalogservice error metrics",
+          "review productcatalogservice dependency errors"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "productcatalogservice"
+        ]
+      }
+    },
+    {
+      "case_id": "recommendation-cache-regression-a",
+      "failure_type": "recommendation_service_cache_failure",
+      "description": "Recommendation latency spike traced to cache behavior. Variant a.",
+      "components": [
+        {
+          "id": "case11-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Investigate the latest incident and identify the first service to inspect. Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+        },
+        {
+          "id": "case11-cache-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s. The symptom appeared suddenly during the most recent window."
+        },
+        {
+          "id": "case11-flag-state",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout. The error pattern lines up with the primary suspected cause."
+        },
+        {
+          "id": "case11-distractor-checkout",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 16,
+          "relevance": 0.14,
+          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet. A prior unrelated incident should not change the diagnosis."
+        }
+      ],
+      "expectation": {
+        "affected_service": "recommendationservice",
+        "suspected_failure": "recommendation_service_cache_failure",
+        "required_evidence_component_ids": [
+          "case11-cache-metric",
+          "case11-flag-state"
+        ],
+        "recommended_next_action_any_of": [
+          "check the recommendation-cache-fallback feature flag",
+          "verify cache behavior for recommendationservice"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_feature_flag",
+        "expected_tool_argument_terms": [
+          "recommendation-cache-fallback"
+        ]
+      }
+    },
+    {
+      "case_id": "recommendation-cache-regression-b",
+      "failure_type": "recommendation_service_cache_failure",
+      "description": "Recommendation latency spike traced to cache behavior. Variant b.",
+      "components": [
+        {
+          "id": "case12-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "A responder needs a grounded diagnosis with the safest next step. Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+        },
+        {
+          "id": "case12-cache-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s. The main service metrics changed sharply with stable background traffic."
+        },
+        {
+          "id": "case12-flag-state",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case12-distractor-checkout",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 16,
+          "relevance": 0.14,
+          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet. Historical noise exists but does not match the timing here."
+        }
+      ],
+      "expectation": {
+        "affected_service": "recommendationservice",
+        "suspected_failure": "recommendation_service_cache_failure",
+        "required_evidence_component_ids": [
+          "case12-cache-metric",
+          "case12-flag-state"
+        ],
+        "recommended_next_action_any_of": [
+          "check the recommendation-cache-fallback feature flag",
+          "verify cache behavior for recommendationservice"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_feature_flag",
+        "expected_tool_argument_terms": [
+          "recommendation-cache-fallback"
+        ]
+      }
+    },
+    {
+      "case_id": "recommendation-cache-regression-c",
+      "failure_type": "recommendation_service_cache_failure",
+      "description": "Recommendation latency spike traced to cache behavior. Variant c.",
+      "components": [
+        {
+          "id": "case13-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Summarize the incident packet and choose the best failure label. Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+        },
+        {
+          "id": "case13-cache-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s. The onset correlates tightly with a single suspicious shift."
+        },
+        {
+          "id": "case13-flag-state",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case13-distractor-checkout",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 16,
+          "relevance": 0.14,
+          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet. An unrelated subsystem changed recently without matching symptoms."
+        }
+      ],
+      "expectation": {
+        "affected_service": "recommendationservice",
+        "suspected_failure": "recommendation_service_cache_failure",
+        "required_evidence_component_ids": [
+          "case13-cache-metric",
+          "case13-flag-state"
+        ],
+        "recommended_next_action_any_of": [
+          "check the recommendation-cache-fallback feature flag",
+          "verify cache behavior for recommendationservice"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_feature_flag",
+        "expected_tool_argument_terms": [
+          "recommendation-cache-fallback"
+        ]
+      }
+    },
+    {
+      "case_id": "recommendation-cache-regression-d",
+      "failure_type": "recommendation_service_cache_failure",
+      "description": "Recommendation latency spike traced to cache behavior. Variant d.",
+      "components": [
+        {
+          "id": "case14-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+        },
+        {
+          "id": "case14-cache-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s. Operational metrics show a clear regression in the affected path."
+        },
+        {
+          "id": "case14-flag-state",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case14-distractor-checkout",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 16,
+          "relevance": 0.14,
+          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet. A separate earlier event is present only as a distractor."
+        }
+      ],
+      "expectation": {
+        "affected_service": "recommendationservice",
+        "suspected_failure": "recommendation_service_cache_failure",
+        "required_evidence_component_ids": [
+          "case14-cache-metric",
+          "case14-flag-state"
+        ],
+        "recommended_next_action_any_of": [
+          "check the recommendation-cache-fallback feature flag",
+          "verify cache behavior for recommendationservice"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_feature_flag",
+        "expected_tool_argument_terms": [
+          "recommendation-cache-fallback"
+        ]
+      }
+    },
+    {
+      "case_id": "recommendation-cache-regression-e",
+      "failure_type": "recommendation_service_cache_failure",
+      "description": "Recommendation latency spike traced to cache behavior. Variant e.",
+      "components": [
+        {
+          "id": "case15-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Use the packet to choose the most precise grounded explanation. Recommendation widgets became slow and intermittently empty after a config change. Identify the service to inspect first, choose the best failure label, cite evidence ids, and recommend the safest next action."
+        },
+        {
+          "id": "case15-cache-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: recommendationservice cache hit ratio dropped from 0.93 to 0.07 at 17:20 UTC while request volume stayed flat. Latency rose from 85 ms to 1.2 s. The primary telemetry change isolates the affected behavior cleanly."
+        },
+        {
+          "id": "case15-flag-state",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Feature flag state: recommendation-cache-fallback was disabled at 17:18 UTC during a configuration rollout. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case15-distractor-checkout",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 16,
+          "relevance": 0.14,
+          "text": "checkoutservice recently introduced a new synthetic payment retry metric. No checkout latency regression is present in the packet. Additional context is intentionally noisy and should not be cited."
+        }
+      ],
+      "expectation": {
+        "affected_service": "recommendationservice",
+        "suspected_failure": "recommendation_service_cache_failure",
+        "required_evidence_component_ids": [
+          "case15-cache-metric",
+          "case15-flag-state"
+        ],
+        "recommended_next_action_any_of": [
+          "check the recommendation-cache-fallback feature flag",
+          "verify cache behavior for recommendationservice"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_feature_flag",
+        "expected_tool_argument_terms": [
+          "recommendation-cache-fallback"
+        ]
+      }
+    },
+    {
+      "case_id": "cart-service-errors-a",
+      "failure_type": "cart_service_failure",
+      "description": "Cart retrieval and add-to-cart failures isolated to cartservice. Variant a.",
+      "components": [
+        {
+          "id": "case16-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Investigate the latest incident and identify the first service to inspect. Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+        },
+        {
+          "id": "case16-frontend-cart-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests. The symptom appeared suddenly during the most recent window."
+        },
+        {
+          "id": "case16-cart-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built. The error pattern lines up with the primary suspected cause."
+        },
+        {
+          "id": "case16-distractor-kafka",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 12,
+          "relevance": 0.1,
+          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline. A prior unrelated incident should not change the diagnosis."
+        }
+      ],
+      "expectation": {
+        "affected_service": "cartservice",
+        "suspected_failure": "cart_service_failure",
+        "required_evidence_component_ids": [
+          "case16-frontend-cart-metric",
+          "case16-cart-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect cartservice error logs",
+          "query cartservice failure metrics"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "cartservice"
+        ]
+      }
+    },
+    {
+      "case_id": "cart-service-errors-b",
+      "failure_type": "cart_service_failure",
+      "description": "Cart retrieval and add-to-cart failures isolated to cartservice. Variant b.",
+      "components": [
+        {
+          "id": "case17-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "A responder needs a grounded diagnosis with the safest next step. Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+        },
+        {
+          "id": "case17-frontend-cart-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests. The main service metrics changed sharply with stable background traffic."
+        },
+        {
+          "id": "case17-cart-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case17-distractor-kafka",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 12,
+          "relevance": 0.1,
+          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline. Historical noise exists but does not match the timing here."
+        }
+      ],
+      "expectation": {
+        "affected_service": "cartservice",
+        "suspected_failure": "cart_service_failure",
+        "required_evidence_component_ids": [
+          "case17-frontend-cart-metric",
+          "case17-cart-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect cartservice error logs",
+          "query cartservice failure metrics"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "cartservice"
+        ]
+      }
+    },
+    {
+      "case_id": "cart-service-errors-c",
+      "failure_type": "cart_service_failure",
+      "description": "Cart retrieval and add-to-cart failures isolated to cartservice. Variant c.",
+      "components": [
+        {
+          "id": "case18-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Summarize the incident packet and choose the best failure label. Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+        },
+        {
+          "id": "case18-frontend-cart-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests. The onset correlates tightly with a single suspicious shift."
+        },
+        {
+          "id": "case18-cart-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case18-distractor-kafka",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 12,
+          "relevance": 0.1,
+          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline. An unrelated subsystem changed recently without matching symptoms."
+        }
+      ],
+      "expectation": {
+        "affected_service": "cartservice",
+        "suspected_failure": "cart_service_failure",
+        "required_evidence_component_ids": [
+          "case18-frontend-cart-metric",
+          "case18-cart-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect cartservice error logs",
+          "query cartservice failure metrics"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "cartservice"
+        ]
+      }
+    },
+    {
+      "case_id": "cart-service-errors-d",
+      "failure_type": "cart_service_failure",
+      "description": "Cart retrieval and add-to-cart failures isolated to cartservice. Variant d.",
+      "components": [
+        {
+          "id": "case19-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+        },
+        {
+          "id": "case19-frontend-cart-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests. Operational metrics show a clear regression in the affected path."
+        },
+        {
+          "id": "case19-cart-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case19-distractor-kafka",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 12,
+          "relevance": 0.1,
+          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline. A separate earlier event is present only as a distractor."
+        }
+      ],
+      "expectation": {
+        "affected_service": "cartservice",
+        "suspected_failure": "cart_service_failure",
+        "required_evidence_component_ids": [
+          "case19-frontend-cart-metric",
+          "case19-cart-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect cartservice error logs",
+          "query cartservice failure metrics"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "cartservice"
+        ]
+      }
+    },
+    {
+      "case_id": "cart-service-errors-e",
+      "failure_type": "cart_service_failure",
+      "description": "Cart retrieval and add-to-cart failures isolated to cartservice. Variant e.",
+      "components": [
+        {
+          "id": "case20-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Use the packet to choose the most precise grounded explanation. Users cannot add items to cart or load an existing cart. Identify the most likely failing service, choose the best failure label, cite evidence ids, and recommend the safest next read-only step."
+        },
+        {
+          "id": "case20-frontend-cart-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: frontendproxy /api/cart error rate jumped to 22% at 12:44 UTC. Downstream cartservice 5xx responses account for nearly all failed cart requests. The primary telemetry change isolates the affected behavior cleanly."
+        },
+        {
+          "id": "case20-cart-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "cartservice log excerpt: unable to read session cart record; backend storage returned 500 and the request was aborted before cart state could be built. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case20-distractor-kafka",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 12,
+          "relevance": 0.1,
+          "text": "Kafka consumer lag was elevated during a marketing-event replay yesterday, but cart requests were healthy and the lag has returned to baseline. Additional context is intentionally noisy and should not be cited."
+        }
+      ],
+      "expectation": {
+        "affected_service": "cartservice",
+        "suspected_failure": "cart_service_failure",
+        "required_evidence_component_ids": [
+          "case20-frontend-cart-metric",
+          "case20-cart-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect cartservice error logs",
+          "query cartservice failure metrics"
+        ],
+        "requires_approval": true,
+        "expected_tool": "search_logs",
+        "expected_tool_argument_terms": [
+          "cartservice"
+        ]
+      }
+    },
+    {
+      "case_id": "queue-backlog-kafka-a",
+      "failure_type": "kafka_queue_problems",
+      "description": "Delayed async processing explained by queue backlog. Variant a.",
+      "components": [
+        {
+          "id": "case21-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Investigate the latest incident and identify the first service to inspect. Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+        },
+        {
+          "id": "case21-queue-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply. The symptom appeared suddenly during the most recent window."
+        },
+        {
+          "id": "case21-broker-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated. The error pattern lines up with the primary suspected cause."
+        },
+        {
+          "id": "case21-distractor-product",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 10,
+          "relevance": 0.08,
+          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes. A prior unrelated incident should not change the diagnosis."
+        }
+      ],
+      "expectation": {
+        "affected_service": "event-processing",
+        "suspected_failure": "kafka_queue_problems",
+        "required_evidence_component_ids": [
+          "case21-queue-metric",
+          "case21-broker-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect Kafka broker health",
+          "query queue lag metrics for the event-processing worker"
+        ],
+        "requires_approval": true,
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "event-processing"
+        ]
+      }
+    },
+    {
+      "case_id": "queue-backlog-kafka-b",
+      "failure_type": "kafka_queue_problems",
+      "description": "Delayed async processing explained by queue backlog. Variant b.",
+      "components": [
+        {
+          "id": "case22-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "A responder needs a grounded diagnosis with the safest next step. Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+        },
+        {
+          "id": "case22-queue-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply. The main service metrics changed sharply with stable background traffic."
+        },
+        {
+          "id": "case22-broker-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case22-distractor-product",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 10,
+          "relevance": 0.08,
+          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes. Historical noise exists but does not match the timing here."
+        }
+      ],
+      "expectation": {
+        "affected_service": "event-processing",
+        "suspected_failure": "kafka_queue_problems",
+        "required_evidence_component_ids": [
+          "case22-queue-metric",
+          "case22-broker-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect Kafka broker health",
+          "query queue lag metrics for the event-processing worker"
+        ],
+        "requires_approval": true,
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "event-processing"
+        ]
+      }
+    },
+    {
+      "case_id": "queue-backlog-kafka-c",
+      "failure_type": "kafka_queue_problems",
+      "description": "Delayed async processing explained by queue backlog. Variant c.",
+      "components": [
+        {
+          "id": "case23-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Summarize the incident packet and choose the best failure label. Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+        },
+        {
+          "id": "case23-queue-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply. The onset correlates tightly with a single suspicious shift."
+        },
+        {
+          "id": "case23-broker-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case23-distractor-product",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 10,
+          "relevance": 0.08,
+          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes. An unrelated subsystem changed recently without matching symptoms."
+        }
+      ],
+      "expectation": {
+        "affected_service": "event-processing",
+        "suspected_failure": "kafka_queue_problems",
+        "required_evidence_component_ids": [
+          "case23-queue-metric",
+          "case23-broker-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect Kafka broker health",
+          "query queue lag metrics for the event-processing worker"
+        ],
+        "requires_approval": true,
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "event-processing"
+        ]
+      }
+    },
+    {
+      "case_id": "queue-backlog-kafka-d",
+      "failure_type": "kafka_queue_problems",
+      "description": "Delayed async processing explained by queue backlog. Variant d.",
+      "components": [
+        {
+          "id": "case24-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+        },
+        {
+          "id": "case24-queue-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply. Operational metrics show a clear regression in the affected path."
+        },
+        {
+          "id": "case24-broker-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case24-distractor-product",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 10,
+          "relevance": 0.08,
+          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes. A separate earlier event is present only as a distractor."
+        }
+      ],
+      "expectation": {
+        "affected_service": "event-processing",
+        "suspected_failure": "kafka_queue_problems",
+        "required_evidence_component_ids": [
+          "case24-queue-metric",
+          "case24-broker-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect Kafka broker health",
+          "query queue lag metrics for the event-processing worker"
+        ],
+        "requires_approval": true,
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "event-processing"
+        ]
+      }
+    },
+    {
+      "case_id": "queue-backlog-kafka-e",
+      "failure_type": "kafka_queue_problems",
+      "description": "Delayed async processing explained by queue backlog. Variant e.",
+      "components": [
+        {
+          "id": "case25-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Use the packet to choose the most precise grounded explanation. Order-status updates are delayed even though the storefront remains mostly responsive. Identify the most likely failure label, cite evidence ids, and recommend a safe next investigation step."
+        },
+        {
+          "id": "case25-queue-metric",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Metric snapshot: Kafka consumer lag for order event processing rose from 120 to 18,400 messages at 15:06 UTC. Broker request timeouts also increased sharply. The primary telemetry change isolates the affected behavior cleanly."
+        },
+        {
+          "id": "case25-broker-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Log excerpt from the event-processing worker: failed to commit consumer offset because broker request timed out; retry loop continued while lag accumulated. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case25-distractor-product",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 10,
+          "relevance": 0.08,
+          "text": "productcatalogservice deployed a readme update this morning with no application code or config changes. Additional context is intentionally noisy and should not be cited."
+        }
+      ],
+      "expectation": {
+        "affected_service": "event-processing",
+        "suspected_failure": "kafka_queue_problems",
+        "required_evidence_component_ids": [
+          "case25-queue-metric",
+          "case25-broker-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect Kafka broker health",
+          "query queue lag metrics for the event-processing worker"
+        ],
+        "requires_approval": true,
+        "expected_tool": "query_metrics",
+        "expected_tool_argument_terms": [
+          "event-processing"
+        ]
+      }
+    },
+    {
+      "case_id": "checkout-readiness-rollout-a",
+      "failure_type": "failed_readiness_probe",
+      "description": "Checkout rollout leaves pods unready after deploy. Variant a.",
+      "components": [
+        {
+          "id": "case26-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Investigate the latest incident and identify the first service to inspect. A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+        },
+        {
+          "id": "case26-deploy-summary",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window. The error pattern lines up with the primary suspected cause."
+        },
+        {
+          "id": "case26-readiness-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set. The error pattern lines up with the primary suspected cause."
+        },
+        {
+          "id": "case26-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
           "priority": 14,
           "relevance": 0.11,
-          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started."
+          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started. A prior unrelated incident should not change the diagnosis."
         }
       ],
       "expectation": {
         "affected_service": "checkoutservice",
         "suspected_failure": "failed_readiness_probe",
-        "required_evidence_component_ids": ["case6-deploy-summary", "case6-readiness-log"],
-        "recommended_next_action_any_of": ["inspect checkoutservice readiness probe configuration", "review checkoutservice rollout health"],
+        "required_evidence_component_ids": [
+          "case26-deploy-summary",
+          "case26-readiness-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect checkoutservice readiness probe configuration",
+          "review checkoutservice rollout health"
+        ],
         "requires_approval": true,
         "expected_tool": "get_recent_deployments",
-        "expected_tool_argument_terms": ["checkoutservice"]
+        "expected_tool_argument_terms": [
+          "checkoutservice"
+        ]
+      }
+    },
+    {
+      "case_id": "checkout-readiness-rollout-b",
+      "failure_type": "failed_readiness_probe",
+      "description": "Checkout rollout leaves pods unready after deploy. Variant b.",
+      "components": [
+        {
+          "id": "case27-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "A responder needs a grounded diagnosis with the safest next step. A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+        },
+        {
+          "id": "case27-deploy-summary",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case27-readiness-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set. Logs and traces both point at the same failure mechanism."
+        },
+        {
+          "id": "case27-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 14,
+          "relevance": 0.11,
+          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started. Historical noise exists but does not match the timing here."
+        }
+      ],
+      "expectation": {
+        "affected_service": "checkoutservice",
+        "suspected_failure": "failed_readiness_probe",
+        "required_evidence_component_ids": [
+          "case27-deploy-summary",
+          "case27-readiness-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect checkoutservice readiness probe configuration",
+          "review checkoutservice rollout health"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_recent_deployments",
+        "expected_tool_argument_terms": [
+          "checkoutservice"
+        ]
+      }
+    },
+    {
+      "case_id": "checkout-readiness-rollout-c",
+      "failure_type": "failed_readiness_probe",
+      "description": "Checkout rollout leaves pods unready after deploy. Variant c.",
+      "components": [
+        {
+          "id": "case28-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Summarize the incident packet and choose the best failure label. A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+        },
+        {
+          "id": "case28-deploy-summary",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case28-readiness-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set. The packet contains direct evidence of the likely source of failure."
+        },
+        {
+          "id": "case28-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 14,
+          "relevance": 0.11,
+          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started. An unrelated subsystem changed recently without matching symptoms."
+        }
+      ],
+      "expectation": {
+        "affected_service": "checkoutservice",
+        "suspected_failure": "failed_readiness_probe",
+        "required_evidence_component_ids": [
+          "case28-deploy-summary",
+          "case28-readiness-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect checkoutservice readiness probe configuration",
+          "review checkoutservice rollout health"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_recent_deployments",
+        "expected_tool_argument_terms": [
+          "checkoutservice"
+        ]
+      }
+    },
+    {
+      "case_id": "checkout-readiness-rollout-d",
+      "failure_type": "failed_readiness_probe",
+      "description": "Checkout rollout leaves pods unready after deploy. Variant d.",
+      "components": [
+        {
+          "id": "case29-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Provide a safe, evidence-cited diagnosis for the on-call handoff. A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+        },
+        {
+          "id": "case29-deploy-summary",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case29-readiness-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set. Supporting evidence narrows the likely mechanism rather than the symptom alone."
+        },
+        {
+          "id": "case29-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 14,
+          "relevance": 0.11,
+          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started. A separate earlier event is present only as a distractor."
+        }
+      ],
+      "expectation": {
+        "affected_service": "checkoutservice",
+        "suspected_failure": "failed_readiness_probe",
+        "required_evidence_component_ids": [
+          "case29-deploy-summary",
+          "case29-readiness-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect checkoutservice readiness probe configuration",
+          "review checkoutservice rollout health"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_recent_deployments",
+        "expected_tool_argument_terms": [
+          "checkoutservice"
+        ]
+      }
+    },
+    {
+      "case_id": "checkout-readiness-rollout-e",
+      "failure_type": "failed_readiness_probe",
+      "description": "Checkout rollout leaves pods unready after deploy. Variant e.",
+      "components": [
+        {
+          "id": "case30-user-request",
+          "kind": "request",
+          "required": true,
+          "stable": false,
+          "priority": 100,
+          "relevance": 1.0,
+          "text": "Use the packet to choose the most precise grounded explanation. A new checkout rollout completed, but service availability stayed degraded. Identify the first service to inspect, choose the best failure label, cite evidence ids, and recommend the safest next read-only action."
+        },
+        {
+          "id": "case30-deploy-summary",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 96,
+          "relevance": 0.99,
+          "text": "Deployment summary: checkoutservice build synthetic-421 rolled out at 08:52 UTC. Only 4 of 10 new pods reached Ready within the expected window. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case30-readiness-log",
+          "kind": "retrieval",
+          "required": false,
+          "stable": false,
+          "priority": 95,
+          "relevance": 0.98,
+          "text": "Readiness probe log: /ready returned 503 for six new checkoutservice pods during rollout; traffic remained concentrated on the older replica set. Correlated logs, traces, or rollout data reinforce the same conclusion."
+        },
+        {
+          "id": "case30-distractor-recommendation",
+          "kind": "memory",
+          "required": false,
+          "stable": false,
+          "priority": 14,
+          "relevance": 0.11,
+          "text": "recommendationservice cache hit ratio dipped briefly earlier in the day but recovered before the checkout deploy started. Additional context is intentionally noisy and should not be cited."
+        }
+      ],
+      "expectation": {
+        "affected_service": "checkoutservice",
+        "suspected_failure": "failed_readiness_probe",
+        "required_evidence_component_ids": [
+          "case30-deploy-summary",
+          "case30-readiness-log"
+        ],
+        "recommended_next_action_any_of": [
+          "inspect checkoutservice readiness probe configuration",
+          "review checkoutservice rollout health"
+        ],
+        "requires_approval": true,
+        "expected_tool": "get_recent_deployments",
+        "expected_tool_argument_terms": [
+          "checkoutservice"
+        ]
       }
     }
   ]

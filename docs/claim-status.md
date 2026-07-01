@@ -13,9 +13,9 @@
 - Grounding sufficiency pass rate: `1.0`
 - Answer-rubric pass rate: `0.86`
 - Provider fixture scope: `synthetic_local`
-- Provider fixture cases: `6`
+- Provider fixture cases: `30`
 - Cache-ready stable prefix: `1066` tokens
-- Average budgeted reduction vs full: `10.57%`
+- Average budgeted reduction vs full: `12.82%`
 - No live provider-validation artifact found.
 
 ## Resume-Risk Claims
@@ -38,9 +38,3 @@
 - Show a better p50 than full_unaligned with enough production requests.
 - Run provider validation across at least 30 distinct cases and 6 or more failure types.
 - Show no material regression in correctness, safety, and grounded citation pass rates.
-
-## Resource Pack
-
-- See [proof-resource-pack.md](./proof-resource-pack.md) for the external docs,
-  papers, and benchmark repositories that most directly unblock these four
-  unsupported claims.

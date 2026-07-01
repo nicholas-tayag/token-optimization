@@ -312,3 +312,14 @@ workspace storage, run:
 
 That writes an index under `external/proof-resources/` and shallow-clones the
 selected GitHub repositories into `external/proof-resources/repos/`.
+
+To regenerate the broad synthetic provider-validation workload that those live
+experiments should use, run:
+
+```bash
+.venv/bin/python scripts/generate_provider_validation_cases.py
+```
+
+The checked fixture currently targets `30` distinct cases across `6` failure
+types so the broad-quality gate can become true once live provider results are
+recorded.

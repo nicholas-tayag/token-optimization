@@ -22,11 +22,13 @@ def test_provider_fixture_is_cache_ready() -> None:
     dataset = load_provider_validation_dataset(FIXTURE)
     report = fixture_readiness_report(dataset, TokenCounter())
 
-    assert report["case_count"] == 6
+    assert report["case_count"] == 30
     assert report["environment_scope"] == "synthetic_local"
     assert report["all_cache_aligned_cases_cache_eligible"] is True
     assert report["all_budgeted_cache_aligned_cases_cache_eligible"] is True
     assert report["average_cache_aligned_stable_prefix_tokens"] >= 1024
+    assert report["minimum_distinct_cases_for_broad_claim"] == 30
+    assert report["minimum_failure_types_for_broad_claim"] == 6
 
 
 def test_budgeted_cache_aligned_package_reduces_tokens() -> None:
@@ -39,6 +41,7 @@ def test_budgeted_cache_aligned_package_reduces_tokens() -> None:
         packages["full_cache_aligned"].stable_prefix_tokens
         >= dataset.minimum_cacheable_prefix_tokens
     )
+    assert len({item.failure_type for item in dataset.cases}) >= 6
 
 
 def test_grade_provider_response_checks_expected_fields() -> None:
