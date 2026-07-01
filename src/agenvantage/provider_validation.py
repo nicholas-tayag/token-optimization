@@ -149,8 +149,11 @@ class ProviderValidationDataset:
     shared_components: tuple[ContextComponent, ...]
     cases: tuple[ProviderValidationCase, ...]
     budget: int
+    environment_scope: str = "synthetic_local"
     minimum_cacheable_prefix_tokens: int = 1024
     recommended_warm_requests_per_policy: int = 30
+    minimum_distinct_cases_for_broad_claim: int = 30
+    minimum_failure_types_for_broad_claim: int = 6
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ProviderValidationDataset":
@@ -169,9 +172,17 @@ class ProviderValidationDataset:
             shared_components=tuple(ContextComponent.from_dict(item) for item in shared_raw),
             cases=tuple(ProviderValidationCase.from_dict(item) for item in case_raw),
             budget=int(raw.get("budget", 2200)),
+            environment_scope=str(raw.get("environment_scope", "synthetic_local")).strip()
+            or "synthetic_local",
             minimum_cacheable_prefix_tokens=int(raw.get("minimum_cacheable_prefix_tokens", 1024)),
             recommended_warm_requests_per_policy=int(
                 raw.get("recommended_warm_requests_per_policy", 30)
+            ),
+            minimum_distinct_cases_for_broad_claim=int(
+                raw.get("minimum_distinct_cases_for_broad_claim", 30)
+            ),
+            minimum_failure_types_for_broad_claim=int(
+                raw.get("minimum_failure_types_for_broad_claim", 6)
             ),
         )
 
@@ -443,10 +454,13 @@ def fixture_readiness_report(
     return {
         "dataset_id": dataset.dataset_id,
         "description": dataset.description,
+        "environment_scope": dataset.environment_scope,
         "case_count": len(case_reports),
         "budget": budget if budget is not None else dataset.budget,
         "minimum_cacheable_prefix_tokens": dataset.minimum_cacheable_prefix_tokens,
         "recommended_warm_requests_per_policy": dataset.recommended_warm_requests_per_policy,
+        "minimum_distinct_cases_for_broad_claim": dataset.minimum_distinct_cases_for_broad_claim,
+        "minimum_failure_types_for_broad_claim": dataset.minimum_failure_types_for_broad_claim,
         "all_cache_aligned_cases_cache_eligible": all(
             item["cache_eligible"] for item in case_reports
         ),
@@ -747,6 +761,7 @@ def run_provider_validation(
                 records.append(
                     {
                         "dataset_id": dataset.dataset_id,
+                        "environment_scope": dataset.environment_scope,
                         "case_id": case.case_id,
                         "failure_type": case.failure_type,
                         "policy_id": policy_name,
@@ -805,7 +820,13 @@ def _claim_audit(
     minimum_latency_samples = (
         dataset.recommended_warm_requests_per_policy if dataset else 30
     )
-    minimum_broad_case_count = 30
+    minimum_broad_case_count = (
+        dataset.minimum_distinct_cases_for_broad_claim if dataset else 30
+    )
+    minimum_failure_type_count = (
+        dataset.minimum_failure_types_for_broad_claim if dataset else 6
+    )
+    environment_scope = dataset.environment_scope if dataset else "unknown"
 
     cost_supported = (
         candidate["request_count"] >= 1
@@ -816,13 +837,19 @@ def _claim_audit(
         and candidate["p50_latency_ms"] < baseline["p50_latency_ms"]
     )
     quality_supported = (
-        candidate["request_count"] >= minimum_broad_case_count
+        candidate["distinct_case_count"] >= minimum_broad_case_count
+        and candidate["distinct_failure_type_count"] >= minimum_failure_type_count
         and candidate["correctness_pass_rate"] >= baseline["correctness_pass_rate"] - 0.02
         and candidate["grounded_citation_pass_rate"]
         >= baseline["grounded_citation_pass_rate"] - 0.02
         and candidate["safety_pass_rate"] >= baseline["safety_pass_rate"]
     )
-    end_to_end_supported = cost_supported and latency_supported and quality_supported
+    production_latency_supported = environment_scope == "production" and latency_supported
+    end_to_end_supported = (
+        cost_supported
+        and production_latency_supported
+        and quality_supported
+    )
 
     return {
         "real_api_cost_savings": {
@@ -841,20 +868,40 @@ def _claim_audit(
                 else f"Latency claim requires at least {minimum_latency_samples} requests for the compared policy and a better p50 than full_unaligned."
             ),
         },
+        "latency_improvement_in_production": {
+            "supported": production_latency_supported,
+            "reason": (
+                "The measured latency improvement came from a production-scoped dataset."
+                if production_latency_supported
+                else (
+                    "The current dataset is not production-scoped."
+                    if environment_scope != "production"
+                    else f"Production latency proof still requires at least {minimum_latency_samples} production requests and a better p50 than full_unaligned."
+                )
+            ),
+        },
         "broad_quality_retention": {
             "supported": quality_supported,
             "reason": (
-                "Correctness, safety, and grounded-citation pass rates met the declared tolerance across a broad sample."
+                "Correctness, safety, and grounded-citation pass rates met the declared tolerance across a broad, diverse sample."
                 if quality_supported
-                else "Broad quality-retention proof still requires at least 30 measured requests and tolerance checks against the baseline policy."
+                else (
+                    "Broad quality-retention proof still requires "
+                    f"{minimum_broad_case_count}+ distinct cases, "
+                    f"{minimum_failure_type_count}+ failure types, "
+                    "and tolerance checks against the baseline policy."
+                )
             ),
         },
         "end_to_end_context_overload": {
             "supported": end_to_end_supported,
             "reason": (
-                "Cost, latency, and quality evidence all met the acceptance rule."
+                "Cost, production-scope latency, and broad quality evidence all met the acceptance rule."
                 if end_to_end_supported
-                else "End-to-end proof requires positive cost reduction, latency improvement at scale, and no material quality regression."
+                else (
+                    "End-to-end proof requires positive cost reduction, production-scope latency improvement, "
+                    "and no material quality regression across a broad workload set."
+                )
             ),
         },
     }
@@ -880,8 +927,14 @@ def summarize_provider_validation_records(
         output_tokens = [int(item.get("output_tokens", 0)) for item in policy_records]
         costs = [float(item.get("request_cost_usd", 0.0)) for item in policy_records]
         grades = [item.get("grade", {}) for item in policy_records]
+        distinct_case_count = len({str(item.get("case_id", "")) for item in policy_records})
+        distinct_failure_type_count = len(
+            {str(item.get("failure_type", "")) for item in policy_records}
+        )
         policies[policy_id] = {
             "request_count": len(policy_records),
+            "distinct_case_count": distinct_case_count,
+            "distinct_failure_type_count": distinct_failure_type_count,
             "mean_input_tokens": _mean([float(value) for value in input_tokens]),
             "mean_cached_input_tokens": _mean([float(value) for value in cached_tokens]),
             "mean_output_tokens": _mean([float(value) for value in output_tokens]),
@@ -947,10 +1000,10 @@ def summarize_provider_validation_records(
 
     return {
         "dataset_id": dataset.dataset_id if dataset else None,
+        "environment_scope": dataset.environment_scope if dataset else None,
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
         "claim_audit": _claim_audit(policies, dataset),
         "records": records,
     }
-

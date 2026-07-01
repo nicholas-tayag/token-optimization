@@ -23,6 +23,7 @@ def test_provider_fixture_is_cache_ready() -> None:
     report = fixture_readiness_report(dataset, TokenCounter())
 
     assert report["case_count"] == 6
+    assert report["environment_scope"] == "synthetic_local"
     assert report["all_cache_aligned_cases_cache_eligible"] is True
     assert report["all_budgeted_cache_aligned_cases_cache_eligible"] is True
     assert report["average_cache_aligned_stable_prefix_tokens"] >= 1024
@@ -117,6 +118,8 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
     records = [
         {
             "policy_id": "full_unaligned",
+            "case_id": "baseline-case",
+            "failure_type": "payment_service_unreachable",
             "latency_ms": 900.0,
             "input_tokens": 2200,
             "cached_input_tokens": 0,
@@ -126,6 +129,8 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
         },
         {
             "policy_id": "budgeted_cache_aligned",
+            "case_id": "candidate-case",
+            "failure_type": "payment_service_unreachable",
             "latency_ms": 700.0,
             "input_tokens": 1800,
             "cached_input_tokens": 1200,
@@ -139,5 +144,6 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
 
     assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
     assert report["claim_audit"]["latency_improvement"]["supported"] is False
+    assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
     assert report["claim_audit"]["broad_quality_retention"]["supported"] is False
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is False

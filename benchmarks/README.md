@@ -78,3 +78,16 @@ export OPENAI_API_KEY=...
 The claim audit is intentionally conservative. Without enough measured requests,
 it should continue reporting that latency or broad quality-retention claims are
 not yet supported.
+
+## Claim Status
+
+To collapse the current evidence into one durable, human-readable answer about
+what the repository can honestly claim today, run:
+
+```bash
+.venv/bin/python benchmarks/claim_status.py
+```
+
+That command reads the checked use-case artifact, inspects the provider
+fixture, optionally summarizes a saved provider-validation artifact, and writes
+[docs/claim-status.md](../docs/claim-status.md).

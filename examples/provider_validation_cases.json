@@ -2,8 +2,11 @@
   "dataset_id": "synthetic-incident-provider-validation",
   "description": "Synthetic incident-response dataset for measuring provider-backed token, latency, and answer-quality tradeoffs with AgenVantage.",
   "budget": 1130,
+  "environment_scope": "synthetic_local",
   "minimum_cacheable_prefix_tokens": 1024,
   "recommended_warm_requests_per_policy": 30,
+  "minimum_distinct_cases_for_broad_claim": 30,
+  "minimum_failure_types_for_broad_claim": 6,
   "shared_components": [
     {
       "id": "response-contract",
