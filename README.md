@@ -18,7 +18,10 @@ latency, caching, cost, and quality measurements.
 The current local workflow provides:
 
 - an `agenvantage pack` command for real coding questions over local
-  repositories, including multi-repository tasks with repeated `--repo` flags;
+  repositories, including multi-repository tasks with repeated `--repo` flags,
+  smart defaults (`--repo .`, default budget), task presets
+  (`explain`/`review`/`debug`/`change`/`compare`), clipboard/stdout output, and
+  optional `.agenvantage.toml` project defaults;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
 - a persistent local repository-metadata index that caches per-file symbols and
@@ -101,23 +104,78 @@ agenvantage view --report artifacts/oncall-report.json
 make test
 ```
 
-Build a context package for a coding task in one of your own repositories:
+## Pack: your day-to-day token saver
+
+`agenvantage pack` is the developer workflow: it selects the repository context
+that matters for a task, fits it under a token budget, and hands you a
+ready-to-paste package. Run it from inside a repo with just a task:
 
 ```bash
-agenvantage pack \
-  --repo /path/to/your/repo \
-  --task "Explain the Redis-backed rate limiter, including fail-open behavior and tests." \
-  --budget 1800 \
-  --output artifacts/rate-limiter-context.md \
-  --manifest artifacts/rate-limiter-manifest.json
+agenvantage pack --task "Explain the rate limiter and its fail-open behavior."
 ```
 
-Build a shared context package across multiple local repositories:
+That uses smart defaults (`--repo .`, a default budget, and the `explain`
+preset) and prints a readable summary of what was selected and how many tokens
+were saved versus scanning the whole repo.
+
+Send the package straight into your prompt with the clipboard or stdout:
+
+```bash
+agenvantage pack --task "Why do the checkout tests fail?" --preset debug --copy
+agenvantage pack --task "token budget selection" --stdout | pbcopy
+```
+
+### Task presets
+
+Presets pick good instructions and provenance so you do not have to remember
+flags:
+
+| Preset  | Focus                              | Includes diff | Includes log |
+|---------|------------------------------------|---------------|--------------|
+| explain | describe behavior (default)        | no            | no           |
+| review  | correctness, edge cases, risk      | yes           | no           |
+| debug   | localize a bug from evidence       | yes           | yes          |
+| change  | plan a minimal, correct edit       | yes           | yes          |
+| compare | contrast implementations per repo  | no            | no           |
+
+```bash
+agenvantage pack --preset review --task "Review the new upload limit change."
+```
+
+### Output modes
+
+```bash
+agenvantage pack --task "..."                 # human summary (default)
+agenvantage pack --task "..." --stdout        # only the Markdown package (pipe-friendly)
+agenvantage pack --task "..." --json          # full JSON decision manifest
+agenvantage pack --task "..." --copy          # copy the package to the clipboard
+agenvantage pack --task "..." \
+  --output artifacts/context.md \
+  --manifest artifacts/manifest.json          # write files
+```
+
+### Project defaults (`.agenvantage.toml`)
+
+Drop a config file at a repo root to stop repeating flags. CLI flags always
+override it.
+
+```toml
+[pack]
+budget = 6000
+model = "gpt-4o-mini"
+preset = "explain"
+top_k = 20
+include_glob = ["src/*"]
+exclude_glob = ["docs/*", "**/*.min.js"]
+```
+
+### Multi-repo packages
 
 ```bash
 agenvantage pack \
   --repo /path/to/repo-a \
   --repo /path/to/repo-b \
+  --preset compare \
   --task "Compare the local static server hardening in both apps." \
   --include-glob "scripts/*" \
   --exclude-glob "docs/*" \
@@ -125,6 +183,9 @@ agenvantage pack \
   --output artifacts/multi-repo-context.md \
   --manifest artifacts/multi-repo-manifest.json
 ```
+
+See [docs/prd-developer-workflow.md](docs/prd-developer-workflow.md) for the
+product requirements behind this workflow.
 
 Write a report and display OpenTelemetry spans locally:
 
@@ -180,9 +241,9 @@ hit or provider cost reduction.
 ## Repository Layout
 
 ```text
-src/agenvantage/     Context model, policies, tracing, and CLI
+src/agenvantage/     Context model, policies, presets, config, tracing, and CLI
 examples/             Secondary synthetic context scenarios
 viz/                  Browser dashboard for experiment reports
-tests/                Deterministic policy tests
-docs/                 Research basis and implementation roadmap
+tests/                Deterministic policy, CLI, preset, and config tests
+docs/                 Research basis, PRD, and implementation roadmap
 ```
