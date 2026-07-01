@@ -4,7 +4,9 @@ import argparse
 import json
 import webbrowser
 from pathlib import Path
+from typing import Any
 
+from agenvantage import __version__
 from agenvantage.experiment import load_scenario, run_experiment
 from agenvantage.repo_context import (
     build_context_package,
@@ -16,14 +18,83 @@ from agenvantage.tokenizer import TokenCounter
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
+_DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
+_DEFAULT_BUDGET = 360
+_DEFAULT_DEMO_OUTPUT = _PACKAGE_ROOT / "artifacts" / "oncall-report.json"
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="agenvantage")
+    parser = argparse.ArgumentParser(
+        prog="agenvantage",
+        description="Build token-budgeted context packages and compare assembly policies.",
+        epilog=(
+            "Examples:\n"
+            "  agenvantage demo\n"
+            "  agenvantage run --budget 360\n"
+            "  agenvantage pack --repo . --task \"Explain the CLI\" --budget 1800\n"
+            "  agenvantage view --report artifacts/oncall-report.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    demo = subparsers.add_parser(
+        "demo",
+        help="Run the built-in on-call demo and open the policy explorer.",
+        description="Run the synthetic on-call scenario, save a report, and open the dashboard.",
+    )
+    demo.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_FIXTURE,
+        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE.relative_to(_PACKAGE_ROOT)}).",
+    )
+    demo.add_argument(
+        "--budget",
+        type=int,
+        default=_DEFAULT_BUDGET,
+        help=f"Budgeted policy token cap (default: {_DEFAULT_BUDGET}).",
+    )
+    demo.add_argument(
+        "--model",
+        default="gpt-4o-mini",
+        help="Tokenizer model identifier.",
+    )
+    demo.add_argument(
+        "--output",
+        type=Path,
+        default=_DEFAULT_DEMO_OUTPUT,
+        help=f"JSON report path (default: {_DEFAULT_DEMO_OUTPUT.relative_to(_PACKAGE_ROOT)}).",
+    )
+    demo.add_argument(
+        "--trace-console",
+        action="store_true",
+        help="Print OpenTelemetry assembly spans to the console.",
+    )
+    demo.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the dashboard path instead of opening a browser tab.",
+    )
+
     run = subparsers.add_parser("run", help="Compare context assembly policies.")
-    run.add_argument("--fixture", type=Path, required=True, help="Scenario JSON file.")
-    run.add_argument("--budget", type=int, required=True, help="Budgeted policy token cap.")
+    run.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_FIXTURE,
+        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE.relative_to(_PACKAGE_ROOT)}).",
+    )
+    run.add_argument(
+        "--budget",
+        type=int,
+        default=_DEFAULT_BUDGET,
+        help=f"Budgeted policy token cap (default: {_DEFAULT_BUDGET}).",
+    )
     run.add_argument("--model", default="gpt-4o-mini", help="Tokenizer model identifier.")
     run.add_argument("--output", type=Path, help="Optional JSON report path.")
     run.add_argument(
@@ -31,6 +102,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print OpenTelemetry assembly spans to the console.",
     )
+    run.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a human-readable summary instead of raw JSON.",
+    )
+
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
     view.add_argument(
         "--report",
@@ -81,11 +158,49 @@ def _parser() -> argparse.ArgumentParser:
         "--exclude-glob",
         action="append",
         default=[],
-        help="Exclude eligible repository files whose paths match this glob. Repeat as needed.",
+        help="Exclude eligible repository files whose paths matching this glob. Repeat as needed.",
     )
     pack.add_argument("--output", type=Path, help="Optional Markdown context-package output.")
     pack.add_argument("--manifest", type=Path, help="Optional JSON decision-manifest output.")
     return parser
+
+
+def _format_experiment_summary(report: dict[str, Any]) -> str:
+    lines = [
+        "AgenVantage experiment",
+        "",
+        f"Scenario: {report['scenario_id']}",
+        report["scenario_description"],
+        f"Tokenizer: {report['tokenizer']['model']} ({report['tokenizer']['encoding']})",
+        "",
+        "Policy comparison:",
+    ]
+    for policy in report["policies"]:
+        name = policy["policy"]
+        tokens = policy["input_tokens"]
+        stable = policy["stable_prefix_tokens"]
+        saved = policy["tokens_saved_vs_full"]
+        if saved:
+            detail = f"saved {saved} tokens ({policy['token_reduction_percent_vs_full']:.1f}%)"
+            excluded = policy["excluded_components"]
+            if excluded:
+                dropped = ", ".join(item["id"] for item in excluded)
+                detail += f"; excluded: {dropped}"
+        elif name == "cache_aligned":
+            full = next(item for item in report["policies"] if item["policy"] == "full")
+            delta = stable - full["stable_prefix_tokens"]
+            detail = f"stable prefix +{delta} tokens vs full"
+        else:
+            detail = "baseline"
+        lines.append(f"  {name:<14} {tokens:>4} tokens  {detail}")
+        if policy.get("budget") is not None:
+            lines[-1] += f"  (budget {policy['budget']})"
+    return "\n".join(lines)
+
+
+def _write_report(report: dict[str, Any], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
 def _open_dashboard(report: Path | None, *, open_browser: bool) -> None:
@@ -94,8 +209,9 @@ def _open_dashboard(report: Path | None, *, open_browser: bool) -> None:
 
     if report is not None:
         dashboard_uri = _DASHBOARD_PATH.resolve().as_uri()
-        print(f"Open {_DASHBOARD_PATH}")
-        print(f"Then load your report: {report.resolve()}")
+        print(f"Dashboard: {_DASHBOARD_PATH.resolve()}")
+        print(f"Report:    {report.resolve()}")
+        print("Load the report in the dashboard file picker to explore the results.")
         if open_browser:
             webbrowser.open(dashboard_uri)
         return
@@ -106,8 +222,51 @@ def _open_dashboard(report: Path | None, *, open_browser: bool) -> None:
         print(_DASHBOARD_PATH.resolve())
 
 
+def _run_experiment(
+    fixture: Path,
+    budget: int,
+    model: str,
+    *,
+    trace_console: bool,
+    output: Path | None,
+    summary: bool,
+) -> dict[str, Any]:
+    if not fixture.is_file():
+        raise SystemExit(f"Scenario fixture not found: {fixture}")
+
+    if trace_console:
+        configure_console_tracing()
+
+    scenario = load_scenario(fixture)
+    report = run_experiment(scenario, TokenCounter(model), budget)
+
+    if summary:
+        print(_format_experiment_summary(report))
+    else:
+        print(json.dumps(report, indent=2))
+
+    if output is not None:
+        _write_report(report, output)
+        print(f"\nReport written to {output.resolve()}")
+
+    flush_tracing()
+    return report
+
+
 def main() -> None:
     args = _parser().parse_args()
+    if args.command == "demo":
+        _run_experiment(
+            args.fixture,
+            args.budget,
+            args.model,
+            trace_console=args.trace_console,
+            output=args.output,
+            summary=True,
+        )
+        print()
+        _open_dashboard(args.output, open_browser=not args.no_browser)
+        return
     if args.command == "view":
         _open_dashboard(args.report, open_browser=not args.no_browser)
         return
@@ -144,16 +303,11 @@ def main() -> None:
             print(f"Decision manifest written to {args.manifest.resolve()}")
         return
 
-    if args.trace_console:
-        configure_console_tracing()
-
-    scenario = load_scenario(args.fixture)
-    report = run_experiment(scenario, TokenCounter(args.model), args.budget)
-    serialized = json.dumps(report, indent=2)
-    print(serialized)
-
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(serialized + "\n", encoding="utf-8")
-
-    flush_tracing()
+    _run_experiment(
+        args.fixture,
+        args.budget,
+        args.model,
+        trace_console=args.trace_console,
+        output=args.output,
+        summary=args.summary,
+    )

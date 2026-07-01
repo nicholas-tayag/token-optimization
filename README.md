@@ -56,52 +56,90 @@ enterprise system.
 
 ## Quick Start
 
+Try the built-in demo in three commands:
+
+```bash
+make setup
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+agenvantage demo
+```
+
+`agenvantage demo` runs the synthetic on-call scenario, writes
+`artifacts/oncall-report.json`, prints a short summary, and opens the policy
+explorer dashboard.
+
+### Manual setup
+
+macOS / Linux:
+
+```bash
+bash scripts/setup.sh
+source .venv/bin/activate
+agenvantage demo
+pytest
+```
+
+Windows PowerShell:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-agenvantage run --fixture examples/synthetic_oncall_context.json --budget 360
+agenvantage demo
 pytest
+```
+
+If `python` is not available, install Python 3.10+ or use
+[uv](https://docs.astral.sh/uv/) (`uv venv .venv --python 3.12`).
+
+### Common commands
+
+```bash
+agenvantage demo                              # built-in on-call walkthrough
+agenvantage run --summary                     # default scenario, readable output
+agenvantage view --report artifacts/oncall-report.json
+make test
 ```
 
 Build a context package for a coding task in one of your own repositories:
 
-```powershell
-agenvantage pack `
-  --repo C:\Users\nicho\GithubRepos\UF-SASE-Website `
-  --task "Explain the Redis-backed rate limiter, including fail-open behavior and tests." `
-  --budget 1800 `
-  --output artifacts/rate-limiter-context.md `
+```bash
+agenvantage pack \
+  --repo /path/to/your/repo \
+  --task "Explain the Redis-backed rate limiter, including fail-open behavior and tests." \
+  --budget 1800 \
+  --output artifacts/rate-limiter-context.md \
   --manifest artifacts/rate-limiter-manifest.json
 ```
 
 Build a shared context package across multiple local repositories:
 
-```powershell
-agenvantage pack `
-  --repo C:\Users\nicho\GithubRepos\mesh `
-  --repo C:\Users\nicho\GithubRepos\signalfoundry `
-  --task "Compare the local static server hardening in both apps." `
-  --include-glob "scripts/*" `
-  --exclude-glob "docs/*" `
-  --budget 2200 `
-  --output artifacts/multi-repo-context.md `
+```bash
+agenvantage pack \
+  --repo /path/to/repo-a \
+  --repo /path/to/repo-b \
+  --task "Compare the local static server hardening in both apps." \
+  --include-glob "scripts/*" \
+  --exclude-glob "docs/*" \
+  --budget 2200 \
+  --output artifacts/multi-repo-context.md \
   --manifest artifacts/multi-repo-manifest.json
 ```
 
 Write a report and display OpenTelemetry spans locally:
 
-```powershell
-agenvantage run `
-  --fixture examples/synthetic_oncall_context.json `
-  --budget 360 `
-  --trace-console `
+```bash
+agenvantage run \
+  --fixture examples/synthetic_oncall_context.json \
+  --budget 360 \
+  --trace-console \
+  --summary \
   --output artifacts/oncall-report.json
 ```
 
 Open the visual policy explorer (bar charts, budget usage, per-component inclusion):
 
-```powershell
+```bash
 agenvantage view
 ```
 
@@ -125,8 +163,8 @@ for the measured build sequence.
 
 ## Example Experiment
 
-```powershell
-agenvantage run --fixture examples/synthetic_oncall_context.json --budget 360
+```bash
+agenvantage run --summary
 ```
 
 The report compares each policy against `full`, showing:
