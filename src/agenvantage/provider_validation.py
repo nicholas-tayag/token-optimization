@@ -912,6 +912,7 @@ def _claim_audit(
     summary_by_policy: dict[str, dict[str, Any]],
     audit_requirements: dict[str, Any] | None,
     paired_case_comparison: dict[str, Any] | None = None,
+    cost_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     baseline = summary_by_policy.get("full_unaligned")
     candidate = summary_by_policy.get("budgeted_cache_aligned")
@@ -948,6 +949,12 @@ def _claim_audit(
     correctness_interval = _interval("correctness_pass_rate")
     grounded_interval = _interval("grounded_citation_pass_rate")
     safety_interval = _interval("safety_pass_rate")
+    reconciliation = cost_reconciliation or {}
+    reconciliation_supported = True
+    if reconciliation:
+        time_window_overlap = bool(reconciliation.get("time_window_overlap"))
+        difference_ratio = abs(float(reconciliation.get("difference_ratio_vs_estimate", 1.0)))
+        reconciliation_supported = time_window_overlap and difference_ratio <= 0.05
 
     paired_cost_supported = (
         paired_case_count >= 1
@@ -973,6 +980,7 @@ def _claim_audit(
         candidate["request_count"] >= 1
         and candidate["mean_request_cost_usd"] < baseline["mean_request_cost_usd"]
         and paired_cost_supported
+        and reconciliation_supported
     )
     latency_supported = (
         candidate["request_count"] >= minimum_latency_samples
@@ -1001,7 +1009,11 @@ def _claim_audit(
             "reason": (
                 "Mean request cost is lower than full_unaligned and the paired cost delta confidence interval stays below zero."
                 if cost_supported
-                else "Cost proof requires lower mean request cost than full_unaligned plus a paired cost delta confidence interval below zero."
+                else (
+                    "Cost proof requires lower mean request cost than full_unaligned plus a paired cost delta confidence interval below zero."
+                    if not reconciliation
+                    else "Cost proof requires lower mean request cost than full_unaligned, a paired cost delta confidence interval below zero, and reconciled organization cost data within tolerance."
+                )
             ),
         },
         "latency_improvement": {
@@ -1661,6 +1673,7 @@ def summarize_provider_validation_records(
     dataset: ProviderValidationDataset | None = None,
     dataset_requirements: dict[str, Any] | None = None,
     pricing: PricingSnapshot | None = None,
+    cost_reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_requirements = _merge_dataset_requirements(dataset, dataset_requirements)
     paired_case_comparison = _paired_case_comparison(records)
@@ -1761,6 +1774,7 @@ def summarize_provider_validation_records(
         ),
         "dataset_requirements": resolved_requirements,
         "pricing_snapshot": pricing.to_dict() if pricing else None,
+        "cost_reconciliation": cost_reconciliation,
         "record_count": len(records),
         "policies": policies,
         "paired_case_comparison": paired_case_comparison,
@@ -1773,6 +1787,7 @@ def summarize_provider_validation_records(
             policies,
             resolved_requirements,
             paired_case_comparison,
+            cost_reconciliation,
         ),
         "records": records,
     }
@@ -1797,6 +1812,11 @@ def summarize_saved_provider_validation_report(
             environment_scope=environment_scope,
         ),
         pricing=pricing_snapshot,
+        cost_reconciliation=(
+            raw_report.get("cost_reconciliation")
+            if isinstance(raw_report.get("cost_reconciliation"), dict)
+            else None
+        ),
     )
 
 
@@ -1826,4 +1846,10 @@ def summarize_normalized_provider_validation_payload(
             environment_scope=environment_scope,
         ),
         pricing=pricing_snapshot,
+        cost_reconciliation=(
+            raw_payload.get("cost_reconciliation")
+            if isinstance(raw_payload, dict)
+            and isinstance(raw_payload.get("cost_reconciliation"), dict)
+            else None
+        ),
     )

@@ -114,7 +114,9 @@ than only through aggregate means. Those paired intervals now back the stronger
 cost, latency, and broad-quality support gates when a provider artifact is
 present. If you also export the OpenAI Costs API, `--reconcile-costs` compares
 the request-level estimated experiment total against organization-recorded
-costs over the supplied window.
+costs over the supplied window. Saved provider reports now preserve that
+reconciliation block on replay, and a bad reconciliation can block the strong
+cost-savings support claim.
 
 ## Claim Status
 

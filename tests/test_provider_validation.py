@@ -259,13 +259,25 @@ def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> No
             }
         )
 
-    saved_report = summarize_provider_validation_records(records, dataset=dataset, pricing=pricing)
+    saved_report = summarize_provider_validation_records(
+        records,
+        dataset=dataset,
+        pricing=pricing,
+        cost_reconciliation={
+            "estimated_request_level_total_cost_usd": 0.12,
+            "recorded_organization_total_cost_usd": 0.12,
+            "difference_usd": 0.0,
+            "difference_ratio_vs_estimate": 0.0,
+            "time_window_overlap": True,
+        },
+    )
     replay_report = summarize_saved_provider_validation_report(saved_report)
 
     assert replay_report["dataset_requirements"]["minimum_distinct_cases_for_broad_claim"] == 30
     assert replay_report["claim_audit"]["real_api_cost_savings"]["supported"] is True
     assert replay_report["claim_audit"]["broad_quality_retention"]["supported"] is True
     assert replay_report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
+    assert replay_report["cost_reconciliation"]["difference_usd"] == 0.0
     assert replay_report["paired_case_comparison"]["overlapping_case_count"] == 30
     assert (
         replay_report["paired_case_comparison"]["metrics"]["request_cost_usd"]["mean_delta"] < 0
@@ -517,3 +529,58 @@ def test_summarize_cost_api_buckets_and_reconcile_provider_costs() -> None:
     assert reconciliation["recorded_organization_total_cost_usd"] == 0.004
     assert reconciliation["difference_usd"] == 0.0
     assert reconciliation["time_window_overlap"] is True
+
+
+def test_claim_audit_rejects_bad_cost_reconciliation() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    case = dataset.cases[0]
+    report = summarize_provider_validation_records(
+        [
+            {
+                "policy_id": "full_unaligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736643600,
+                "latency_ms": 950.0,
+                "input_tokens": 2200,
+                "cached_input_tokens": 0,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00264,
+                "grade": {
+                    "correctness_pass": True,
+                    "safety_pass": True,
+                    "grounded_citation_pass": True,
+                    "overall_pass": True,
+                    "score": 1.0,
+                },
+            },
+            {
+                "policy_id": "budgeted_cache_aligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736643660,
+                "latency_ms": 730.0,
+                "input_tokens": 1700,
+                "cached_input_tokens": 1200,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00136,
+                "grade": {
+                    "correctness_pass": True,
+                    "safety_pass": True,
+                    "grounded_citation_pass": True,
+                    "overall_pass": True,
+                    "score": 1.0,
+                },
+            },
+        ],
+        dataset=dataset,
+        cost_reconciliation={
+            "estimated_request_level_total_cost_usd": 0.004,
+            "recorded_organization_total_cost_usd": 0.01,
+            "difference_usd": 0.006,
+            "difference_ratio_vs_estimate": 1.5,
+            "time_window_overlap": True,
+        },
+    )
+
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is False

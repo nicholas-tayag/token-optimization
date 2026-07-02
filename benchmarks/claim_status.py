@@ -150,6 +150,7 @@ def build_claim_status_report(
             provider_evidence,
             [
                 "Run validate-provider live with a real pricing snapshot, or normalize saved raw telemetry into provider-validation records.",
+                "If you have an OpenAI Costs API export, reconcile it against the saved provider report.",
                 "Show lower mean request cost for budgeted_cache_aligned than full_unaligned.",
             ],
         ),
