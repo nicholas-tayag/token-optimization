@@ -114,9 +114,19 @@ save it as:
 artifacts/openai-costs.json
 ```
 
-The exact collection method can live outside this repo. What matters is that
-the saved export covers the experiment window and includes the line item for
-the relevant model usage.
+This repo now includes a helper script for that step:
+
+```bash
+export OPENAI_ADMIN_KEY=...
+
+.venv/bin/python scripts/export_openai_costs.py \
+  --start-time <unix-start> \
+  --end-time <unix-end> \
+  --output artifacts/openai-costs.json
+```
+
+What matters is that the saved export covers the experiment window and
+includes the line item for the relevant model usage.
 
 ### 4. Reconcile Request Totals Against Provider Costs
 
@@ -196,4 +206,3 @@ these exist:
 - `artifacts/provider-validation-otel.json`
 - `artifacts/openai-costs.json`
 - `docs/claim-status.md` showing `proved_real_api_cost_savings = True`
-
