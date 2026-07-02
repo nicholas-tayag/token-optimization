@@ -270,6 +270,40 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
     assert "src/rate_limiter.py" in summary
 
 
+def test_format_pack_summary_reports_feature_change_surface() -> None:
+    report = {
+        "task": "Add rate limiter tests",
+        "repo_count": 1,
+        "scanned_files": 4,
+        "budget": 6000,
+        "selected_context_tokens": 700,
+        "candidate_context_tokens": 4000,
+        "local_reduction_percent_vs_candidate_context": 82.5,
+        "local_tokens_omitted_vs_candidate_context": 3300,
+        "candidate_chunks": 12,
+        "uncovered_query_terms": [],
+        "provenance": {"enabled": False},
+        "change_surface": {
+            "edit_targets": [{"path": "src/rate_limiter.py"}],
+            "test_targets": [{"path": "tests/test_rate_limiter.py"}],
+            "config_targets": [],
+            "supporting_targets": [{"path": "src/redis_client.py"}],
+            "missing_signals": ["No config target was needed."],
+        },
+        "selected_chunks": [
+            {"path": "src/rate_limiter.py", "tokens": 400},
+            {"path": "tests/test_rate_limiter.py", "tokens": 300},
+        ],
+    }
+
+    summary = _format_pack_summary(report, "feature")
+
+    assert "Likely edit files: src/rate_limiter.py" in summary
+    assert "Tests to inspect: tests/test_rate_limiter.py" in summary
+    assert "Supporting files: src/redis_client.py" in summary
+    assert "Missing signals:" in summary
+
+
 def test_pack_command_uses_smart_defaults_and_summary(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
 
@@ -314,6 +348,43 @@ def test_pack_stdout_emits_markdown_package(tmp_path: Path) -> None:
 
     assert "# AgenVantage Context Package" in completed.stdout
     assert "## Task" in completed.stdout
+
+
+def test_pack_feature_handoff_json_emits_agent_ready_payload(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "pack",
+            "--preset",
+            "feature",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+            "--handoff-json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["workflow"] == "feature"
+    assert payload["task_suffix"] == "Add tests for rate limiter Redis fail open behavior"
+    assert "# AgenVantage Context Package" in payload["system_prefix"]
+    assert "prompt_markdown" in payload
+    assert payload["selected_chunks"]
+    assert "src/rate_limiter.py" in payload["change_surface"]["edit_targets"]
+    assert "tests/test_rate_limiter.py" in payload["change_surface"]["test_targets"]
 
 
 def test_pack_preset_debug_enables_provenance_in_manifest(tmp_path: Path) -> None:

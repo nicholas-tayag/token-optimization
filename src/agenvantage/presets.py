@@ -71,6 +71,19 @@ _CHANGE = TaskPreset(
     include_log=True,
 )
 
+_FEATURE = TaskPreset(
+    name="feature",
+    summary="Find the minimum sufficient context to start implementing a feature.",
+    instructions=(
+        "You are preparing a feature implementation plan. Use the provided "
+        "repository excerpts to identify the most likely files to modify, the "
+        "tests to update or add, and any supporting config or helper files an "
+        "implementer should inspect first. Cite chunk identifiers for each "
+        "suggested file, preserve existing conventions, and call out missing "
+        "signals instead of hallucinating an edit surface."
+    ),
+)
+
 _COMPARE = TaskPreset(
     name="compare",
     summary="Compare implementations across repositories.",
@@ -83,7 +96,8 @@ _COMPARE = TaskPreset(
 )
 
 PRESETS: dict[str, TaskPreset] = {
-    preset.name: preset for preset in (_EXPLAIN, _REVIEW, _DEBUG, _CHANGE, _COMPARE)
+    preset.name: preset
+    for preset in (_EXPLAIN, _REVIEW, _DEBUG, _CHANGE, _FEATURE, _COMPARE)
 }
 
 DEFAULT_PRESET = "explain"

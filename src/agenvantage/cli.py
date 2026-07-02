@@ -325,6 +325,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Print the full JSON decision manifest instead of a summary.",
     )
     pack.add_argument(
+        "--handoff-json",
+        action="store_true",
+        help="Print a structured agent handoff payload for IDE or agent workflows.",
+    )
+    pack.add_argument(
         "--copy",
         action="store_true",
         help="Copy the Markdown context package to the system clipboard.",
@@ -399,12 +404,58 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
         )
     if report.get("uncovered_query_terms"):
         lines.append(f"Uncovered concepts: {', '.join(report['uncovered_query_terms'])}")
+    change_surface = report.get("change_surface") or {}
+    if preset_name == "feature":
+        edit_targets = [item["path"] for item in change_surface.get("edit_targets", [])]
+        test_targets = [item["path"] for item in change_surface.get("test_targets", [])]
+        config_targets = [item["path"] for item in change_surface.get("config_targets", [])]
+        supporting_targets = [item["path"] for item in change_surface.get("supporting_targets", [])]
+        missing_signals = change_surface.get("missing_signals", [])
+        if edit_targets:
+            lines.append(f"Likely edit files: {', '.join(edit_targets)}")
+        if test_targets:
+            lines.append(f"Tests to inspect: {', '.join(test_targets)}")
+        if config_targets:
+            lines.append(f"Config/schema targets: {', '.join(config_targets)}")
+        if supporting_targets:
+            lines.append(f"Supporting files: {', '.join(supporting_targets)}")
+        if missing_signals:
+            lines.append(f"Missing signals: {' | '.join(missing_signals)}")
     if top_files:
         lines.append("")
         lines.append("Top selected files:")
         for path, tokens in top_files:
             lines.append(f"  {tokens:>5} tok  {path}")
     return "\n".join(lines)
+
+
+def _build_handoff_payload(markdown: str, report: dict[str, Any], preset_name: str) -> dict[str, Any]:
+    change_surface = report.get("change_surface") or {
+        "edit_targets": [],
+        "test_targets": [],
+        "config_targets": [],
+        "supporting_targets": [],
+        "missing_signals": [],
+    }
+    return {
+        "workflow": preset_name,
+        "task": report["task"],
+        "system_prefix": (
+            markdown.split("## Task\n\n", 1)[0].rstrip()
+            if "## Task\n\n" in markdown
+            else markdown
+        ),
+        "task_suffix": report["task"],
+        "change_surface": {
+            "edit_targets": [item["path"] for item in change_surface.get("edit_targets", [])],
+            "test_targets": [item["path"] for item in change_surface.get("test_targets", [])],
+            "config_targets": [item["path"] for item in change_surface.get("config_targets", [])],
+            "supporting_targets": [item["path"] for item in change_surface.get("supporting_targets", [])],
+            "missing_signals": list(change_surface.get("missing_signals", [])),
+        },
+        "selected_chunks": report.get("selected_chunks", []),
+        "prompt_markdown": markdown,
+    }
 
 
 def _format_provider_validation_summary(report: dict[str, Any]) -> str:
@@ -708,6 +759,7 @@ def _run_pack(args: argparse.Namespace) -> None:
             include_log=settings["include_log"],
             include_globs=settings["include_globs"],
             exclude_globs=settings["exclude_globs"],
+            workflow=settings["preset_name"] if settings["preset_name"] == "feature" else "generic",
         )
     else:
         markdown, report = build_multi_repo_context_package(
@@ -721,6 +773,7 @@ def _run_pack(args: argparse.Namespace) -> None:
             include_log=settings["include_log"],
             include_globs=settings["include_globs"],
             exclude_globs=settings["exclude_globs"],
+            workflow=settings["preset_name"] if settings["preset_name"] == "feature" else "generic",
         )
 
     report["preset"] = settings["preset_name"]
@@ -728,6 +781,8 @@ def _run_pack(args: argparse.Namespace) -> None:
 
     if args.stdout:
         print(markdown)
+    elif args.handoff_json:
+        print(json.dumps(_build_handoff_payload(markdown, report, settings["preset_name"]), indent=2))
     elif args.as_json:
         print(json.dumps(report, indent=2))
     else:
@@ -746,7 +801,7 @@ def _run_pack(args: argparse.Namespace) -> None:
     if args.manifest:
         notices.append(f"Decision manifest written to {args.manifest.resolve()}")
 
-    machine_readable = args.stdout or args.as_json
+    machine_readable = args.stdout or args.as_json or args.handoff_json
     if notices:
         if machine_readable:
             for notice in notices:

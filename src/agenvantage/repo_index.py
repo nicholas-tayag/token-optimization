@@ -8,11 +8,33 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-_INDEX_FORMAT_VERSION = 2
+_INDEX_FORMAT_VERSION = 3
 _SYMBOL_LIMIT = 40
 _IMPORT_LIMIT = 40
 _LOCAL_IMPORT_LIMIT = 40
 _LOCAL_IMPORT_SUFFIXES = (".js", ".mjs", ".ts", ".tsx", ".jsx", ".py")
+
+
+@dataclass(frozen=True)
+class SymbolOccurrence:
+    line_number: int
+    name: str
+    kind: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "line_number": self.line_number,
+            "name": self.name,
+            "kind": self.kind,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SymbolOccurrence":
+        return cls(
+            line_number=int(payload["line_number"]),
+            name=str(payload["name"]),
+            kind=str(payload["kind"]),
+        )
 
 
 @dataclass(frozen=True)
@@ -24,6 +46,8 @@ class RepositoryFileIndexEntry:
     symbols: tuple[str, ...]
     imports: tuple[str, ...]
     local_import_paths: tuple[str, ...]
+    imported_by_paths: tuple[str, ...]
+    symbol_occurrences: tuple[SymbolOccurrence, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +58,8 @@ class RepositoryFileIndexEntry:
             "symbols": list(self.symbols),
             "imports": list(self.imports),
             "local_import_paths": list(self.local_import_paths),
+            "imported_by_paths": list(self.imported_by_paths),
+            "symbol_occurrences": [item.to_dict() for item in self.symbol_occurrences],
         }
 
     @classmethod
@@ -46,6 +72,12 @@ class RepositoryFileIndexEntry:
             symbols=tuple(str(item) for item in payload.get("symbols", [])),
             imports=tuple(str(item) for item in payload.get("imports", [])),
             local_import_paths=tuple(str(item) for item in payload.get("local_import_paths", [])),
+            imported_by_paths=tuple(str(item) for item in payload.get("imported_by_paths", [])),
+            symbol_occurrences=tuple(
+                SymbolOccurrence.from_dict(item)
+                for item in payload.get("symbol_occurrences", [])
+                if isinstance(item, dict)
+            ),
         )
 
 
@@ -121,14 +153,15 @@ def _write_cache(path: Path, repo: Path, entries: dict[str, RepositoryFileIndexE
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def extract_symbol_occurrences(path: Path, text: str) -> tuple[tuple[int, str, str], ...]:
-    occurrences: list[tuple[int, str, str]] = []
+def extract_symbol_occurrences(path: Path, text: str) -> tuple[SymbolOccurrence, ...]:
+    occurrences: list[SymbolOccurrence] = []
     patterns = (
         (r"\b(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "function"),
         (r"\b(?:class|interface|enum|struct)\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "type"),
         (r"\b(const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=", 2, 0, "variable"),
         (r"^\s*(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, re.MULTILINE, "function"),
         (r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\b", 1, 0, "function"),
+        (r"\b(?:test|it|describe)\(\s*['\"]([^'\"]+)", 1, 0, "test"),
         (
             r"\b(?:app|router)\.(?:get|post|put|patch|delete|use)\(\s*['\"]([^'\"]+)",
             1,
@@ -139,20 +172,26 @@ def extract_symbol_occurrences(path: Path, text: str) -> tuple[tuple[int, str, s
     for pattern, group_index, flags, kind in patterns:
         for match in re.finditer(pattern, text, flags):
             occurrences.append(
-                (_line_number_for_offset(text, match.start()), match.group(group_index), kind)
+                SymbolOccurrence(
+                    line_number=_line_number_for_offset(text, match.start()),
+                    name=match.group(group_index),
+                    kind=kind,
+                )
             )
     for export_match in re.finditer(r"\bexport\s*\{([^}]+)\}", text):
         line_number = _line_number_for_offset(text, export_match.start())
         for piece in export_match.group(1).split(","):
             candidate = piece.strip().split(" as ")[0].strip()
             if candidate:
-                occurrences.append((line_number, candidate, "export"))
+                occurrences.append(
+                    SymbolOccurrence(line_number=line_number, name=candidate, kind="export")
+                )
     return tuple(occurrences)
 
 
 def _extract_symbols(path: Path, text: str) -> tuple[str, ...]:
     return _ordered_unique(
-        [name for _, name, _ in extract_symbol_occurrences(path, text)] + [path.stem],
+        [item.name for item in extract_symbol_occurrences(path, text)] + [path.stem],
         _SYMBOL_LIMIT,
     )
 
@@ -208,6 +247,20 @@ def _resolve_local_imports(
     return _ordered_unique(resolved, _LOCAL_IMPORT_LIMIT)
 
 
+def _reverse_local_imports(
+    entries: dict[str, RepositoryFileIndexEntry],
+) -> dict[str, tuple[str, ...]]:
+    imported_by: dict[str, list[str]] = {path: [] for path in entries}
+    for relative_path, entry in entries.items():
+        for target in entry.local_import_paths:
+            if target in imported_by:
+                imported_by[target].append(relative_path)
+    return {
+        path: _ordered_unique(paths, _LOCAL_IMPORT_LIMIT)
+        for path, paths in imported_by.items()
+    }
+
+
 def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndexBuildResult:
     repo = repo.resolve()
     file_list = tuple(files)
@@ -243,6 +296,8 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             symbols=_extract_symbols(path, text),
             imports=_extract_imports(text),
             local_import_paths=(),
+            imported_by_paths=(),
+            symbol_occurrences=extract_symbol_occurrences(path, text),
         )
         entries[relative_path] = entry
         rebuilt_files += 1
@@ -257,6 +312,21 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             local_import_paths=_resolve_local_imports(
                 entry.relative_path, entry.imports, candidate_paths
             ),
+            imported_by_paths=(),
+            symbol_occurrences=entry.symbol_occurrences,
+        )
+    imported_by_paths = _reverse_local_imports(entries)
+    for relative_path, entry in tuple(entries.items()):
+        entries[relative_path] = RepositoryFileIndexEntry(
+            relative_path=entry.relative_path,
+            size_bytes=entry.size_bytes,
+            mtime_ns=entry.mtime_ns,
+            content_hash=entry.content_hash,
+            symbols=entry.symbols,
+            imports=entry.imports,
+            local_import_paths=entry.local_import_paths,
+            imported_by_paths=imported_by_paths.get(entry.relative_path, ()),
+            symbol_occurrences=entry.symbol_occurrences,
         )
     _write_cache(cache_path, repo, entries)
     stats = {

@@ -6,12 +6,14 @@ from agenvantage.presets import DEFAULT_PRESET, PRESETS, get_preset, preset_name
 
 
 def test_expected_presets_exist() -> None:
-    assert set(preset_names()) == {"explain", "review", "debug", "change", "compare"}
+    assert set(preset_names()) == {"explain", "feature", "review", "debug", "change", "compare"}
     assert DEFAULT_PRESET in PRESETS
 
 
 def test_provenance_defaults_match_intent() -> None:
     assert get_preset("explain").include_diff is False
+    assert get_preset("feature").include_diff is False
+    assert get_preset("feature").include_log is False
     assert get_preset("review").include_diff is True
     assert get_preset("debug").include_diff is True
     assert get_preset("debug").include_log is True

@@ -170,6 +170,11 @@ def test_repository_index_resolves_local_import_targets(tmp_path: Path) -> None:
         "lib/form-autofill.mjs"
         in index_result.entries["server.mjs"].local_import_paths
     )
+    assert "server.mjs" in index_result.entries["lib/form-autofill.mjs"].imported_by_paths
+    assert any(
+        item.name == "buildAutofillPlan" and item.line_number == 1
+        for item in index_result.entries["lib/form-autofill.mjs"].symbol_occurrences
+    )
 
 
 def test_context_package_graph_expands_to_imported_helpers(
@@ -210,6 +215,47 @@ def test_context_package_graph_expands_to_imported_helpers(
     assert "server.mjs" in selected_paths
     assert "lib/form-autofill.mjs" in selected_paths
     assert "lib/resume-agent.mjs" in selected_paths
+
+
+def test_feature_context_package_reports_change_surface_with_tests(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_root = tmp_path.parent / "agenvantage-cache-feature"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "rateLimiter.ts").write_text(
+        "export function configureRateLimiter(redis) {\n"
+        "  return redis.consume('ratelimit');\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "rateLimiter.test.ts").write_text(
+        "test('rate limiter fails open when redis is unavailable', () => {\n"
+        "  expect(true).toBe(true);\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Add feature tests for rate limiter Redis fail open behavior",
+        budget=900,
+        counter=TokenCounter(),
+        workflow="feature",
+    )
+
+    change_surface = report["change_surface"]
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert report["pack_workflow"] == "feature"
+    assert "src/rateLimiter.ts" in {
+        item["path"] for item in change_surface["edit_targets"]
+    }
+    assert "tests/rateLimiter.test.ts" in {
+        item["path"] for item in change_surface["test_targets"]
+    }
+    assert "src/rateLimiter.ts" in selected_paths
+    assert "tests/rateLimiter.test.ts" in selected_paths
 
 
 def test_context_package_builds_and_reuses_repository_index(

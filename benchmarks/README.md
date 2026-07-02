@@ -35,6 +35,49 @@ Run it with:
 The generated `artifacts/` files are ignored from git. Commit durable findings
 to `docs/` instead of relying on ignored benchmark output.
 
+## Feature-Work Validation
+
+`feature_work_validation.py` checks the Phase 1 feature-work promise: given a
+local repo and a natural-language feature request, `agenvantage pack --preset
+feature` should expose enough context to begin implementation on the first
+prompt.
+
+The benchmark fixture contains `12` manually annotated tasks across
+`token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`. It
+separates retrieval sufficiency from answer-plan sufficiency and reports:
+
+- `edit_target_recall`: whether the feature change surface names the expected
+  implementation files.
+- `test_target_recall`: whether the feature change surface names expected test
+  files.
+- `required_observation_recall`: whether selected excerpts expose required
+  behavior, config, or test observations.
+- `answer_plan_pass_rate`: deterministic pass signal that the pack includes
+  edit targets, test signals, and enough required observations for an agent to
+  start work.
+- `median_token_reduction_percent`: selected context reduction versus scanned
+  eligible repository context.
+- `missing_signal_warning_rate`: how often the planner explicitly reports
+  insufficient signals instead of inventing certainty.
+
+Run it with:
+
+```bash
+.venv/bin/python benchmarks/feature_work_validation.py \
+  --output-json artifacts/feature-work-validation.json \
+  --output-md artifacts/feature-work-validation.md \
+  --summary
+```
+
+Current local result from July 2, 2026:
+
+- edit-target recall: `1.0`
+- test-target recall: `0.8333`
+- required-observation recall: `1.0`
+- answer-plan pass rate: `0.8333`
+- median token reduction: `90.91%`
+- acceptance pass: `true`
+
 ## Provider Validation
 
 `agenvantage validate-provider` is the claim-audit path for the stronger

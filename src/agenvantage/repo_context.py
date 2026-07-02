@@ -113,6 +113,49 @@ _DEFAULT_INSTRUCTIONS = (
     "behavior, state when context is insufficient, and avoid inventing files, "
     "tests, or runtime results."
 )
+_FEATURE_TEST_TERMS = {
+    "test",
+    "tests",
+    "spec",
+    "coverage",
+    "verify",
+    "validation",
+}
+_FEATURE_CONFIG_TERMS = {
+    "config",
+    "configuration",
+    "schema",
+    "manifest",
+    "env",
+    "flag",
+    "flags",
+    "setting",
+    "settings",
+}
+_TEST_PATH_MARKERS = (
+    ".test.",
+    ".spec.",
+    "/tests/",
+    "/test/",
+    "/qa/",
+    "tests/",
+    "test/",
+    "qa/",
+)
+_CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml"}
+_CONFIG_NAMES = {
+    "package.json",
+    "pyproject.toml",
+    "tsconfig.json",
+    "manifest.json",
+    ".env.example",
+}
+_FEATURE_RESERVED_COUNTS = {
+    "edit_targets": 2,
+    "test_targets": 1,
+    "config_targets": 1,
+    "supporting_targets": 1,
+}
 
 
 @dataclass(frozen=True)
@@ -130,6 +173,7 @@ class CodeChunk:
     file_symbols: tuple[str, ...] = ()
     file_imports: tuple[str, ...] = ()
     file_local_import_paths: tuple[str, ...] = ()
+    file_imported_by_paths: tuple[str, ...] = ()
     score: float = 0.0
     matched_terms: tuple[str, ...] = ()
 
@@ -220,16 +264,16 @@ def _ordered_unique(values: Iterable[str], limit: int) -> tuple[str, ...]:
 
 
 def _chunk_local_symbols(
-    symbol_occurrences: tuple[tuple[int, str, str], ...],
+    symbol_occurrences: tuple[Any, ...],
     *,
     start_line: int,
     end_line: int,
 ) -> tuple[str, ...]:
     window_start = max(1, start_line - _CHUNK_SYMBOL_LOOKBACK_LINES)
     nearby = [
-        (name, kind)
-        for line_number, name, kind in symbol_occurrences
-        if window_start <= line_number <= end_line
+        (item.name, item.kind)
+        for item in symbol_occurrences
+        if window_start <= int(item.line_number) <= end_line
     ]
     prioritized = [
         name
@@ -248,6 +292,35 @@ def _eligible_file(path: Path, repo: Path) -> bool:
     if path.name.lower().startswith(".env"):
         return False
     return path.suffix.lower() in _SUPPORTED_SUFFIXES or path.name.lower() in _SUPPORTED_NAMES
+
+
+def _is_test_path(relative_path: str) -> bool:
+    lowered = relative_path.lower()
+    name = Path(lowered).name
+    return (
+        any(marker in lowered for marker in _TEST_PATH_MARKERS)
+        or ".test." in name
+        or ".spec." in name
+        or name.startswith("test_")
+        or name.endswith("-test.js")
+        or name.endswith("-test.mjs")
+        or name.endswith("-spec.js")
+        or name.endswith("-spec.mjs")
+    )
+
+
+def _is_config_path(relative_path: str) -> bool:
+    path = Path(relative_path)
+    return path.suffix.lower() in _CONFIG_SUFFIXES or path.name.lower() in _CONFIG_NAMES
+
+
+def _is_doc_like_path(relative_path: str) -> bool:
+    lowered = relative_path.lower()
+    return lowered.endswith(".md") or "/docs/" in lowered or lowered.startswith("docs/")
+
+
+def _path_terms(relative_path: str) -> set[str]:
+    return set(_terms(relative_path))
 
 
 def _repo_display_labels(repos: Iterable[Path]) -> tuple[str, ...]:
@@ -345,10 +418,14 @@ def chunks_for_repo(
             lines = path.read_text(encoding="utf-8").splitlines()
         except UnicodeDecodeError:
             continue
-        symbol_occurrences = extract_symbol_occurrences(path, "\n".join(lines))
         relative = path.relative_to(repo).as_posix()
         display_path = f"{repo_label}/{relative}" if repo_label else relative
         indexed_entry = file_index.get(relative) if file_index is not None else None
+        symbol_occurrences = (
+            indexed_entry.symbol_occurrences
+            if indexed_entry is not None and indexed_entry.symbol_occurrences
+            else extract_symbol_occurrences(path, "\n".join(lines))
+        )
         for start in range(0, len(lines), stride):
             content_lines = lines[start : start + chunk_lines]
             if not any(line.strip() for line in content_lines):
@@ -379,6 +456,7 @@ def chunks_for_repo(
                     indexed_entry.symbols if indexed_entry is not None else (),
                     indexed_entry.imports if indexed_entry is not None else (),
                     indexed_entry.local_import_paths if indexed_entry is not None else (),
+                    indexed_entry.imported_by_paths if indexed_entry is not None else (),
                 )
             )
             if end_line == len(lines):
@@ -396,6 +474,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
         chunk_symbol_counts = Counter(_terms(" ".join(chunk.chunk_symbols)))
         symbol_counts = Counter(_terms(" ".join(chunk.file_symbols)))
         import_counts = Counter(_terms(" ".join(chunk.file_imports)))
+        imported_by_counts = Counter(_terms(" ".join(chunk.file_imported_by_paths)))
         matches = tuple(
             term
             for term in query_counts
@@ -405,6 +484,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
             or chunk_symbol_counts.get(term, 0)
             or symbol_counts.get(term, 0)
             or import_counts.get(term, 0)
+            or imported_by_counts.get(term, 0)
         )
         path_score = sum(query_counts[term] * min(path_counts[term], 3) * 5 for term in matches)
         repo_score = sum(query_counts[term] * min(repo_counts[term], 2) for term in matches)
@@ -418,6 +498,9 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
         import_score = sum(
             query_counts[term] * min(import_counts[term], 2) for term in matches
         )
+        imported_by_score = sum(
+            query_counts[term] * min(imported_by_counts[term], 2) for term in matches
+        )
         coverage_bonus = 2 * len(matches)
         score = float(
             path_score
@@ -426,6 +509,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
             + chunk_symbol_score
             + symbol_score
             + import_score
+            + imported_by_score
             + coverage_bonus
         )
         ranked.append(
@@ -443,6 +527,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.file_symbols,
                 chunk.file_imports,
                 chunk.file_local_import_paths,
+                chunk.file_imported_by_paths,
                 score,
                 matches,
             )
@@ -479,6 +564,166 @@ def _build_candidate_pool(ranked: tuple[CodeChunk, ...], top_k: int) -> list[Cod
     return candidate_pool
 
 
+def _best_chunk_for_path(
+    ranked: tuple[CodeChunk, ...],
+    display_path: str,
+) -> CodeChunk | None:
+    for chunk in ranked:
+        if chunk.display_path == display_path:
+            return chunk
+    return None
+
+
+def _file_kind(relative_path: str) -> str:
+    if _is_test_path(relative_path):
+        return "test"
+    if _is_config_path(relative_path):
+        return "config"
+    if _is_doc_like_path(relative_path):
+        return "supporting"
+    return "source"
+
+
+def _feature_path_score(
+    chunk: CodeChunk,
+    *,
+    task_terms: set[str],
+    feature_mentions_tests: bool,
+    feature_mentions_config: bool,
+) -> float:
+    path_terms = _path_terms(chunk.relative_path)
+    symbol_terms = set(_terms(" ".join(chunk.file_symbols)))
+    chunk_terms = set(chunk.matched_terms)
+    exact_path_hits = len(task_terms & path_terms)
+    exact_symbol_hits = len(task_terms & symbol_terms)
+    exact_chunk_hits = len(task_terms & chunk_terms)
+    score = chunk.score + (exact_path_hits * 12) + (exact_symbol_hits * 8) + (exact_chunk_hits * 5)
+    if _is_test_path(chunk.relative_path):
+        score += 10 if feature_mentions_tests else 4
+    if _is_config_path(chunk.relative_path):
+        score += 8 if feature_mentions_config else 2
+    return score
+
+
+def _build_feature_change_surface(
+    ranked: tuple[CodeChunk, ...],
+    task: str,
+    include_diff: bool,
+    include_log: bool,
+) -> dict[str, Any]:
+    task_terms = set(_terms(task))
+    feature_mentions_tests = bool(task_terms & _FEATURE_TEST_TERMS)
+    feature_mentions_config = bool(task_terms & _FEATURE_CONFIG_TERMS)
+
+    file_candidates: dict[str, dict[str, Any]] = {}
+    for chunk in ranked:
+        candidate = file_candidates.get(chunk.display_path)
+        file_score = _feature_path_score(
+            chunk,
+            task_terms=task_terms,
+            feature_mentions_tests=feature_mentions_tests,
+            feature_mentions_config=feature_mentions_config,
+        )
+        if candidate is None or file_score > candidate["score"]:
+            file_candidates[chunk.display_path] = {
+                "path": chunk.display_path,
+                "relative_path": chunk.relative_path,
+                "repo_label": chunk.repo_label,
+                "repo_path": chunk.repo_path,
+                "best_chunk_id": chunk.chunk_id,
+                "matched_terms": list(chunk.matched_terms),
+                "score": file_score,
+                "kind": _file_kind(chunk.relative_path),
+                "local_imports": list(chunk.file_local_import_paths),
+                "imported_by": list(chunk.file_imported_by_paths),
+            }
+
+    ordered = sorted(
+        file_candidates.values(),
+        key=lambda item: (item["score"], item["path"]),
+        reverse=True,
+    )
+    edit_targets = [item for item in ordered if item["kind"] == "source"][: _FEATURE_RESERVED_COUNTS["edit_targets"]]
+
+    edit_paths = {item["relative_path"] for item in edit_targets}
+    support_paths: list[str] = []
+    for target in edit_targets:
+        support_paths.extend(target["local_imports"])
+        support_paths.extend(target["imported_by"])
+    supporting_targets = []
+    for path in _ordered_unique(support_paths, 12):
+        for item in ordered:
+            if item["relative_path"] == path and item["relative_path"] not in edit_paths:
+                supporting_targets.append(item)
+                break
+        if len(supporting_targets) >= _FEATURE_RESERVED_COUNTS["supporting_targets"]:
+            break
+
+    test_targets: list[dict[str, Any]] = []
+    for item in ordered:
+        if item["kind"] != "test":
+            continue
+        if (
+            feature_mentions_tests
+            or any(term in _path_terms(item["relative_path"]) for term in task_terms)
+            or any(
+                Path(edit["relative_path"]).stem.split(".")[0] in item["relative_path"]
+                for edit in edit_targets
+            )
+        ):
+            test_targets.append(item)
+        if len(test_targets) >= _FEATURE_RESERVED_COUNTS["test_targets"]:
+            break
+
+    config_targets: list[dict[str, Any]] = []
+    for item in ordered:
+        if item["kind"] != "config":
+            continue
+        if feature_mentions_config or any(term in _path_terms(item["relative_path"]) for term in task_terms):
+            config_targets.append(item)
+        if len(config_targets) >= _FEATURE_RESERVED_COUNTS["config_targets"]:
+            break
+
+    missing_signals: list[str] = []
+    if not test_targets:
+        missing_signals.append("No likely test target was identified for this feature task.")
+    if feature_mentions_config and not config_targets:
+        missing_signals.append("Task suggests config or schema work, but no strong config target was identified.")
+    if not supporting_targets and edit_targets:
+        missing_signals.append("No strong supporting implementation neighbor was identified from local imports.")
+    if not edit_targets:
+        missing_signals.append("No likely edit target was identified from exact path, symbol, or chunk matches.")
+    if (include_diff or include_log) and not (include_diff and include_log):
+        missing_signals.append("Feature work may benefit from both diff and recent log provenance for changed-behavior context.")
+
+    return {
+        "edit_targets": edit_targets,
+        "test_targets": test_targets,
+        "config_targets": config_targets,
+        "supporting_targets": supporting_targets,
+        "missing_signals": missing_signals,
+    }
+
+
+def _select_feature_reserved_chunks(
+    ranked: tuple[CodeChunk, ...],
+    change_surface: dict[str, Any],
+) -> list[CodeChunk]:
+    reserved: list[CodeChunk] = []
+    seen_paths: set[str] = set()
+    for category in ("edit_targets", "test_targets", "config_targets", "supporting_targets"):
+        for target in change_surface.get(category, []):
+            path = target["path"]
+            if path in seen_paths:
+                continue
+            chunk = _best_chunk_for_path(ranked, path)
+            if chunk is None:
+                continue
+            reserved.append(chunk)
+            seen_paths.add(path)
+    return reserved
+
+
 def build_multi_repo_context_package(
     repos: Iterable[Path],
     task: str,
@@ -490,6 +735,7 @@ def build_multi_repo_context_package(
     include_log: bool = False,
     include_globs: tuple[str, ...] = (),
     exclude_globs: tuple[str, ...] = (),
+    workflow: str = "generic",
 ) -> tuple[str, dict[str, Any]]:
     if budget <= 0:
         raise ValueError("Token budget must be positive.")
@@ -581,11 +827,32 @@ def build_multi_repo_context_package(
     excluded: list[dict[str, Any]] = []
     rendered = prefix
     candidate_pool = _build_candidate_pool(ranked, top_k)
+    change_surface = (
+        _build_feature_change_surface(ranked, task, include_diff, include_log)
+        if workflow == "feature"
+        else None
+    )
     selected_paths: Counter[str] = Counter()
     selected_repos: Counter[str] = Counter()
     selected_terms: set[str] = set()
     selected_dependency_targets: Counter[tuple[str, str]] = Counter()
     multiple_repos = len(repo_inputs) > 1
+    if change_surface is not None:
+        for chunk in _select_feature_reserved_chunks(ranked, change_surface):
+            addition = chunk.render() + "\n\n"
+            if counter.count(rendered + addition) > budget:
+                excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
+                continue
+            selected.append(chunk)
+            rendered += addition
+            selected_paths[chunk.display_path] += 1
+            selected_repos[chunk.repo_label] += 1
+            selected_terms.update(chunk.matched_terms)
+            for local_import_path in chunk.file_local_import_paths:
+                selected_dependency_targets[(chunk.repo_label, local_import_path)] += 1
+            candidate_pool = [
+                candidate for candidate in candidate_pool if candidate.display_path != chunk.display_path
+            ]
     while candidate_pool:
         chunk = max(
             candidate_pool,
@@ -598,6 +865,22 @@ def build_multi_repo_context_package(
                         0.45
                         * selected_dependency_targets[(candidate.repo_label, candidate.relative_path)]
                     )
+                )
+                * (
+                    1.35
+                    if change_surface is not None
+                    and any(
+                        candidate.display_path
+                        == target["path"]
+                        for category in (
+                            "edit_targets",
+                            "test_targets",
+                            "config_targets",
+                            "supporting_targets",
+                        )
+                        for target in change_surface.get(category, [])
+                    )
+                    else 1
                 )
                 / (
                     1
@@ -644,6 +927,7 @@ def build_multi_repo_context_package(
     report = {
         "project": "AgenVantage",
         "workflow": "repository_context_package",
+        "pack_workflow": workflow,
         "task": task,
         "tokenizer": {"model": counter.model, "encoding": counter.encoding_name},
         "budget": budget,
@@ -667,6 +951,7 @@ def build_multi_repo_context_package(
         "selected_repo_labels": sorted(selected_repos),
         "selected_chunks": [chunk.to_dict() for chunk in selected],
         "excluded_ranked_chunks": excluded,
+        "change_surface": change_surface,
         "index": index_totals,
         "provenance": {
             "enabled": include_diff or include_log,
@@ -677,9 +962,13 @@ def build_multi_repo_context_package(
             "selected_provenance_tokens": sum(section.tokens for section in provenance_sections),
         },
         "selection_strategy": (
-            "term-ranked chunks with file-level symbol and import boosts plus a moderate per-file diversity penalty"
-            if not multiple_repos
-            else "term-ranked chunks with file-level symbol and import boosts, moderate per-file, and light per-repository diversity penalties"
+            "feature-work exploration plus deterministic chunk ranking with category-aware reserved paths"
+            if workflow == "feature"
+            else (
+                "term-ranked chunks with file-level symbol and import boosts plus a moderate per-file diversity penalty"
+                if not multiple_repos
+                else "term-ranked chunks with file-level symbol and import boosts, moderate per-file, and light per-repository diversity penalties"
+            )
         ),
         "measurement_notes": [
             "This compares local packaged context with the scanned eligible source corpus.",
@@ -704,6 +993,7 @@ def build_context_package(
     include_log: bool = False,
     include_globs: tuple[str, ...] = (),
     exclude_globs: tuple[str, ...] = (),
+    workflow: str = "generic",
 ) -> tuple[str, dict[str, Any]]:
     return build_multi_repo_context_package(
         [repo],
@@ -716,6 +1006,7 @@ def build_context_package(
         include_log=include_log,
         include_globs=include_globs,
         exclude_globs=exclude_globs,
+        workflow=workflow,
     )
 
 

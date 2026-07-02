@@ -20,12 +20,13 @@ The current local workflow provides:
 - an `agenvantage pack` command for real coding questions over local
   repositories, including multi-repository tasks with repeated `--repo` flags,
   smart defaults (`--repo .`, default budget), task presets
-  (`explain`/`review`/`debug`/`change`/`compare`), clipboard/stdout output, and
+  (`explain`/`feature`/`review`/`debug`/`change`/`compare`), clipboard/stdout output, and
   optional `.agenvantage.toml` project defaults;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
-- a persistent local repository-metadata index that caches per-file symbols and
-  imports outside the worktree for reuse across runs;
+- a persistent local repository-metadata index that caches per-file symbols,
+  line-addressed symbol occurrences, local imports, and reverse import edges
+  outside the worktree for reuse across runs;
 - optional git diff and recent commit-log provenance sections for changed-
   behavior and review-style tasks;
 - optional include and exclude path globs for narrowing eligible repository
@@ -34,11 +35,15 @@ The current local workflow provides:
 - chunk-local anchor symbols plus file-level symbol and import boosts layered
   onto chunk ranking, with a diversity-aware candidate pool and
   imported-helper expansion before budget selection;
+- a deterministic feature-work planner that separates candidate exploration
+  from final packing, reserves room for likely edit files, tests, config/schema
+  evidence, and supporting neighbors, and can emit a structured handoff JSON
+  artifact for agent workflows;
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and
-- a use-case benchmark that scores required behavioral observations against the
-  selected excerpts, not just file recall;
+- use-case and feature-work benchmarks that score required behavioral
+  observations against the selected excerpts, not just file recall;
 - an experimental `agenvantage validate-provider` workflow that can dry-run a
   cache-eligible synthetic dataset locally, normalize raw usage artifacts
   including OTLP spans/logs/per-request metrics, replay recorded provider
@@ -156,14 +161,20 @@ flags:
 | Preset  | Focus                              | Includes diff | Includes log |
 |---------|------------------------------------|---------------|--------------|
 | explain | describe behavior (default)        | no            | no           |
+| feature | start implementing a feature       | no            | no           |
 | review  | correctness, edge cases, risk      | yes           | no           |
 | debug   | localize a bug from evidence       | yes           | yes          |
 | change  | plan a minimal, correct edit       | yes           | yes          |
 | compare | contrast implementations per repo  | no            | no           |
 
 ```bash
+agenvantage pack --preset feature --task "Add upload limit smoke-test coverage."
 agenvantage pack --preset review --task "Review the new upload limit change."
 ```
+
+The `feature` preset prints likely edit files, tests to inspect, config/schema
+targets, supporting files, covered concepts, missing signals, and token
+reduction. It is tuned for the first prompt of a coding-agent workflow.
 
 ### Output modes
 
@@ -171,6 +182,8 @@ agenvantage pack --preset review --task "Review the new upload limit change."
 agenvantage pack --task "..."                 # human summary (default)
 agenvantage pack --task "..." --stdout        # only the Markdown package (pipe-friendly)
 agenvantage pack --task "..." --json          # full JSON decision manifest
+agenvantage pack --task "..." --preset feature --handoff-json
+                                               # structured agent handoff payload
 agenvantage pack --task "..." --copy          # copy the package to the clipboard
 agenvantage pack --task "..." \
   --output artifacts/context.md \
