@@ -803,6 +803,110 @@ def _percentile(values: list[float], percentile: float) -> float:
     return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction, 2)
 
 
+def _percentile_raw(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = (len(ordered) - 1) * percentile
+    lower = int(index)
+    upper = min(lower + 1, len(ordered) - 1)
+    if lower == upper:
+        return float(ordered[lower])
+    fraction = index - lower
+    return float(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
+
+
+def _bootstrap_confidence_interval(
+    values: list[float],
+    *,
+    iterations: int = 500,
+    confidence: float = 0.95,
+    seed: str = "agenvantage-bootstrap",
+) -> dict[str, float] | None:
+    if not values:
+        return None
+    if len(values) == 1:
+        return {
+            "confidence": confidence,
+            "lower": round(values[0], 8),
+            "upper": round(values[0], 8),
+        }
+    rng = random.Random(seed)
+    means: list[float] = []
+    sample_size = len(values)
+    for _ in range(iterations):
+        sample = [values[rng.randrange(sample_size)] for _ in range(sample_size)]
+        means.append(float(statistics.mean(sample)))
+    lower_q = (1.0 - confidence) / 2.0
+    upper_q = 1.0 - lower_q
+    return {
+        "confidence": confidence,
+        "lower": round(_percentile_raw(means, lower_q), 8),
+        "upper": round(_percentile_raw(means, upper_q), 8),
+    }
+
+
+def _paired_case_comparison(records: list[dict[str, Any]]) -> dict[str, Any]:
+    per_policy_case: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for record in records:
+        policy_id = str(record.get("policy_id", "")).strip()
+        case_id = str(record.get("case_id", "")).strip()
+        if not policy_id or not case_id:
+            continue
+        policy_bucket = per_policy_case.setdefault(policy_id, {})
+        policy_bucket.setdefault(case_id, []).append(record)
+
+    baseline_cases = per_policy_case.get("full_unaligned", {})
+    candidate_cases = per_policy_case.get("budgeted_cache_aligned", {})
+    overlapping_case_ids = sorted(set(baseline_cases) & set(candidate_cases))
+
+    metric_deltas: dict[str, list[float]] = {
+        "request_cost_usd": [],
+        "latency_ms": [],
+        "correctness_pass_rate": [],
+        "grounded_citation_pass_rate": [],
+        "safety_pass_rate": [],
+        "overall_pass_rate": [],
+    }
+
+    for case_id in overlapping_case_ids:
+        baseline_records = baseline_cases[case_id]
+        candidate_records = candidate_cases[case_id]
+
+        def _avg_metric(items: list[dict[str, Any]], metric_name: str) -> float:
+            if metric_name in {"request_cost_usd", "latency_ms"}:
+                values = [float(item.get(metric_name, 0.0)) for item in items]
+                return float(statistics.mean(values)) if values else 0.0
+            grade_key = metric_name.replace("_pass_rate", "_pass")
+            values = [
+                1.0 if (item.get("grade") or {}).get(grade_key) else 0.0
+                for item in items
+            ]
+            return float(statistics.mean(values)) if values else 0.0
+
+        for metric_name in metric_deltas:
+            candidate_value = _avg_metric(candidate_records, metric_name)
+            baseline_value = _avg_metric(baseline_records, metric_name)
+            metric_deltas[metric_name].append(round(candidate_value - baseline_value, 8))
+
+    metrics: dict[str, Any] = {}
+    for metric_name, deltas in metric_deltas.items():
+        metrics[metric_name] = {
+            "mean_delta": round(float(statistics.mean(deltas)), 8) if deltas else 0.0,
+            "confidence_interval": _bootstrap_confidence_interval(
+                deltas,
+                seed=f"agenvantage-bootstrap:{metric_name}:{len(deltas)}",
+            ),
+        }
+
+    return {
+        "baseline_policy_id": "full_unaligned",
+        "candidate_policy_id": "budgeted_cache_aligned",
+        "overlapping_case_count": len(overlapping_case_ids),
+        "metrics": metrics,
+    }
+
+
 def _claim_audit(
     summary_by_policy: dict[str, dict[str, Any]],
     audit_requirements: dict[str, Any] | None,
@@ -1494,6 +1598,7 @@ def summarize_provider_validation_records(
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
+        "paired_case_comparison": _paired_case_comparison(records),
         "evidence_readiness": _evidence_readiness(
             policies,
             resolved_requirements,

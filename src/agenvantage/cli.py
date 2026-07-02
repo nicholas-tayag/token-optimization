@@ -419,6 +419,46 @@ def _format_provider_validation_summary(report: dict[str, Any]) -> str:
         status = "supported" if claim.get("supported") else "not yet supported"
         lines.append(f"  {claim_name:<28} {status}  {claim.get('reason', '')}")
 
+    paired = report.get("paired_case_comparison", {})
+    paired_metrics = paired.get("metrics", {})
+    if paired and paired_metrics:
+        lines.extend(
+            [
+                "",
+                "Paired deltas (candidate - baseline):",
+                (
+                    "  "
+                    f"overlapping_cases={paired.get('overlapping_case_count', 0)} "
+                    f"baseline={paired.get('baseline_policy_id')} "
+                    f"candidate={paired.get('candidate_policy_id')}"
+                ),
+            ]
+        )
+        for metric_name in (
+            "request_cost_usd",
+            "latency_ms",
+            "correctness_pass_rate",
+            "grounded_citation_pass_rate",
+            "safety_pass_rate",
+            "overall_pass_rate",
+        ):
+            metric = paired_metrics.get(metric_name)
+            if not isinstance(metric, dict):
+                continue
+            interval = metric.get("confidence_interval") or {}
+            if interval:
+                ci_text = (
+                    f"[{interval.get('lower')}, {interval.get('upper')}] "
+                    f"@ {interval.get('confidence')}"
+                )
+            else:
+                ci_text = "n/a"
+            lines.append(
+                "  "
+                f"{metric_name:<28} mean_delta={metric.get('mean_delta', 0.0)} "
+                f"ci={ci_text}"
+            )
+
     readiness = report.get("evidence_readiness", {})
     if readiness:
         completeness = readiness.get("record_completeness", {})

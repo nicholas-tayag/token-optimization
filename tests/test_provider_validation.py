@@ -213,6 +213,10 @@ def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> No
     assert replay_report["claim_audit"]["real_api_cost_savings"]["supported"] is True
     assert replay_report["claim_audit"]["broad_quality_retention"]["supported"] is True
     assert replay_report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
+    assert replay_report["paired_case_comparison"]["overlapping_case_count"] == 30
+    assert (
+        replay_report["paired_case_comparison"]["metrics"]["request_cost_usd"]["mean_delta"] < 0
+    )
 
 
 def test_normalize_plain_provider_records_computes_costs() -> None:
@@ -343,6 +347,17 @@ def test_normalize_otel_export_supports_production_scope_override() -> None:
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is True
     assert report["evidence_readiness"]["production_scope_ready"] is True
     assert report["evidence_readiness"]["latency_sample_requirement_met"] is True
+    assert report["paired_case_comparison"]["overlapping_case_count"] == 30
+    request_cost_interval = report["paired_case_comparison"]["metrics"]["request_cost_usd"][
+        "confidence_interval"
+    ]
+    assert request_cost_interval is not None
+    assert request_cost_interval["upper"] < 0
+    latency_interval = report["paired_case_comparison"]["metrics"]["latency_ms"][
+        "confidence_interval"
+    ]
+    assert latency_interval is not None
+    assert latency_interval["upper"] < 0
 
 
 def test_evidence_readiness_tracks_missing_grade_fields() -> None:

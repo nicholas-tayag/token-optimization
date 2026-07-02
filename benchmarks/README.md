@@ -106,7 +106,10 @@ The claim audit is intentionally conservative. Without enough measured requests,
 it should continue reporting that latency or broad quality-retention claims are
 not yet supported. The provider summary now also prints an evidence-readiness
 section so you can see whether the artifact is blocked by sample count,
-environment scope, missing grader fields, or incomplete case pairing.
+environment scope, missing grader fields, or incomplete case pairing. It also
+prints paired case deltas with bootstrap confidence intervals for cost,
+latency, and quality metrics so the result can be defended case-by-case rather
+than only through aggregate means.
 
 ## Claim Status
 

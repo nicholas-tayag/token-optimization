@@ -199,6 +199,7 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
     )
 
     assert "AgenVantage provider validation" in completed.stdout
+    assert "Paired deltas (candidate - baseline):" in completed.stdout
     assert "Evidence readiness:" in completed.stdout
     report = json.loads(output_path.read_text(encoding="utf-8"))
     assert report["environment_scope"] == "production"
