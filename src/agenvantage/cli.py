@@ -181,6 +181,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Print a human-readable summary instead of raw JSON.",
     )
     validate_provider.add_argument(
+        "--trace-console",
+        action="store_true",
+        help="Print OpenTelemetry provider-validation spans to the console.",
+    )
+    validate_provider.add_argument(
         "--model",
         default="gpt-4o-mini",
         help="Provider model identifier for live validation.",
@@ -752,6 +757,9 @@ def _run_pack(args: argparse.Namespace) -> None:
 
 
 def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
+    if args.trace_console:
+        configure_console_tracing()
+
     counter = TokenCounter(args.model)
     dataset = (
         load_provider_validation_dataset(args.fixture)
@@ -835,6 +843,7 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
         _write_report(provider_validation_report_to_otel_export(report), args.otel_export)
         print(f"OTLP-style export written to {args.otel_export.resolve()}")
 
+    flush_tracing()
     return report
 
 

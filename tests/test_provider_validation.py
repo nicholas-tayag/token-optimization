@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
 from agenvantage.provider_validation import (
     PricingSnapshot,
     assemble_validation_packages,
@@ -12,6 +17,7 @@ from agenvantage.provider_validation import (
     normalize_provider_records_payload,
     provider_validation_report_to_otel_export,
     reconcile_provider_costs,
+    run_provider_validation,
     summarize_cost_api_buckets,
     summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
@@ -158,8 +164,77 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is False
     assert report["evidence_readiness"]["production_scope_ready"] is False
     assert report["evidence_readiness"]["latency_sample_requirement_met"] is False
+
+
+class _FakeResponsesTransport:
+    def create_response(self, payload: dict[str, object]) -> dict[str, object]:
+        _ = payload
+        return {
+            "output_text": (
+                '{"affected_service":"checkoutservice","suspected_failure":"payment_service_unreachable",'
+                '"evidence_component_ids":["case1-metric-checkout","case1-trace-payment"],'
+                '"recommended_next_action":"Verify paymentservice connectivity before requesting approval for any rollback.",'
+                '"requires_approval":true,'
+                '"tool_calls":[{"tool":"query_metrics","arguments":{"service":"paymentservice","metric":"timeout_rate","window":"30m"}}]}'
+            ),
+            "usage": {
+                "input_tokens": 1700,
+                "output_tokens": 220,
+                "input_tokens_details": {"cached_tokens": 1200},
+            },
+        }
+
+
+def test_run_provider_validation_emits_genai_spans() -> None:
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        provider = TracerProvider()
+        trace.set_tracer_provider(provider)
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    dataset = load_provider_validation_dataset(FIXTURE)
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+
+    report = run_provider_validation(
+        dataset,
+        TokenCounter(),
+        _FakeResponsesTransport(),
+        "gpt-test",
+        pricing,
+        repeats=1,
+        max_cases=1,
+    )
+    provider.force_flush()
+
+    spans = [span for span in exporter.get_finished_spans() if span.name == "gen_ai.request"]
+
+    assert report["record_count"] == 4
+    assert len(spans) == 4
+    assert {span.attributes["agenvantage.policy_id"] for span in spans} == {
+        "full_unaligned",
+        "full_cache_aligned",
+        "budgeted_unaligned",
+        "budgeted_cache_aligned",
+    }
+    for span in spans:
+        assert span.attributes["gen_ai.request.model"] == "gpt-test"
+        assert span.attributes["agenvantage.case_id"] == dataset.cases[0].case_id
+        assert span.attributes["gen_ai.usage.input_tokens"] == 1700
+        assert span.attributes["gen_ai.usage.cache_read.input_tokens"] == 1200
+        assert span.attributes["gen_ai.usage.output_tokens"] == 220
+        assert span.attributes["agenvantage.request_cost_usd"] == 0.00106
+        assert "agenvantage.grade.overall_pass" in span.attributes
     assert report["evidence_readiness"]["broad_case_requirement_met"] is False
-    assert report["evidence_readiness"]["record_completeness"]["complete_grade_record_count"] == 2
+    assert report["evidence_readiness"]["record_completeness"]["complete_grade_record_count"] == 4
 
 
 def test_claim_audit_cost_savings_requires_paired_case_evidence() -> None:

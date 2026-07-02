@@ -87,6 +87,7 @@ export OPENAI_API_KEY=...
   --pricing artifacts/openai-pricing.json \
   --records artifacts/provider-validation.json \
   --otel-export artifacts/provider-validation-otel.json \
+  --trace-console \
   --summary
 ```
 
@@ -140,6 +141,10 @@ round-trip it through normalization:
   --records artifacts/provider-validation-roundtrip.json \
   --summary
 ```
+
+For the concrete billed-cost proof sequence, including how to reconcile the
+saved report against an OpenAI Costs API export, see
+[docs/provider-cost-proof-playbook.md](../docs/provider-cost-proof-playbook.md).
 
 ## Claim Status
 

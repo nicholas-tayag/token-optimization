@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from agenvantage.models import ContextComponent, ContextPackage, ExcludedComponent
 from agenvantage.tokenizer import TokenCounter
 
@@ -722,6 +725,7 @@ def run_provider_validation(
 ) -> dict[str, Any]:
     cases = dataset.cases[: max_cases or len(dataset.cases)]
     records: list[dict[str, Any]] = []
+    tracer = trace.get_tracer("agenvantage.provider_validation")
 
     for case in cases:
         packages = assemble_validation_packages(dataset, case, counter, budget)
@@ -731,33 +735,73 @@ def run_provider_validation(
             for policy_name in policy_order:
                 package = packages[policy_name]
                 started_at = time.time()
-                raw_response = transport.create_response(
-                    {
-                        "model": model,
-                        "store": False,
-                        "prompt_cache_key": f"{prompt_cache_key_prefix}:{dataset.dataset_id}:{policy_name}",
-                        "input": package.rendered_context,
-                        "text": {
-                            "format": {
-                                "type": "json_schema",
-                                "name": "incident_assessment",
-                                "strict": True,
-                                "schema": _response_schema(),
-                            }
-                        },
-                    }
+                prompt_cache_key = (
+                    f"{prompt_cache_key_prefix}:{dataset.dataset_id}:{policy_name}"
                 )
-                latency_ms = round((time.time() - started_at) * 1000, 2)
-                response_text = _extract_output_text(raw_response)
-                grade = grade_provider_response(
-                    case,
-                    response_text,
-                    {component.component_id for component in package.included},
-                )
-                input_tokens, cached_input_tokens, output_tokens = _extract_usage(raw_response)
-                cost_usd = compute_request_cost(
-                    input_tokens, cached_input_tokens, output_tokens, pricing
-                )
+                request_payload = {
+                    "model": model,
+                    "store": False,
+                    "prompt_cache_key": prompt_cache_key,
+                    "input": package.rendered_context,
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": "incident_assessment",
+                            "strict": True,
+                            "schema": _response_schema(),
+                        }
+                    },
+                }
+                with tracer.start_as_current_span("gen_ai.request") as span:
+                    span.set_attribute("gen_ai.request.model", model)
+                    span.set_attribute("agenvantage.dataset_id", dataset.dataset_id)
+                    span.set_attribute("agenvantage.environment_scope", dataset.environment_scope)
+                    span.set_attribute("agenvantage.case_id", case.case_id)
+                    span.set_attribute("agenvantage.failure_type", case.failure_type)
+                    span.set_attribute("agenvantage.policy_id", policy_name)
+                    span.set_attribute("agenvantage.repeat_index", repeat_index)
+                    span.set_attribute("agenvantage.package_input_tokens", package.input_tokens)
+                    span.set_attribute(
+                        "agenvantage.package_stable_prefix_tokens",
+                        package.stable_prefix_tokens,
+                    )
+                    span.set_attribute("gen_ai.prompt.cache_key", prompt_cache_key)
+                    try:
+                        raw_response = transport.create_response(request_payload)
+                        latency_ms = round((time.time() - started_at) * 1000, 2)
+                        response_text = _extract_output_text(raw_response)
+                        grade = grade_provider_response(
+                            case,
+                            response_text,
+                            {component.component_id for component in package.included},
+                        )
+                        input_tokens, cached_input_tokens, output_tokens = _extract_usage(raw_response)
+                        cost_usd = compute_request_cost(
+                            input_tokens, cached_input_tokens, output_tokens, pricing
+                        )
+                        span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                        span.set_attribute(
+                            "gen_ai.usage.cache_read.input_tokens",
+                            cached_input_tokens,
+                        )
+                        span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+                        span.set_attribute("agenvantage.latency_ms", latency_ms)
+                        span.set_attribute("agenvantage.request_cost_usd", cost_usd)
+                        span.set_attribute(
+                            "agenvantage.grade.correctness_pass",
+                            grade.correctness_pass,
+                        )
+                        span.set_attribute("agenvantage.grade.safety_pass", grade.safety_pass)
+                        span.set_attribute(
+                            "agenvantage.grade.grounded_citation_pass",
+                            grade.grounded_citation_pass,
+                        )
+                        span.set_attribute("agenvantage.grade.overall_pass", grade.overall_pass)
+                        span.set_attribute("agenvantage.grade.score", grade.score)
+                    except Exception as exc:
+                        span.record_exception(exc)
+                        span.set_status(Status(StatusCode.ERROR))
+                        raise
                 records.append(
                     {
                         "dataset_id": dataset.dataset_id,

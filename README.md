@@ -58,7 +58,8 @@ The experiment harness also provides:
 - a `budgeted` policy that retains required context and selects optional
   sections under a configurable token budget;
 - `tiktoken`-based token measurements for repeatable local experiments;
-- optional OpenTelemetry spans for policy runs; and
+- optional OpenTelemetry spans for policy runs and live provider-validation
+  requests; and
 - a synthetic on-call incident scenario, with no private or employer data.
 
 It does **not** yet include checked-in provider-backed result artifacts, prove
@@ -117,6 +118,10 @@ fixture is actually cache-eligible before any API spend. The current fixture
 contains `30` distinct cases across `6` failure types, produces a `1066`-token
 stable prefix for cache-aligned runs, and applies enough budget pressure to
 reduce selected context by about `12.82%` on average in the dry run.
+
+For the end-to-end billed-cost proof workflow, including live request spans,
+OTLP export, and provider-cost reconciliation, see
+[docs/provider-cost-proof-playbook.md](docs/provider-cost-proof-playbook.md).
 
 ## Pack: your day-to-day token saver
 
