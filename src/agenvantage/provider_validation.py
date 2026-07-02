@@ -906,6 +906,153 @@ def _claim_audit(
     }
 
 
+def _record_completeness_audit(records: list[dict[str, Any]]) -> dict[str, Any]:
+    required_grade_keys = (
+        "correctness_pass",
+        "safety_pass",
+        "grounded_citation_pass",
+        "overall_pass",
+        "score",
+    )
+    missing_grade = 0
+    missing_case_id = 0
+    missing_policy_id = 0
+    missing_failure_type = 0
+    missing_latency_ms = 0
+    missing_request_cost_usd = 0
+    missing_input_tokens = 0
+    missing_output_tokens = 0
+    complete_record_count = 0
+
+    for record in records:
+        has_case_id = bool(str(record.get("case_id", "")).strip())
+        has_policy_id = bool(str(record.get("policy_id", "")).strip())
+        has_failure_type = bool(str(record.get("failure_type", "")).strip())
+        has_latency_ms = record.get("latency_ms") not in (None, "")
+        has_request_cost_usd = record.get("request_cost_usd") not in (None, "")
+        has_input_tokens = record.get("input_tokens") not in (None, "")
+        has_output_tokens = record.get("output_tokens") not in (None, "")
+
+        if not str(record.get("case_id", "")).strip():
+            missing_case_id += 1
+        if not str(record.get("policy_id", "")).strip():
+            missing_policy_id += 1
+        if not str(record.get("failure_type", "")).strip():
+            missing_failure_type += 1
+        if record.get("latency_ms") in (None, ""):
+            missing_latency_ms += 1
+        if record.get("request_cost_usd") in (None, ""):
+            missing_request_cost_usd += 1
+        if record.get("input_tokens") in (None, ""):
+            missing_input_tokens += 1
+        if record.get("output_tokens") in (None, ""):
+            missing_output_tokens += 1
+
+        grade = record.get("grade")
+        has_grade = isinstance(grade, dict) and all(key in grade for key in required_grade_keys)
+        if not has_grade:
+            missing_grade += 1
+        if (
+            has_case_id
+            and has_policy_id
+            and has_failure_type
+            and has_latency_ms
+            and has_request_cost_usd
+            and has_input_tokens
+            and has_output_tokens
+            and has_grade
+        ):
+            complete_record_count += 1
+
+    return {
+        "record_count": len(records),
+        "complete_grade_record_count": len(records) - missing_grade,
+        "complete_grade_coverage_rate": round(
+            ((len(records) - missing_grade) / len(records)),
+            2,
+        )
+        if records
+        else 0.0,
+        "complete_record_count": complete_record_count,
+        "missing_case_id": missing_case_id,
+        "missing_policy_id": missing_policy_id,
+        "missing_failure_type": missing_failure_type,
+        "missing_latency_ms": missing_latency_ms,
+        "missing_request_cost_usd": missing_request_cost_usd,
+        "missing_input_tokens": missing_input_tokens,
+        "missing_output_tokens": missing_output_tokens,
+        "missing_grade": missing_grade,
+    }
+
+
+def _evidence_readiness(
+    summary_by_policy: dict[str, dict[str, Any]],
+    audit_requirements: dict[str, Any] | None,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    requirements = audit_requirements or {}
+    minimum_latency_samples = int(requirements.get("recommended_warm_requests_per_policy", 30))
+    minimum_broad_case_count = int(
+        requirements.get("minimum_distinct_cases_for_broad_claim", 30)
+    )
+    minimum_failure_type_count = int(
+        requirements.get("minimum_failure_types_for_broad_claim", 6)
+    )
+    required_environment_scope = str(requirements.get("environment_scope", "unknown"))
+
+    baseline = summary_by_policy.get("full_unaligned", {})
+    candidate = summary_by_policy.get("budgeted_cache_aligned", {})
+    completeness = _record_completeness_audit(records)
+    policy_ids = sorted(summary_by_policy.keys())
+
+    baseline_cases = {
+        str(item.get("case_id", "")).strip()
+        for item in records
+        if str(item.get("policy_id", "")).strip() == "full_unaligned"
+        and str(item.get("case_id", "")).strip()
+    }
+    candidate_cases = {
+        str(item.get("case_id", "")).strip()
+        for item in records
+        if str(item.get("policy_id", "")).strip() == "budgeted_cache_aligned"
+        and str(item.get("case_id", "")).strip()
+    }
+    overlapping_cases = sorted(baseline_cases & candidate_cases)
+
+    return {
+        "policy_ids": policy_ids,
+        "required_environment_scope": required_environment_scope,
+        "observed_environment_scope": required_environment_scope,
+        "production_scope_ready": required_environment_scope == "production",
+        "required_latency_samples_per_policy": minimum_latency_samples,
+        "baseline_latency_sample_count": int(baseline.get("request_count", 0)),
+        "candidate_latency_sample_count": int(candidate.get("request_count", 0)),
+        "latency_sample_requirement_met": (
+            int(baseline.get("request_count", 0)) >= minimum_latency_samples
+            and int(candidate.get("request_count", 0)) >= minimum_latency_samples
+        ),
+        "required_distinct_cases": minimum_broad_case_count,
+        "candidate_distinct_cases": int(candidate.get("distinct_case_count", 0)),
+        "broad_case_requirement_met": (
+            int(candidate.get("distinct_case_count", 0)) >= minimum_broad_case_count
+        ),
+        "required_failure_types": minimum_failure_type_count,
+        "candidate_distinct_failure_types": int(
+            candidate.get("distinct_failure_type_count", 0)
+        ),
+        "failure_type_requirement_met": (
+            int(candidate.get("distinct_failure_type_count", 0)) >= minimum_failure_type_count
+        ),
+        "baseline_candidate_case_overlap_count": len(overlapping_cases),
+        "case_pairing_requirement_met": (
+            len(overlapping_cases) >= minimum_broad_case_count
+            and len(overlapping_cases) == len(candidate_cases)
+            and len(overlapping_cases) == len(baseline_cases)
+        ),
+        "record_completeness": completeness,
+    }
+
+
 def _dataset_requirements(dataset: ProviderValidationDataset | None) -> dict[str, Any] | None:
     if dataset is None:
         return None
@@ -1347,6 +1494,11 @@ def summarize_provider_validation_records(
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
+        "evidence_readiness": _evidence_readiness(
+            policies,
+            resolved_requirements,
+            records,
+        ),
         "claim_audit": _claim_audit(
             policies,
             resolved_requirements,

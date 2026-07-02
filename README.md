@@ -43,7 +43,8 @@ The current local workflow provides:
   cache-eligible synthetic dataset locally, normalize raw usage artifacts,
   replay recorded provider results, or collect OpenAI Responses API usage,
   latency, and deterministic grading data when credentials and a pricing
-  snapshot are supplied; and
+  snapshot are supplied, with readiness reporting for claim-sufficiency gaps;
+  and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:

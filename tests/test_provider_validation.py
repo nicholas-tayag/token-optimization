@@ -153,6 +153,10 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
     assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
     assert report["claim_audit"]["broad_quality_retention"]["supported"] is False
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is False
+    assert report["evidence_readiness"]["production_scope_ready"] is False
+    assert report["evidence_readiness"]["latency_sample_requirement_met"] is False
+    assert report["evidence_readiness"]["broad_case_requirement_met"] is False
+    assert report["evidence_readiness"]["record_completeness"]["complete_grade_record_count"] == 2
 
 
 def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> None:
@@ -337,3 +341,38 @@ def test_normalize_otel_export_supports_production_scope_override() -> None:
     assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is True
     assert report["claim_audit"]["broad_quality_retention"]["supported"] is True
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is True
+    assert report["evidence_readiness"]["production_scope_ready"] is True
+    assert report["evidence_readiness"]["latency_sample_requirement_met"] is True
+
+
+def test_evidence_readiness_tracks_missing_grade_fields() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    records = [
+        {
+            "policy_id": "full_unaligned",
+            "case_id": dataset.cases[0].case_id,
+            "failure_type": dataset.cases[0].failure_type,
+            "latency_ms": 950.0,
+            "input_tokens": 2200,
+            "cached_input_tokens": 0,
+            "output_tokens": 220,
+            "request_cost_usd": 0.00264,
+        },
+        {
+            "policy_id": "budgeted_cache_aligned",
+            "case_id": dataset.cases[0].case_id,
+            "failure_type": dataset.cases[0].failure_type,
+            "latency_ms": 730.0,
+            "input_tokens": 1700,
+            "cached_input_tokens": 1200,
+            "output_tokens": 220,
+            "request_cost_usd": 0.00136,
+        },
+    ]
+
+    report = summarize_provider_validation_records(records, dataset=dataset)
+
+    completeness = report["evidence_readiness"]["record_completeness"]
+    assert completeness["missing_grade"] == 2
+    assert completeness["complete_grade_record_count"] == 0
+    assert completeness["complete_record_count"] == 0

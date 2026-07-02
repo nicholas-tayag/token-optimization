@@ -104,7 +104,9 @@ quality regression before the stronger claims can turn `True`.
 
 The claim audit is intentionally conservative. Without enough measured requests,
 it should continue reporting that latency or broad quality-retention claims are
-not yet supported.
+not yet supported. The provider summary now also prints an evidence-readiness
+section so you can see whether the artifact is blocked by sample count,
+environment scope, missing grader fields, or incomplete case pairing.
 
 ## Claim Status
 

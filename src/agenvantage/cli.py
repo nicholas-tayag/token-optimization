@@ -419,6 +419,52 @@ def _format_provider_validation_summary(report: dict[str, Any]) -> str:
         status = "supported" if claim.get("supported") else "not yet supported"
         lines.append(f"  {claim_name:<28} {status}  {claim.get('reason', '')}")
 
+    readiness = report.get("evidence_readiness", {})
+    if readiness:
+        completeness = readiness.get("record_completeness", {})
+        lines.extend(
+            [
+                "",
+                "Evidence readiness:",
+                (
+                    "  "
+                    f"scope={readiness.get('observed_environment_scope', 'unknown')} "
+                    f"production_ready={readiness.get('production_scope_ready')}"
+                ),
+                (
+                    "  "
+                    f"latency_samples baseline={readiness.get('baseline_latency_sample_count', 0)}/"
+                    f"{readiness.get('required_latency_samples_per_policy', 0)} "
+                    f"candidate={readiness.get('candidate_latency_sample_count', 0)}/"
+                    f"{readiness.get('required_latency_samples_per_policy', 0)} "
+                    f"ready={readiness.get('latency_sample_requirement_met')}"
+                ),
+                (
+                    "  "
+                    f"broad_cases={readiness.get('candidate_distinct_cases', 0)}/"
+                    f"{readiness.get('required_distinct_cases', 0)} "
+                    f"failure_types={readiness.get('candidate_distinct_failure_types', 0)}/"
+                    f"{readiness.get('required_failure_types', 0)} "
+                    f"paired_cases={readiness.get('baseline_candidate_case_overlap_count', 0)} "
+                    f"ready={readiness.get('broad_case_requirement_met') and readiness.get('failure_type_requirement_met') and readiness.get('case_pairing_requirement_met')}"
+                ),
+                (
+                    "  "
+                    f"grade_coverage={completeness.get('complete_grade_record_count', 0)}/"
+                    f"{completeness.get('record_count', 0)} "
+                    f"records_complete={completeness.get('complete_record_count', 0)}/"
+                    f"{completeness.get('record_count', 0)}"
+                ),
+            ]
+        )
+        missing_fields = [
+            f"{field.replace('missing_', '')}={count}"
+            for field, count in completeness.items()
+            if field.startswith("missing_") and count
+        ]
+        if missing_fields:
+            lines.append(f"  missing_fields: {', '.join(missing_fields)}")
+
     return "\n".join(lines)
 
 
