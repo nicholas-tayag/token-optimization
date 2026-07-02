@@ -426,6 +426,304 @@ def test_normalize_otel_export_supports_production_scope_override() -> None:
     assert latency_interval["upper"] < 0
 
 
+def test_normalize_otel_metrics_supports_production_scope_override() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    metric_points = {
+        "gen_ai.client.operation.duration": [],
+        "gen_ai.usage.input_tokens": [],
+        "gen_ai.usage.cache_read.input_tokens": [],
+        "gen_ai.usage.output_tokens": [],
+    }
+
+    for index, case in enumerate(dataset.cases):
+        for policy_id, latency_ms, input_tokens, cached_input_tokens, output_tokens in (
+            ("full_unaligned", 950.0, 2200, 0, 220),
+            ("budgeted_cache_aligned", 730.0, 1700, 1200, 220),
+        ):
+            timestamp_ns = str((1736643600 + index + (0 if policy_id == "full_unaligned" else 3600)) * 1_000_000_000)
+            attributes = [
+                {"key": "agenvantage.case_id", "value": {"stringValue": case.case_id}},
+                {"key": "agenvantage.failure_type", "value": {"stringValue": case.failure_type}},
+                {"key": "agenvantage.policy_id", "value": {"stringValue": policy_id}},
+                {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-test"}},
+                {"key": "agenvantage.grade.correctness_pass", "value": {"boolValue": True}},
+                {"key": "agenvantage.grade.safety_pass", "value": {"boolValue": True}},
+                {
+                    "key": "agenvantage.grade.grounded_citation_pass",
+                    "value": {"boolValue": True},
+                },
+                {"key": "agenvantage.grade.overall_pass", "value": {"boolValue": True}},
+                {"key": "agenvantage.grade.score", "value": {"doubleValue": 1.0}},
+            ]
+            metric_points["gen_ai.client.operation.duration"].append(
+                {
+                    "timeUnixNano": timestamp_ns,
+                    "asDouble": latency_ms,
+                    "attributes": attributes,
+                }
+            )
+            metric_points["gen_ai.usage.input_tokens"].append(
+                {
+                    "timeUnixNano": timestamp_ns,
+                    "asInt": str(input_tokens),
+                    "attributes": attributes,
+                }
+            )
+            metric_points["gen_ai.usage.cache_read.input_tokens"].append(
+                {
+                    "timeUnixNano": timestamp_ns,
+                    "asInt": str(cached_input_tokens),
+                    "attributes": attributes,
+                }
+            )
+            metric_points["gen_ai.usage.output_tokens"].append(
+                {
+                    "timeUnixNano": timestamp_ns,
+                    "asInt": str(output_tokens),
+                    "attributes": attributes,
+                }
+            )
+
+    report = summarize_normalized_provider_validation_payload(
+        {
+            "resourceMetrics": [
+                {
+                    "scopeMetrics": [
+                        {
+                            "metrics": [
+                                {
+                                    "name": metric_name,
+                                    "unit": "ms" if metric_name == "gen_ai.client.operation.duration" else "1",
+                                    "gauge": {"dataPoints": data_points},
+                                }
+                                for metric_name, data_points in metric_points.items()
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        dataset=dataset,
+        pricing=pricing,
+        environment_scope="production",
+    )
+
+    assert report["environment_scope"] == "production"
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert report["claim_audit"]["latency_improvement"]["supported"] is True
+    assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is True
+    assert report["claim_audit"]["broad_quality_retention"]["supported"] is True
+    assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is True
+    assert report["paired_case_comparison"]["overlapping_case_count"] == 30
+
+
+def test_normalize_combined_otel_logs_and_metrics_merges_fields() -> None:
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    payload = {
+        "resourceLogs": [
+            {
+                "scopeLogs": [
+                    {
+                        "logRecords": [
+                            {
+                                "timeUnixNano": "1736643600000000000",
+                                "attributes": [
+                                    {
+                                        "key": "agenvantage.case_id",
+                                        "value": {"stringValue": "checkout-payment-connectivity-a"},
+                                    },
+                                    {
+                                        "key": "agenvantage.failure_type",
+                                        "value": {"stringValue": "payment_service_unreachable"},
+                                    },
+                                    {
+                                        "key": "agenvantage.policy_id",
+                                        "value": {"stringValue": "budgeted_cache_aligned"},
+                                    },
+                                    {
+                                        "key": "agenvantage.grade.correctness_pass",
+                                        "value": {"boolValue": True},
+                                    },
+                                    {
+                                        "key": "agenvantage.grade.safety_pass",
+                                        "value": {"boolValue": True},
+                                    },
+                                    {
+                                        "key": "agenvantage.grade.grounded_citation_pass",
+                                        "value": {"boolValue": True},
+                                    },
+                                    {
+                                        "key": "agenvantage.grade.overall_pass",
+                                        "value": {"boolValue": True},
+                                    },
+                                    {
+                                        "key": "agenvantage.grade.score",
+                                        "value": {"doubleValue": 1.0},
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+        "resourceMetrics": [
+            {
+                "scopeMetrics": [
+                    {
+                        "metrics": [
+                            {
+                                "name": "gen_ai.client.operation.duration",
+                                "unit": "ms",
+                                "gauge": {
+                                    "dataPoints": [
+                                        {
+                                            "timeUnixNano": "1736643600000000000",
+                                            "asDouble": 730.0,
+                                            "attributes": [
+                                                {
+                                                    "key": "agenvantage.case_id",
+                                                    "value": {"stringValue": "checkout-payment-connectivity-a"},
+                                                },
+                                                {
+                                                    "key": "agenvantage.failure_type",
+                                                    "value": {
+                                                        "stringValue": "payment_service_unreachable"
+                                                    },
+                                                },
+                                                {
+                                                    "key": "agenvantage.policy_id",
+                                                    "value": {"stringValue": "budgeted_cache_aligned"},
+                                                },
+                                                {
+                                                    "key": "gen_ai.request.model",
+                                                    "value": {"stringValue": "gpt-test"},
+                                                },
+                                            ],
+                                        }
+                                    ]
+                                },
+                            },
+                            {
+                                "name": "gen_ai.usage.input_tokens",
+                                "unit": "1",
+                                "gauge": {
+                                    "dataPoints": [
+                                        {
+                                            "timeUnixNano": "1736643600000000000",
+                                            "asInt": "1700",
+                                            "attributes": [
+                                                {
+                                                    "key": "agenvantage.case_id",
+                                                    "value": {"stringValue": "checkout-payment-connectivity-a"},
+                                                },
+                                                {
+                                                    "key": "agenvantage.failure_type",
+                                                    "value": {
+                                                        "stringValue": "payment_service_unreachable"
+                                                    },
+                                                },
+                                                {
+                                                    "key": "agenvantage.policy_id",
+                                                    "value": {"stringValue": "budgeted_cache_aligned"},
+                                                },
+                                            ],
+                                        }
+                                    ]
+                                },
+                            },
+                            {
+                                "name": "gen_ai.usage.cache_read.input_tokens",
+                                "unit": "1",
+                                "gauge": {
+                                    "dataPoints": [
+                                        {
+                                            "timeUnixNano": "1736643600000000000",
+                                            "asInt": "1200",
+                                            "attributes": [
+                                                {
+                                                    "key": "agenvantage.case_id",
+                                                    "value": {"stringValue": "checkout-payment-connectivity-a"},
+                                                },
+                                                {
+                                                    "key": "agenvantage.failure_type",
+                                                    "value": {
+                                                        "stringValue": "payment_service_unreachable"
+                                                    },
+                                                },
+                                                {
+                                                    "key": "agenvantage.policy_id",
+                                                    "value": {"stringValue": "budgeted_cache_aligned"},
+                                                },
+                                            ],
+                                        }
+                                    ]
+                                },
+                            },
+                            {
+                                "name": "gen_ai.usage.output_tokens",
+                                "unit": "1",
+                                "gauge": {
+                                    "dataPoints": [
+                                        {
+                                            "timeUnixNano": "1736643600000000000",
+                                            "asInt": "220",
+                                            "attributes": [
+                                                {
+                                                    "key": "agenvantage.case_id",
+                                                    "value": {"stringValue": "checkout-payment-connectivity-a"},
+                                                },
+                                                {
+                                                    "key": "agenvantage.failure_type",
+                                                    "value": {
+                                                        "stringValue": "payment_service_unreachable"
+                                                    },
+                                                },
+                                                {
+                                                    "key": "agenvantage.policy_id",
+                                                    "value": {"stringValue": "budgeted_cache_aligned"},
+                                                },
+                                            ],
+                                        }
+                                    ]
+                                },
+                            },
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    records = normalize_provider_records_payload(payload, pricing)
+
+    assert len(records) == 1
+    assert records[0]["policy_id"] == "budgeted_cache_aligned"
+    assert records[0]["latency_ms"] == 730.0
+    assert records[0]["input_tokens"] == 1700
+    assert records[0]["cached_input_tokens"] == 1200
+    assert records[0]["output_tokens"] == 220
+    assert records[0]["request_cost_usd"] == 0.00106
+    assert records[0]["grade"]["overall_pass"] is True
+
+
 def test_evidence_readiness_tracks_missing_grade_fields() -> None:
     dataset = load_provider_validation_dataset(FIXTURE)
     records = [

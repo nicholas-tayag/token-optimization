@@ -1479,20 +1479,12 @@ def _grade_from_otel_attributes(attributes: dict[str, Any]) -> dict[str, Any] | 
     return grade
 
 
-def _normalize_otel_span_record(
-    span: dict[str, Any],
-    pricing: PricingSnapshot | None = None,
-) -> dict[str, Any]:
-    attributes = _flatten_otel_attributes(span.get("attributes"))
+def _record_from_otel_attributes(attributes: dict[str, Any]) -> dict[str, Any]:
     record: dict[str, Any] = {
         "case_id": str(attributes.get("agenvantage.case_id", "")).strip(),
         "policy_id": str(attributes.get("agenvantage.policy_id", "")).strip(),
         "failure_type": str(attributes.get("agenvantage.failure_type", "unknown")).strip()
         or "unknown",
-        "repeat_index": _coerce_int(attributes.get("agenvantage.repeat_index", 0)),
-        "dataset_id": str(attributes.get("agenvantage.dataset_id", "")).strip() or None,
-        "environment_scope": str(attributes.get("agenvantage.environment_scope", "")).strip()
-        or None,
         "model": str(
             attributes.get("gen_ai.response.model")
             or attributes.get("gen_ai.request.model")
@@ -1505,8 +1497,28 @@ def _normalize_otel_span_record(
             or attributes.get("gen_ai.usage.cached_input_tokens")
         ),
         "output_tokens": _coerce_int(attributes.get("gen_ai.usage.output_tokens")),
-        "latency_ms": _latency_ms_from_otel_span(span),
     }
+    if "agenvantage.repeat_index" in attributes:
+        record["repeat_index"] = _coerce_int(attributes.get("agenvantage.repeat_index"))
+    if "agenvantage.dataset_id" in attributes:
+        record["dataset_id"] = str(attributes.get("agenvantage.dataset_id", "")).strip() or None
+    if "agenvantage.environment_scope" in attributes:
+        record["environment_scope"] = (
+            str(attributes.get("agenvantage.environment_scope", "")).strip() or None
+        )
+    grade = _grade_from_otel_attributes(attributes)
+    if grade is not None:
+        record["grade"] = grade
+    return record
+
+
+def _normalize_otel_span_record(
+    span: dict[str, Any],
+    pricing: PricingSnapshot | None = None,
+) -> dict[str, Any]:
+    attributes = _flatten_otel_attributes(span.get("attributes"))
+    record = _record_from_otel_attributes(attributes)
+    record["latency_ms"] = _latency_ms_from_otel_span(span)
     started_at_unix_s = (
         round(_coerce_float(span.get("startTimeUnixNano")) / 1_000_000_000)
         if span.get("startTimeUnixNano") not in (None, "")
@@ -1514,9 +1526,6 @@ def _normalize_otel_span_record(
     )
     if started_at_unix_s is not None:
         record["started_at_unix_s"] = _coerce_int(started_at_unix_s)
-    grade = _grade_from_otel_attributes(attributes)
-    if grade is not None:
-        record["grade"] = grade
     if "agenvantage.request_cost_usd" in attributes:
         record["request_cost_usd"] = round(
             _coerce_float(attributes.get("agenvantage.request_cost_usd")),
@@ -1530,6 +1539,224 @@ def _normalize_otel_span_record(
             pricing,
         )
     return record
+
+
+def _flatten_otel_log_records(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        records: list[dict[str, Any]] = []
+        for item in payload:
+            records.extend(_flatten_otel_log_records(item))
+        return records
+    if not isinstance(payload, dict):
+        return []
+    if "resourceLogs" in payload:
+        records = []
+        for resource_log in payload.get("resourceLogs", []):
+            records.extend(_flatten_otel_log_records(resource_log))
+        return records
+    if "scopeLogs" in payload:
+        records = []
+        for scope_log in payload.get("scopeLogs", []):
+            records.extend(_flatten_otel_log_records(scope_log))
+        return records
+    if "logRecords" in payload:
+        return [item for item in payload.get("logRecords", []) if isinstance(item, dict)]
+    if "attributes" in payload and ("timeUnixNano" in payload or "observedTimeUnixNano" in payload):
+        return [payload]
+    return []
+
+
+def _normalize_otel_log_record(
+    log_record: dict[str, Any],
+    pricing: PricingSnapshot | None = None,
+) -> dict[str, Any]:
+    attributes = _flatten_otel_attributes(log_record.get("attributes"))
+    record = _record_from_otel_attributes(attributes)
+    latency_ms = (
+        attributes.get("gen_ai.client.operation.duration")
+        or attributes.get("agenvantage.latency_ms")
+        or attributes.get("latency_ms")
+    )
+    if latency_ms is not None:
+        record["latency_ms"] = round(_coerce_float(latency_ms), 2)
+    timestamp_ns = (
+        log_record.get("timeUnixNano")
+        or log_record.get("observedTimeUnixNano")
+        or attributes.get("agenvantage.time_unix_nano")
+    )
+    started_at_unix_s = _coerce_optional_int(
+        round(_coerce_float(timestamp_ns) / 1_000_000_000)
+        if timestamp_ns not in (None, "")
+        else None
+    )
+    if started_at_unix_s is not None:
+        record["started_at_unix_s"] = started_at_unix_s
+    if "agenvantage.request_cost_usd" in attributes:
+        record["request_cost_usd"] = round(
+            _coerce_float(attributes.get("agenvantage.request_cost_usd")),
+            8,
+        )
+    elif pricing is not None:
+        record["request_cost_usd"] = compute_request_cost(
+            record["input_tokens"],
+            record["cached_input_tokens"],
+            record["output_tokens"],
+            pricing,
+        )
+    return record
+
+
+def _flatten_otel_metrics(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        metrics: list[dict[str, Any]] = []
+        for item in payload:
+            metrics.extend(_flatten_otel_metrics(item))
+        return metrics
+    if not isinstance(payload, dict):
+        return []
+    if "resourceMetrics" in payload:
+        metrics = []
+        for resource_metric in payload.get("resourceMetrics", []):
+            metrics.extend(_flatten_otel_metrics(resource_metric))
+        return metrics
+    if "scopeMetrics" in payload:
+        metrics = []
+        for scope_metric in payload.get("scopeMetrics", []):
+            metrics.extend(_flatten_otel_metrics(scope_metric))
+        return metrics
+    if "metrics" in payload:
+        return [item for item in payload.get("metrics", []) if isinstance(item, dict)]
+    return []
+
+
+def _otel_metric_points(metric: dict[str, Any]) -> list[dict[str, Any]]:
+    for field in ("sum", "gauge", "histogram"):
+        payload = metric.get(field)
+        if isinstance(payload, dict) and isinstance(payload.get("dataPoints"), list):
+            return [item for item in payload.get("dataPoints", []) if isinstance(item, dict)]
+    return []
+
+
+def _otel_metric_value(metric: dict[str, Any], point: dict[str, Any]) -> float | None:
+    if "asDouble" in point:
+        return _coerce_float(point.get("asDouble"))
+    if "asInt" in point:
+        return float(_coerce_int(point.get("asInt")))
+    histogram = metric.get("histogram")
+    if isinstance(histogram, dict):
+        count = _coerce_int(point.get("count"))
+        if count == 1 and point.get("sum") not in (None, ""):
+            return _coerce_float(point.get("sum"))
+    return None
+
+
+def _convert_otel_duration_to_ms(value: float, unit: str) -> float:
+    normalized = unit.strip().lower()
+    if normalized in ("ms", "millisecond", "milliseconds"):
+        return value
+    if normalized in ("s", "sec", "second", "seconds"):
+        return value * 1000.0
+    if normalized in ("us", "microsecond", "microseconds"):
+        return value / 1000.0
+    if normalized in ("ns", "nanosecond", "nanoseconds"):
+        return value / 1_000_000.0
+    return value
+
+
+def _normalized_otel_record_key(record: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        record.get("case_id"),
+        record.get("policy_id"),
+        record.get("repeat_index"),
+        record.get("started_at_unix_s"),
+    )
+
+
+def _merge_normalized_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
+    ordered_keys: list[tuple[Any, ...]] = []
+
+    for record in records:
+        key = _normalized_otel_record_key(record)
+        if key not in merged:
+            merged[key] = dict(record)
+            ordered_keys.append(key)
+            continue
+        current = merged[key]
+        for field, value in record.items():
+            if field == "grade" and isinstance(value, dict):
+                existing_grade = current.get("grade")
+                if isinstance(existing_grade, dict):
+                    existing_grade.update(value)
+                else:
+                    current["grade"] = dict(value)
+                continue
+            if value in (None, "", 0, 0.0):
+                continue
+            if current.get(field) in (None, "", 0, 0.0):
+                current[field] = value
+    return [merged[key] for key in ordered_keys]
+
+
+def _normalize_otel_metric_records(
+    payload: Any,
+    pricing: PricingSnapshot | None = None,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    metric_name_map = {
+        "gen_ai.usage.input_tokens": "input_tokens",
+        "gen_ai.usage.cache_read.input_tokens": "cached_input_tokens",
+        "gen_ai.usage.cached_input_tokens": "cached_input_tokens",
+        "gen_ai.usage.output_tokens": "output_tokens",
+        "agenvantage.request_cost_usd": "request_cost_usd",
+    }
+
+    for metric in _flatten_otel_metrics(payload):
+        name = str(metric.get("name", "")).strip()
+        unit = str(metric.get("unit", "")).strip()
+        for point in _otel_metric_points(metric):
+            attributes = _flatten_otel_attributes(point.get("attributes"))
+            record = _record_from_otel_attributes(attributes)
+            if not record.get("case_id") or not record.get("policy_id"):
+                continue
+            timestamp_ns = (
+                point.get("timeUnixNano")
+                or point.get("endTimeUnixNano")
+                or point.get("startTimeUnixNano")
+            )
+            started_at_unix_s = _coerce_optional_int(
+                round(_coerce_float(timestamp_ns) / 1_000_000_000)
+                if timestamp_ns not in (None, "")
+                else None
+            )
+            if started_at_unix_s is not None:
+                record["started_at_unix_s"] = started_at_unix_s
+
+            value = _otel_metric_value(metric, point)
+            if value is None:
+                continue
+            if name == "gen_ai.client.operation.duration":
+                record["latency_ms"] = round(_convert_otel_duration_to_ms(value, unit), 2)
+            elif name in metric_name_map:
+                field_name = metric_name_map[name]
+                if field_name == "request_cost_usd":
+                    record[field_name] = round(value, 8)
+                else:
+                    record[field_name] = _coerce_int(value)
+            else:
+                continue
+            records.append(record)
+
+    merged_records = _merge_normalized_records(records)
+    for record in merged_records:
+        if "request_cost_usd" not in record and pricing is not None:
+            record["request_cost_usd"] = compute_request_cost(
+                _coerce_int(record.get("input_tokens")),
+                _coerce_int(record.get("cached_input_tokens")),
+                _coerce_int(record.get("output_tokens")),
+                pricing,
+            )
+    return merged_records
 
 
 def normalize_provider_records_payload(
@@ -1554,19 +1781,35 @@ def normalize_provider_records_payload(
             for record in raw_payload
         ]
 
+    otel_records: list[dict[str, Any]] = []
     spans = _flatten_otel_spans(raw_payload)
     if spans:
-        records = [
-            _normalize_otel_span_record(span, pricing)
-            for span in spans
-            if _flatten_otel_attributes(span.get("attributes")).get("agenvantage.case_id")
-            and _flatten_otel_attributes(span.get("attributes")).get("agenvantage.policy_id")
-        ]
-        if records:
-            return records
+        otel_records.extend(
+            [
+                _normalize_otel_span_record(span, pricing)
+                for span in spans
+                if _flatten_otel_attributes(span.get("attributes")).get("agenvantage.case_id")
+                and _flatten_otel_attributes(span.get("attributes")).get("agenvantage.policy_id")
+            ]
+        )
+
+    log_records = _flatten_otel_log_records(raw_payload)
+    if log_records:
+        otel_records.extend(
+            [
+                _normalize_otel_log_record(record, pricing)
+                for record in log_records
+                if _flatten_otel_attributes(record.get("attributes")).get("agenvantage.case_id")
+                and _flatten_otel_attributes(record.get("attributes")).get("agenvantage.policy_id")
+            ]
+        )
+
+    otel_records.extend(_normalize_otel_metric_records(raw_payload, pricing))
+    if otel_records:
+        return _merge_normalized_records(otel_records)
 
     raise ValueError(
-        "Unsupported provider-validation payload. Expected records, requests, or OTLP-style spans."
+        "Unsupported provider-validation payload. Expected records, requests, or OTLP-style spans/logs/metrics."
     )
 
 

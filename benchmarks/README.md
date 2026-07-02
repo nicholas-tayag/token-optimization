@@ -50,8 +50,9 @@ It supports five modes:
 - `--dry-run`: validate that the synthetic fixture is cache-eligible and that
   the budgeted policies actually create token-selection pressure before any API
   call is made.
-- `--normalize <payload.json>`: convert raw request records or OTLP-style span
-  exports into a claim-auditable provider-validation artifact.
+- `--normalize <payload.json>`: convert raw request records or OTLP-style
+  spans, logs, or per-request metrics into a claim-auditable
+  provider-validation artifact.
 - `--replay <report.json>`: summarize previously recorded validation records and
   re-run the claim audit without another provider call.
 - live mode with `--pricing` plus `OPENAI_API_KEY`: call the OpenAI Responses

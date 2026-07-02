@@ -40,8 +40,9 @@ The current local workflow provides:
 - a use-case benchmark that scores required behavioral observations against the
   selected excerpts, not just file recall;
 - an experimental `agenvantage validate-provider` workflow that can dry-run a
-  cache-eligible synthetic dataset locally, normalize raw usage artifacts,
-  replay recorded provider results, or collect OpenAI Responses API usage,
+  cache-eligible synthetic dataset locally, normalize raw usage artifacts
+  including OTLP spans/logs/per-request metrics, replay recorded provider
+  results, or collect OpenAI Responses API usage,
   latency, and deterministic grading data when credentials and a pricing
   snapshot are supplied, with readiness reporting for claim-sufficiency gaps
   and paired-bootstrap reporting for measured deltas, plus optional Costs API
