@@ -148,7 +148,7 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
 
     report = summarize_provider_validation_records(records, dataset=dataset, pricing=pricing)
 
-    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is False
     assert report["claim_audit"]["latency_improvement"]["supported"] is False
     assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
     assert report["claim_audit"]["broad_quality_retention"]["supported"] is False
@@ -157,6 +157,57 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
     assert report["evidence_readiness"]["latency_sample_requirement_met"] is False
     assert report["evidence_readiness"]["broad_case_requirement_met"] is False
     assert report["evidence_readiness"]["record_completeness"]["complete_grade_record_count"] == 2
+
+
+def test_claim_audit_cost_savings_requires_paired_case_evidence() -> None:
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-06-30",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    dataset = load_provider_validation_dataset(FIXTURE)
+    perfect_grade = {
+        "correctness_pass": True,
+        "safety_pass": True,
+        "grounded_citation_pass": True,
+        "overall_pass": True,
+        "score": 1.0,
+    }
+    case = dataset.cases[0]
+    records = [
+        {
+            "policy_id": "full_unaligned",
+            "case_id": case.case_id,
+            "failure_type": case.failure_type,
+            "latency_ms": 900.0,
+            "input_tokens": 2200,
+            "cached_input_tokens": 0,
+            "output_tokens": 220,
+            "request_cost_usd": 0.00264,
+            "grade": perfect_grade,
+        },
+        {
+            "policy_id": "budgeted_cache_aligned",
+            "case_id": case.case_id,
+            "failure_type": case.failure_type,
+            "latency_ms": 700.0,
+            "input_tokens": 1700,
+            "cached_input_tokens": 1200,
+            "output_tokens": 220,
+            "request_cost_usd": 0.00136,
+            "grade": perfect_grade,
+        },
+    ]
+
+    report = summarize_provider_validation_records(records, dataset=dataset, pricing=pricing)
+
+    assert report["paired_case_comparison"]["overlapping_case_count"] == 1
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert report["claim_audit"]["latency_improvement"]["supported"] is False
 
 
 def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> None:

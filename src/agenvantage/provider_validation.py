@@ -910,6 +910,7 @@ def _paired_case_comparison(records: list[dict[str, Any]]) -> dict[str, Any]:
 def _claim_audit(
     summary_by_policy: dict[str, dict[str, Any]],
     audit_requirements: dict[str, Any] | None,
+    paired_case_comparison: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     baseline = summary_by_policy.get("full_unaligned")
     candidate = summary_by_policy.get("budgeted_cache_aligned")
@@ -930,14 +931,52 @@ def _claim_audit(
         requirements.get("minimum_failure_types_for_broad_claim", 6)
     )
     environment_scope = str(requirements.get("environment_scope", "unknown"))
+    paired = paired_case_comparison or {}
+    paired_metrics = paired.get("metrics", {}) if isinstance(paired, dict) else {}
+    paired_case_count = int(paired.get("overlapping_case_count", 0)) if isinstance(paired, dict) else 0
+
+    def _interval(metric_name: str) -> dict[str, float] | None:
+        metric = paired_metrics.get(metric_name)
+        if not isinstance(metric, dict):
+            return None
+        interval = metric.get("confidence_interval")
+        return interval if isinstance(interval, dict) else None
+
+    cost_interval = _interval("request_cost_usd")
+    latency_interval = _interval("latency_ms")
+    correctness_interval = _interval("correctness_pass_rate")
+    grounded_interval = _interval("grounded_citation_pass_rate")
+    safety_interval = _interval("safety_pass_rate")
+
+    paired_cost_supported = (
+        paired_case_count >= 1
+        and cost_interval is not None
+        and float(cost_interval.get("upper", 0.0)) < 0.0
+    )
+    paired_latency_supported = (
+        paired_case_count >= minimum_latency_samples
+        and latency_interval is not None
+        and float(latency_interval.get("upper", 0.0)) < 0.0
+    )
+    paired_quality_supported = (
+        paired_case_count >= minimum_broad_case_count
+        and correctness_interval is not None
+        and grounded_interval is not None
+        and safety_interval is not None
+        and float(correctness_interval.get("lower", 0.0)) >= -0.02
+        and float(grounded_interval.get("lower", 0.0)) >= -0.02
+        and float(safety_interval.get("lower", 0.0)) >= 0.0
+    )
 
     cost_supported = (
         candidate["request_count"] >= 1
         and candidate["mean_request_cost_usd"] < baseline["mean_request_cost_usd"]
+        and paired_cost_supported
     )
     latency_supported = (
         candidate["request_count"] >= minimum_latency_samples
         and candidate["p50_latency_ms"] < baseline["p50_latency_ms"]
+        and paired_latency_supported
     )
     quality_supported = (
         candidate["distinct_case_count"] >= minimum_broad_case_count
@@ -946,6 +985,7 @@ def _claim_audit(
         and candidate["grounded_citation_pass_rate"]
         >= baseline["grounded_citation_pass_rate"] - 0.02
         and candidate["safety_pass_rate"] >= baseline["safety_pass_rate"]
+        and paired_quality_supported
     )
     production_latency_supported = environment_scope == "production" and latency_supported
     end_to_end_supported = (
@@ -958,17 +998,17 @@ def _claim_audit(
         "real_api_cost_savings": {
             "supported": cost_supported,
             "reason": (
-                "Mean request cost is lower than full_unaligned."
+                "Mean request cost is lower than full_unaligned and the paired cost delta confidence interval stays below zero."
                 if cost_supported
-                else "No measured mean request-cost reduction versus full_unaligned."
+                else "Cost proof requires lower mean request cost than full_unaligned plus a paired cost delta confidence interval below zero."
             ),
         },
         "latency_improvement": {
             "supported": latency_supported,
             "reason": (
-                f"p50 latency improved with at least {minimum_latency_samples} samples."
+                f"p50 latency improved with at least {minimum_latency_samples} samples and the paired latency delta confidence interval stays below zero."
                 if latency_supported
-                else f"Latency claim requires at least {minimum_latency_samples} requests for the compared policy and a better p50 than full_unaligned."
+                else f"Latency claim requires at least {minimum_latency_samples} paired requests for the compared policy, a better p50 than full_unaligned, and a paired latency delta confidence interval below zero."
             ),
         },
         "latency_improvement_in_production": {
@@ -986,13 +1026,13 @@ def _claim_audit(
         "broad_quality_retention": {
             "supported": quality_supported,
             "reason": (
-                "Correctness, safety, and grounded-citation pass rates met the declared tolerance across a broad, diverse sample."
+                "Correctness, safety, and grounded-citation pass rates met the declared tolerance across a broad, diverse sample, including paired confidence interval checks."
                 if quality_supported
                 else (
                     "Broad quality-retention proof still requires "
                     f"{minimum_broad_case_count}+ distinct cases, "
                     f"{minimum_failure_type_count}+ failure types, "
-                    "and tolerance checks against the baseline policy."
+                    "paired cases, and tolerance checks against the baseline policy."
                 )
             ),
         },
@@ -1499,6 +1539,7 @@ def summarize_provider_validation_records(
     pricing: PricingSnapshot | None = None,
 ) -> dict[str, Any]:
     resolved_requirements = _merge_dataset_requirements(dataset, dataset_requirements)
+    paired_case_comparison = _paired_case_comparison(records)
     summary_by_policy: dict[str, dict[str, Any]] = {}
     for record in records:
         policy_id = str(record["policy_id"])
@@ -1598,7 +1639,7 @@ def summarize_provider_validation_records(
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
-        "paired_case_comparison": _paired_case_comparison(records),
+        "paired_case_comparison": paired_case_comparison,
         "evidence_readiness": _evidence_readiness(
             policies,
             resolved_requirements,
@@ -1607,6 +1648,7 @@ def summarize_provider_validation_records(
         "claim_audit": _claim_audit(
             policies,
             resolved_requirements,
+            paired_case_comparison,
         ),
         "records": records,
     }
