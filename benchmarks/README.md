@@ -45,11 +45,13 @@ questions that the repository could not previously answer:
 - downstream answer-quality retention; and
 - end-to-end support for the broader "context overload" claim.
 
-It supports three modes:
+It supports four modes:
 
 - `--dry-run`: validate that the synthetic fixture is cache-eligible and that
   the budgeted policies actually create token-selection pressure before any API
   call is made.
+- `--normalize <payload.json>`: convert raw request records or OTLP-style span
+  exports into a claim-auditable provider-validation artifact.
 - `--replay <report.json>`: summarize previously recorded validation records and
   re-run the claim audit without another provider call.
 - live mode with `--pricing` plus `OPENAI_API_KEY`: call the OpenAI Responses
@@ -82,6 +84,23 @@ export OPENAI_API_KEY=...
   --records artifacts/provider-validation.json \
   --summary
 ```
+
+If the live run happened elsewhere and you only have saved usage artifacts,
+normalize them into the same provider-validation shape:
+
+```bash
+.venv/bin/python -m agenvantage validate-provider \
+  --normalize artifacts/provider-otel-export.json \
+  --pricing artifacts/openai-pricing.json \
+  --environment-scope production \
+  --records artifacts/provider-validation.json \
+  --summary
+```
+
+Use `--environment-scope production` only when the exported telemetry actually
+came from a production-scoped deployment. The claim audit stays conservative:
+the artifact still needs enough requests, lower measured cost, and no material
+quality regression before the stronger claims can turn `True`.
 
 The claim audit is intentionally conservative. Without enough measured requests,
 it should continue reporting that latency or broad quality-retention claims are

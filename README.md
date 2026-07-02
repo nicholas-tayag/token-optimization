@@ -40,9 +40,10 @@ The current local workflow provides:
 - a use-case benchmark that scores required behavioral observations against the
   selected excerpts, not just file recall;
 - an experimental `agenvantage validate-provider` workflow that can dry-run a
-  cache-eligible synthetic dataset locally, replay recorded provider results,
-  or collect OpenAI Responses API usage, latency, and deterministic grading
-  data when credentials and a pricing snapshot are supplied; and
+  cache-eligible synthetic dataset locally, normalize raw usage artifacts,
+  replay recorded provider results, or collect OpenAI Responses API usage,
+  latency, and deterministic grading data when credentials and a pricing
+  snapshot are supplied; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:
@@ -110,9 +111,9 @@ make test
 
 `validate-provider --dry-run` now verifies that the synthetic provider-eval
 fixture is actually cache-eligible before any API spend. The current fixture
-contains six synthetic incidents, produces a `1066`-token stable prefix for
-cache-aligned runs, and applies enough budget pressure to reduce selected
-context by about `10.57%` on average in the dry run.
+contains `30` distinct cases across `6` failure types, produces a `1066`-token
+stable prefix for cache-aligned runs, and applies enough budget pressure to
+reduce selected context by about `12.82%` on average in the dry run.
 
 ## Pack: your day-to-day token saver
 

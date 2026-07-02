@@ -9,6 +9,8 @@ from agenvantage.provider_validation import (
     fixture_readiness_report,
     grade_provider_response,
     load_provider_validation_dataset,
+    normalize_provider_records_payload,
+    summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
@@ -207,3 +209,131 @@ def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> No
     assert replay_report["claim_audit"]["real_api_cost_savings"]["supported"] is True
     assert replay_report["claim_audit"]["broad_quality_retention"]["supported"] is True
     assert replay_report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
+
+
+def test_normalize_plain_provider_records_computes_costs() -> None:
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+
+    records = normalize_provider_records_payload(
+        [
+            {
+                "case_id": "checkout-payment-connectivity-a",
+                "policy_id": "budgeted_cache_aligned",
+                "failure_type": "payment_service_unreachable",
+                "latency_ms": 712.4,
+                "usage": {
+                    "input_tokens": 1700,
+                    "output_tokens": 220,
+                    "input_tokens_details": {"cached_tokens": 1200},
+                },
+            }
+        ],
+        pricing,
+    )
+
+    assert records[0]["input_tokens"] == 1700
+    assert records[0]["cached_input_tokens"] == 1200
+    assert records[0]["output_tokens"] == 220
+    assert records[0]["request_cost_usd"] == 0.00106
+
+
+def test_normalize_otel_export_supports_production_scope_override() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    spans = []
+    for case in dataset.cases:
+        spans.append(
+            {
+                "name": "gen_ai.request",
+                "startTimeUnixNano": "1000000000",
+                "endTimeUnixNano": "1950000000",
+                "attributes": [
+                    {"key": "agenvantage.case_id", "value": {"stringValue": case.case_id}},
+                    {
+                        "key": "agenvantage.failure_type",
+                        "value": {"stringValue": case.failure_type},
+                    },
+                    {"key": "agenvantage.policy_id", "value": {"stringValue": "full_unaligned"}},
+                    {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-test"}},
+                    {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "2200"}},
+                    {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "220"}},
+                    {
+                        "key": "agenvantage.grade.correctness_pass",
+                        "value": {"boolValue": True},
+                    },
+                    {"key": "agenvantage.grade.safety_pass", "value": {"boolValue": True}},
+                    {
+                        "key": "agenvantage.grade.grounded_citation_pass",
+                        "value": {"boolValue": True},
+                    },
+                    {"key": "agenvantage.grade.overall_pass", "value": {"boolValue": True}},
+                    {"key": "agenvantage.grade.score", "value": {"doubleValue": 1.0}},
+                ],
+            }
+        )
+        spans.append(
+            {
+                "name": "gen_ai.request",
+                "startTimeUnixNano": "1000000000",
+                "endTimeUnixNano": "1730000000",
+                "attributes": [
+                    {"key": "agenvantage.case_id", "value": {"stringValue": case.case_id}},
+                    {
+                        "key": "agenvantage.failure_type",
+                        "value": {"stringValue": case.failure_type},
+                    },
+                    {
+                        "key": "agenvantage.policy_id",
+                        "value": {"stringValue": "budgeted_cache_aligned"},
+                    },
+                    {"key": "gen_ai.request.model", "value": {"stringValue": "gpt-test"}},
+                    {"key": "gen_ai.usage.input_tokens", "value": {"intValue": "1700"}},
+                    {
+                        "key": "gen_ai.usage.cache_read.input_tokens",
+                        "value": {"intValue": "1200"},
+                    },
+                    {"key": "gen_ai.usage.output_tokens", "value": {"intValue": "220"}},
+                    {
+                        "key": "agenvantage.grade.correctness_pass",
+                        "value": {"boolValue": True},
+                    },
+                    {"key": "agenvantage.grade.safety_pass", "value": {"boolValue": True}},
+                    {
+                        "key": "agenvantage.grade.grounded_citation_pass",
+                        "value": {"boolValue": True},
+                    },
+                    {"key": "agenvantage.grade.overall_pass", "value": {"boolValue": True}},
+                    {"key": "agenvantage.grade.score", "value": {"doubleValue": 1.0}},
+                ],
+            }
+        )
+
+    report = summarize_normalized_provider_validation_payload(
+        {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]},
+        dataset=dataset,
+        pricing=pricing,
+        environment_scope="production",
+    )
+
+    assert report["environment_scope"] == "production"
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert report["claim_audit"]["latency_improvement"]["supported"] is True
+    assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is True
+    assert report["claim_audit"]["broad_quality_retention"]["supported"] is True
+    assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is True

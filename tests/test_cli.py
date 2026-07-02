@@ -113,6 +113,97 @@ def test_validate_provider_dry_run_summary() -> None:
     assert "cache_ready=True" in completed.stdout
 
 
+def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
+    records_path = tmp_path / "records.json"
+    output_path = tmp_path / "provider-validation.json"
+    pricing_path = tmp_path / "pricing.json"
+    records_path.write_text(
+        json.dumps(
+            [
+                {
+                    "case_id": "checkout-payment-connectivity-a",
+                    "policy_id": "full_unaligned",
+                    "failure_type": "payment_service_unreachable",
+                    "latency_ms": 930.0,
+                    "input_tokens": 2200,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 220,
+                    "grade": {
+                        "correctness_pass": True,
+                        "safety_pass": True,
+                        "grounded_citation_pass": True,
+                        "overall_pass": True,
+                        "score": 1.0,
+                    },
+                },
+                {
+                    "case_id": "checkout-payment-connectivity-a",
+                    "policy_id": "budgeted_cache_aligned",
+                    "failure_type": "payment_service_unreachable",
+                    "latency_ms": 710.0,
+                    "input_tokens": 1700,
+                    "cached_input_tokens": 1200,
+                    "output_tokens": 220,
+                    "grade": {
+                        "correctness_pass": True,
+                        "safety_pass": True,
+                        "grounded_citation_pass": True,
+                        "overall_pass": True,
+                        "score": 1.0,
+                    },
+                },
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pricing_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "gpt-test",
+                "captured_at": "2026-07-02",
+                "source_url": "https://developers.openai.com/api/docs/pricing",
+                "prices_per_million": {
+                    "input": 1.0,
+                    "cached_input": 0.1,
+                    "output": 2.0,
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "validate-provider",
+            "--normalize",
+            str(records_path),
+            "--pricing",
+            str(pricing_path),
+            "--environment-scope",
+            "production",
+            "--records",
+            str(output_path),
+            "--summary",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage provider validation" in completed.stdout
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["environment_scope"] == "production"
+    assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+
+
 def test_format_pack_summary_reports_budget_and_files() -> None:
     report = {
         "task": "Explain the rate limiter",

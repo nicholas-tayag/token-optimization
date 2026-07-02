@@ -144,7 +144,7 @@ def build_claim_status_report(
             ),
             provider_evidence,
             [
-                "Run validate-provider live with a real pricing snapshot and saved records.",
+                "Run validate-provider live with a real pricing snapshot, or normalize saved raw telemetry into provider-validation records.",
                 "Show lower mean request cost for budgeted_cache_aligned than full_unaligned.",
             ],
         ),
@@ -159,7 +159,7 @@ def build_claim_status_report(
                 f"Current provider fixture scope: {environment_scope or 'unknown'}.",
             ],
             [
-                "Collect latency measurements from a production-scoped workload or telemetry source.",
+                "Collect latency measurements from a production-scoped workload or telemetry source, then normalize or replay them.",
                 "Show a better p50 than full_unaligned with enough production requests.",
             ],
         ),

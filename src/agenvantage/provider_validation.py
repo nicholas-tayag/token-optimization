@@ -918,12 +918,336 @@ def _dataset_requirements(dataset: ProviderValidationDataset | None) -> dict[str
     }
 
 
+def _merge_dataset_requirements(
+    dataset: ProviderValidationDataset | None,
+    dataset_requirements: dict[str, Any] | None = None,
+    *,
+    environment_scope: str | None = None,
+) -> dict[str, Any] | None:
+    merged = dict(_dataset_requirements(dataset) or {})
+    if dataset_requirements:
+        merged.update(dataset_requirements)
+    if environment_scope:
+        merged["environment_scope"] = environment_scope
+    return merged or None
+
+
+def _coerce_int(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return int(str(value).strip())
+
+
+def _coerce_float(value: Any) -> float:
+    if value in (None, ""):
+        return 0.0
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(str(value).strip())
+
+
+def _extract_usage_from_record(record: dict[str, Any]) -> tuple[int, int, int]:
+    if "usage" in record and isinstance(record["usage"], dict):
+        usage = record["usage"]
+        input_tokens = (
+            usage.get("input_tokens")
+            or usage.get("prompt_tokens")
+            or usage.get("total_input_tokens")
+            or 0
+        )
+        output_tokens = (
+            usage.get("output_tokens")
+            or usage.get("completion_tokens")
+            or usage.get("total_output_tokens")
+            or 0
+        )
+        details = usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
+        cached_input_tokens = (
+            details.get("cached_tokens")
+            or details.get("cached_input_tokens")
+            or usage.get("cached_input_tokens")
+            or 0
+        )
+        return (
+            _coerce_int(input_tokens),
+            _coerce_int(cached_input_tokens),
+            _coerce_int(output_tokens),
+        )
+    input_tokens = (
+        record.get("input_tokens")
+        or record.get("prompt_tokens")
+        or record.get("total_input_tokens")
+        or 0
+    )
+    cached_input_tokens = (
+        record.get("cached_input_tokens")
+        or record.get("cache_read_input_tokens")
+        or record.get("cached_tokens")
+        or 0
+    )
+    output_tokens = (
+        record.get("output_tokens")
+        or record.get("completion_tokens")
+        or record.get("total_output_tokens")
+        or 0
+    )
+    return (
+        _coerce_int(input_tokens),
+        _coerce_int(cached_input_tokens),
+        _coerce_int(output_tokens),
+    )
+
+
+def _normalize_provider_record(
+    raw_record: dict[str, Any],
+    pricing: PricingSnapshot | None = None,
+) -> dict[str, Any]:
+    input_tokens, cached_input_tokens, output_tokens = _extract_usage_from_record(raw_record)
+    request_cost_usd = raw_record.get("request_cost_usd")
+    if request_cost_usd in (None, "") and pricing is not None:
+        request_cost_usd = compute_request_cost(
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            pricing,
+        )
+
+    record = dict(raw_record)
+    record["case_id"] = str(
+        raw_record.get("case_id")
+        or raw_record.get("agenvantage.case_id")
+        or ""
+    ).strip()
+    record["policy_id"] = str(
+        raw_record.get("policy_id")
+        or raw_record.get("agenvantage.policy_id")
+        or ""
+    ).strip()
+    record["failure_type"] = str(
+        raw_record.get("failure_type")
+        or raw_record.get("agenvantage.failure_type")
+        or "unknown"
+    ).strip() or "unknown"
+    record["input_tokens"] = input_tokens
+    record["cached_input_tokens"] = cached_input_tokens
+    record["output_tokens"] = output_tokens
+    record["latency_ms"] = round(
+        _coerce_float(raw_record.get("latency_ms", raw_record.get("duration_ms", 0.0))),
+        2,
+    )
+    record["request_cost_usd"] = round(_coerce_float(request_cost_usd), 8)
+
+    if "repeat_index" in raw_record:
+        record["repeat_index"] = _coerce_int(raw_record.get("repeat_index"))
+
+    grade = raw_record.get("grade")
+    if isinstance(grade, dict):
+        record["grade"] = grade
+
+    return record
+
+
+def _otel_attribute_value(raw: dict[str, Any]) -> Any:
+    if "stringValue" in raw:
+        return raw["stringValue"]
+    if "intValue" in raw:
+        return raw["intValue"]
+    if "doubleValue" in raw:
+        return raw["doubleValue"]
+    if "boolValue" in raw:
+        return raw["boolValue"]
+    if "arrayValue" in raw:
+        values = raw.get("arrayValue", {}).get("values", [])
+        return [_otel_attribute_value(item) for item in values if isinstance(item, dict)]
+    if "kvlistValue" in raw:
+        values = raw.get("kvlistValue", {}).get("values", [])
+        result: dict[str, Any] = {}
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key", "")).strip()
+            value = item.get("value")
+            if key and isinstance(value, dict):
+                result[key] = _otel_attribute_value(value)
+        return result
+    return None
+
+
+def _flatten_otel_attributes(raw_attributes: Any) -> dict[str, Any]:
+    if isinstance(raw_attributes, dict):
+        return {
+            str(key): value
+            for key, value in raw_attributes.items()
+        }
+    attributes: dict[str, Any] = {}
+    if not isinstance(raw_attributes, list):
+        return attributes
+    for item in raw_attributes:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key", "")).strip()
+        value = item.get("value")
+        if not key or not isinstance(value, dict):
+            continue
+        attributes[key] = _otel_attribute_value(value)
+    return attributes
+
+
+def _flatten_otel_spans(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        spans: list[dict[str, Any]] = []
+        for item in payload:
+            spans.extend(_flatten_otel_spans(item))
+        return spans
+    if not isinstance(payload, dict):
+        return []
+    if "resourceSpans" in payload:
+        spans = []
+        for resource_span in payload.get("resourceSpans", []):
+            spans.extend(_flatten_otel_spans(resource_span))
+        return spans
+    if "scopeSpans" in payload:
+        spans = []
+        for scope_span in payload.get("scopeSpans", []):
+            spans.extend(_flatten_otel_spans(scope_span))
+        return spans
+    if "spans" in payload:
+        spans = []
+        for span in payload.get("spans", []):
+            if isinstance(span, dict):
+                spans.append(span)
+        return spans
+    if "attributes" in payload and ("name" in payload or "startTimeUnixNano" in payload):
+        return [payload]
+    return []
+
+
+def _latency_ms_from_otel_span(span: dict[str, Any]) -> float:
+    if "latency_ms" in span or "duration_ms" in span:
+        return round(_coerce_float(span.get("latency_ms", span.get("duration_ms", 0.0))), 2)
+    start = span.get("startTimeUnixNano")
+    end = span.get("endTimeUnixNano")
+    if start not in (None, "") and end not in (None, ""):
+        duration_ns = _coerce_float(end) - _coerce_float(start)
+        if duration_ns > 0:
+            return round(duration_ns / 1_000_000, 2)
+    return 0.0
+
+
+def _grade_from_otel_attributes(attributes: dict[str, Any]) -> dict[str, Any] | None:
+    grade_keys = {
+        "correctness_pass": "agenvantage.grade.correctness_pass",
+        "safety_pass": "agenvantage.grade.safety_pass",
+        "grounded_citation_pass": "agenvantage.grade.grounded_citation_pass",
+        "overall_pass": "agenvantage.grade.overall_pass",
+        "score": "agenvantage.grade.score",
+    }
+    if not any(key in attributes for key in grade_keys.values()):
+        return None
+    grade: dict[str, Any] = {}
+    for output_key, attribute_key in grade_keys.items():
+        if attribute_key in attributes:
+            grade[output_key] = attributes[attribute_key]
+    return grade
+
+
+def _normalize_otel_span_record(
+    span: dict[str, Any],
+    pricing: PricingSnapshot | None = None,
+) -> dict[str, Any]:
+    attributes = _flatten_otel_attributes(span.get("attributes"))
+    record: dict[str, Any] = {
+        "case_id": str(attributes.get("agenvantage.case_id", "")).strip(),
+        "policy_id": str(attributes.get("agenvantage.policy_id", "")).strip(),
+        "failure_type": str(attributes.get("agenvantage.failure_type", "unknown")).strip()
+        or "unknown",
+        "repeat_index": _coerce_int(attributes.get("agenvantage.repeat_index", 0)),
+        "dataset_id": str(attributes.get("agenvantage.dataset_id", "")).strip() or None,
+        "environment_scope": str(attributes.get("agenvantage.environment_scope", "")).strip()
+        or None,
+        "model": str(
+            attributes.get("gen_ai.response.model")
+            or attributes.get("gen_ai.request.model")
+            or ""
+        ).strip()
+        or None,
+        "input_tokens": _coerce_int(attributes.get("gen_ai.usage.input_tokens")),
+        "cached_input_tokens": _coerce_int(
+            attributes.get("gen_ai.usage.cache_read.input_tokens")
+            or attributes.get("gen_ai.usage.cached_input_tokens")
+        ),
+        "output_tokens": _coerce_int(attributes.get("gen_ai.usage.output_tokens")),
+        "latency_ms": _latency_ms_from_otel_span(span),
+    }
+    grade = _grade_from_otel_attributes(attributes)
+    if grade is not None:
+        record["grade"] = grade
+    if "agenvantage.request_cost_usd" in attributes:
+        record["request_cost_usd"] = round(
+            _coerce_float(attributes.get("agenvantage.request_cost_usd")),
+            8,
+        )
+    elif pricing is not None:
+        record["request_cost_usd"] = compute_request_cost(
+            record["input_tokens"],
+            record["cached_input_tokens"],
+            record["output_tokens"],
+            pricing,
+        )
+    return record
+
+
+def normalize_provider_records_payload(
+    raw_payload: Any,
+    pricing: PricingSnapshot | None = None,
+) -> list[dict[str, Any]]:
+    if isinstance(raw_payload, dict) and isinstance(raw_payload.get("records"), list):
+        return [
+            _normalize_provider_record(record, pricing)
+            for record in raw_payload["records"]
+            if isinstance(record, dict)
+        ]
+    if isinstance(raw_payload, dict) and isinstance(raw_payload.get("requests"), list):
+        return [
+            _normalize_provider_record(record, pricing)
+            for record in raw_payload["requests"]
+            if isinstance(record, dict)
+        ]
+    if isinstance(raw_payload, list) and all(isinstance(item, dict) for item in raw_payload):
+        return [
+            _normalize_provider_record(record, pricing)
+            for record in raw_payload
+        ]
+
+    spans = _flatten_otel_spans(raw_payload)
+    if spans:
+        records = [
+            _normalize_otel_span_record(span, pricing)
+            for span in spans
+            if _flatten_otel_attributes(span.get("attributes")).get("agenvantage.case_id")
+            and _flatten_otel_attributes(span.get("attributes")).get("agenvantage.policy_id")
+        ]
+        if records:
+            return records
+
+    raise ValueError(
+        "Unsupported provider-validation payload. Expected records, requests, or OTLP-style spans."
+    )
+
+
 def summarize_provider_validation_records(
     records: list[dict[str, Any]],
     dataset: ProviderValidationDataset | None = None,
     dataset_requirements: dict[str, Any] | None = None,
     pricing: PricingSnapshot | None = None,
 ) -> dict[str, Any]:
+    resolved_requirements = _merge_dataset_requirements(dataset, dataset_requirements)
     summary_by_policy: dict[str, dict[str, Any]] = {}
     for record in records:
         policy_id = str(record["policy_id"])
@@ -1011,17 +1335,21 @@ def summarize_provider_validation_records(
         }
 
     return {
-        "dataset_id": dataset.dataset_id if dataset else None,
-        "environment_scope": dataset.environment_scope if dataset else None,
-        "dataset_requirements": (
-            _dataset_requirements(dataset) if dataset is not None else dataset_requirements
+        "dataset_id": (
+            (resolved_requirements or {}).get("dataset_id")
+            or (dataset.dataset_id if dataset else None)
         ),
+        "environment_scope": (
+            (resolved_requirements or {}).get("environment_scope")
+            or (dataset.environment_scope if dataset else None)
+        ),
+        "dataset_requirements": resolved_requirements,
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
         "claim_audit": _claim_audit(
             policies,
-            _dataset_requirements(dataset) if dataset is not None else dataset_requirements,
+            resolved_requirements,
         ),
         "records": records,
     }
@@ -1031,14 +1359,48 @@ def summarize_saved_provider_validation_report(
     raw_report: dict[str, Any],
     dataset: ProviderValidationDataset | None = None,
     pricing: PricingSnapshot | None = None,
+    environment_scope: str | None = None,
 ) -> dict[str, Any]:
     pricing_snapshot = pricing
     if pricing_snapshot is None and isinstance(raw_report.get("pricing_snapshot"), dict):
         pricing_snapshot = PricingSnapshot.from_dict(raw_report["pricing_snapshot"])
 
     return summarize_provider_validation_records(
-        raw_report.get("records", []),
+        normalize_provider_records_payload(raw_report, pricing_snapshot),
         dataset=dataset,
-        dataset_requirements=raw_report.get("dataset_requirements"),
+        dataset_requirements=_merge_dataset_requirements(
+            None,
+            raw_report.get("dataset_requirements"),
+            environment_scope=environment_scope,
+        ),
+        pricing=pricing_snapshot,
+    )
+
+
+def summarize_normalized_provider_validation_payload(
+    raw_payload: Any,
+    dataset: ProviderValidationDataset | None = None,
+    pricing: PricingSnapshot | None = None,
+    environment_scope: str | None = None,
+) -> dict[str, Any]:
+    pricing_snapshot = pricing
+    if pricing_snapshot is None and isinstance(raw_payload, dict) and isinstance(
+        raw_payload.get("pricing_snapshot"),
+        dict,
+    ):
+        pricing_snapshot = PricingSnapshot.from_dict(raw_payload["pricing_snapshot"])
+
+    dataset_requirements = None
+    if isinstance(raw_payload, dict):
+        dataset_requirements = raw_payload.get("dataset_requirements")
+
+    return summarize_provider_validation_records(
+        normalize_provider_records_payload(raw_payload, pricing_snapshot),
+        dataset=dataset,
+        dataset_requirements=_merge_dataset_requirements(
+            None,
+            dataset_requirements,
+            environment_scope=environment_scope,
+        ),
         pricing=pricing_snapshot,
     )

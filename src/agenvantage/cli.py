@@ -19,6 +19,7 @@ from agenvantage.provider_validation import (
     load_pricing_snapshot,
     load_provider_validation_dataset,
     run_provider_validation,
+    summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
@@ -160,6 +161,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Summarize a previously saved validation JSON report instead of calling a provider.",
     )
     validate_provider.add_argument(
+        "--normalize",
+        type=Path,
+        help=(
+            "Normalize raw request records or OTLP-style span exports into a "
+            "provider-validation summary without calling a provider."
+        ),
+    )
+    validate_provider.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate fixture readiness locally without making provider calls.",
@@ -201,6 +210,14 @@ def _parser() -> argparse.ArgumentParser:
         "--base-url",
         default="https://api.openai.com/v1",
         help="Responses API base URL.",
+    )
+    validate_provider.add_argument(
+        "--environment-scope",
+        default=None,
+        help=(
+            "Optional evidence scope override such as synthetic_local or production. "
+            "Use only when the saved artifact came from that environment."
+        ),
     )
 
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
@@ -627,6 +644,21 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
                 if args.pricing is not None
                 else None
             ),
+            environment_scope=args.environment_scope,
+        )
+    elif args.normalize is not None:
+        if not args.normalize.is_file():
+            raise SystemExit(f"Normalization input not found: {args.normalize}")
+        raw_payload = json.loads(args.normalize.read_text(encoding="utf-8"))
+        report = summarize_normalized_provider_validation_payload(
+            raw_payload,
+            dataset=dataset,
+            pricing=(
+                load_pricing_snapshot(args.pricing)
+                if args.pricing is not None
+                else None
+            ),
+            environment_scope=args.environment_scope,
         )
     else:
         if not args.fixture.is_file():
