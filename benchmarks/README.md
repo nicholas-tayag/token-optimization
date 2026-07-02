@@ -45,7 +45,7 @@ questions that the repository could not previously answer:
 - downstream answer-quality retention; and
 - end-to-end support for the broader "context overload" claim.
 
-It supports four modes:
+It supports five modes:
 
 - `--dry-run`: validate that the synthetic fixture is cache-eligible and that
   the budgeted policies actually create token-selection pressure before any API
@@ -57,6 +57,9 @@ It supports four modes:
 - live mode with `--pricing` plus `OPENAI_API_KEY`: call the OpenAI Responses
   API, persist raw records, compute request cost from a versioned pricing
   snapshot, and grade structured JSON answers with deterministic checks.
+- `--otel-export <payload.json>`: emit the summarized provider-validation report
+  as an OTLP-style span export so the same evidence can be replayed through the
+  normalization path or shared with observability tooling.
 
 Run the fixture readiness check with:
 
@@ -82,6 +85,7 @@ export OPENAI_API_KEY=...
 .venv/bin/python -m agenvantage validate-provider \
   --pricing artifacts/openai-pricing.json \
   --records artifacts/provider-validation.json \
+  --otel-export artifacts/provider-validation-otel.json \
   --summary
 ```
 
@@ -117,6 +121,24 @@ the request-level estimated experiment total against organization-recorded
 costs over the supplied window. Saved provider reports now preserve that
 reconciliation block on replay, and a bad reconciliation can block the strong
 cost-savings support claim.
+
+If you already have a saved provider-validation report and want to verify that
+its OTLP export preserves the same claim-audit outcome, write the export and
+round-trip it through normalization:
+
+```bash
+.venv/bin/python -m agenvantage validate-provider \
+  --replay artifacts/provider-validation.json \
+  --otel-export artifacts/provider-validation-otel.json \
+  --summary
+
+.venv/bin/python -m agenvantage validate-provider \
+  --normalize artifacts/provider-validation-otel.json \
+  --pricing artifacts/openai-pricing.json \
+  --environment-scope production \
+  --records artifacts/provider-validation-roundtrip.json \
+  --summary
+```
 
 ## Claim Status
 

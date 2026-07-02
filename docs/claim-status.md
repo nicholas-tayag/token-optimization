@@ -32,9 +32,10 @@
 - Record provider-backed cost and latency results for the compared policies.
 - Run a broad answer-quality evaluation with enough distinct tasks to satisfy the declared tolerance.
 - Keep the result production-scoped if you want the strongest end-to-end claim.
-- Run validate-provider live with a real pricing snapshot and saved records.
+- Run validate-provider live with a real pricing snapshot, or normalize saved raw telemetry into provider-validation records.
+- If you have an OpenAI Costs API export, reconcile it against the saved provider report.
 - Show lower mean request cost for budgeted_cache_aligned than full_unaligned.
-- Collect latency measurements from a production-scoped workload or telemetry source.
+- Collect latency measurements from a production-scoped workload or telemetry source, then normalize or replay them.
 - Show a better p50 than full_unaligned with enough production requests.
 - Run provider validation across at least 30 distinct cases and 6 or more failure types.
 - Show no material regression in correctness, safety, and grounded citation pass rates.

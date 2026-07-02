@@ -118,6 +118,7 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
     output_path = tmp_path / "provider-validation.json"
     pricing_path = tmp_path / "pricing.json"
     costs_path = tmp_path / "costs.json"
+    otel_path = tmp_path / "provider-validation-otel.json"
     records_path.write_text(
         json.dumps(
             [
@@ -218,6 +219,8 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
             str(costs_path),
             "--records",
             str(output_path),
+            "--otel-export",
+            str(otel_path),
             "--summary",
         ],
         check=True,
@@ -229,10 +232,13 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
     assert "Paired deltas (candidate - baseline):" in completed.stdout
     assert "Evidence readiness:" in completed.stdout
     assert "Cost reconciliation:" in completed.stdout
+    assert "OTLP-style export written to" in completed.stdout
     report = json.loads(output_path.read_text(encoding="utf-8"))
+    otel_export = json.loads(otel_path.read_text(encoding="utf-8"))
     assert report["environment_scope"] == "production"
     assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
     assert report["cost_reconciliation"]["recorded_organization_total_cost_usd"] == 0.004
+    assert otel_export["resourceSpans"][0]["scopeSpans"][0]["spans"]
 
 
 def test_format_pack_summary_reports_budget_and_files() -> None:

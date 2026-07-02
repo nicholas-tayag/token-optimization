@@ -1668,6 +1668,98 @@ def reconcile_provider_costs(report: dict[str, Any], raw_costs_payload: Any) -> 
     }
 
 
+def _otel_attribute(key: str, value: Any) -> dict[str, Any]:
+    if isinstance(value, bool):
+        payload = {"boolValue": value}
+    elif isinstance(value, int) and not isinstance(value, bool):
+        payload = {"intValue": str(value)}
+    elif isinstance(value, float):
+        payload = {"doubleValue": value}
+    else:
+        payload = {"stringValue": str(value)}
+    return {"key": key, "value": payload}
+
+
+def provider_validation_report_to_otel_export(report: dict[str, Any]) -> dict[str, Any]:
+    spans: list[dict[str, Any]] = []
+    dataset_id = report.get("dataset_id")
+    environment_scope = report.get("environment_scope")
+
+    for index, record in enumerate(report.get("records", [])):
+        if not isinstance(record, dict):
+            continue
+        started_at_unix_s = _coerce_optional_int(record.get("started_at_unix_s")) or (index + 1)
+        latency_ms = _coerce_float(record.get("latency_ms"))
+        start_ns = started_at_unix_s * 1_000_000_000
+        end_ns = start_ns + int(latency_ms * 1_000_000)
+        attributes = [
+            _otel_attribute("agenvantage.case_id", record.get("case_id", "")),
+            _otel_attribute("agenvantage.failure_type", record.get("failure_type", "unknown")),
+            _otel_attribute("agenvantage.policy_id", record.get("policy_id", "")),
+            _otel_attribute("gen_ai.request.model", record.get("model", "unknown")),
+            _otel_attribute("gen_ai.usage.input_tokens", _coerce_int(record.get("input_tokens"))),
+            _otel_attribute(
+                "gen_ai.usage.cache_read.input_tokens",
+                _coerce_int(record.get("cached_input_tokens")),
+            ),
+            _otel_attribute(
+                "gen_ai.usage.output_tokens",
+                _coerce_int(record.get("output_tokens")),
+            ),
+            _otel_attribute(
+                "agenvantage.request_cost_usd",
+                _coerce_float(record.get("request_cost_usd")),
+            ),
+        ]
+        if dataset_id:
+            attributes.append(_otel_attribute("agenvantage.dataset_id", dataset_id))
+        if environment_scope:
+            attributes.append(_otel_attribute("agenvantage.environment_scope", environment_scope))
+        if "repeat_index" in record:
+            attributes.append(
+                _otel_attribute(
+                    "agenvantage.repeat_index",
+                    _coerce_int(record.get("repeat_index")),
+                )
+            )
+        grade = record.get("grade") or {}
+        if isinstance(grade, dict):
+            for key in (
+                "correctness_pass",
+                "safety_pass",
+                "grounded_citation_pass",
+                "overall_pass",
+                "score",
+            ):
+                if key in grade:
+                    attributes.append(_otel_attribute(f"agenvantage.grade.{key}", grade[key]))
+
+        spans.append(
+            {
+                "name": "gen_ai.request",
+                "startTimeUnixNano": str(start_ns),
+                "endTimeUnixNano": str(end_ns),
+                "attributes": attributes,
+            }
+        )
+
+    return {
+        "resourceSpans": [
+            {
+                "scopeSpans": [
+                    {
+                        "scope": {
+                            "name": "agenvantage.provider_validation",
+                            "version": "1",
+                        },
+                        "spans": spans,
+                    }
+                ]
+            }
+        ]
+    }
+
+
 def summarize_provider_validation_records(
     records: list[dict[str, Any]],
     dataset: ProviderValidationDataset | None = None,

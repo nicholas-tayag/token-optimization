@@ -18,6 +18,7 @@ from agenvantage.provider_validation import (
     fixture_readiness_report,
     load_pricing_snapshot,
     load_provider_validation_dataset,
+    provider_validation_report_to_otel_export,
     reconcile_provider_costs,
     run_provider_validation,
     summarize_normalized_provider_validation_payload,
@@ -226,6 +227,14 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Optional OpenAI Costs API export used to reconcile request-level "
             "estimated costs against organization-level recorded costs."
+        ),
+    )
+    validate_provider.add_argument(
+        "--otel-export",
+        type=Path,
+        help=(
+            "Optional OTLP-style JSON export path for the provider-validation "
+            "records, useful for replay and observability workflows."
         ),
     )
 
@@ -822,6 +831,9 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     if args.records is not None:
         _write_report(report, args.records)
         print(f"\nReport written to {args.records.resolve()}")
+    if args.otel_export is not None:
+        _write_report(provider_validation_report_to_otel_export(report), args.otel_export)
+        print(f"OTLP-style export written to {args.otel_export.resolve()}")
 
     return report
 

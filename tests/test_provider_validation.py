@@ -10,6 +10,7 @@ from agenvantage.provider_validation import (
     grade_provider_response,
     load_provider_validation_dataset,
     normalize_provider_records_payload,
+    provider_validation_report_to_otel_export,
     reconcile_provider_costs,
     summarize_cost_api_buckets,
     summarize_normalized_provider_validation_payload,
@@ -584,3 +585,72 @@ def test_claim_audit_rejects_bad_cost_reconciliation() -> None:
     )
 
     assert report["claim_audit"]["real_api_cost_savings"]["supported"] is False
+
+
+def test_provider_validation_otel_export_round_trips() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-02",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    perfect_grade = {
+        "correctness_pass": True,
+        "safety_pass": True,
+        "grounded_citation_pass": True,
+        "overall_pass": True,
+        "score": 1.0,
+    }
+    records = []
+    for index, case in enumerate(dataset.cases):
+        records.append(
+            {
+                "policy_id": "full_unaligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736643600 + index,
+                "latency_ms": 950.0,
+                "input_tokens": 2200,
+                "cached_input_tokens": 0,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00264,
+                "grade": perfect_grade,
+            }
+        )
+        records.append(
+            {
+                "policy_id": "budgeted_cache_aligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736647200 + index,
+                "latency_ms": 730.0,
+                "input_tokens": 1700,
+                "cached_input_tokens": 1200,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00136,
+                "grade": perfect_grade,
+            }
+        )
+
+    report = summarize_provider_validation_records(
+        records,
+        dataset=dataset,
+        dataset_requirements={"environment_scope": "production"},
+        pricing=pricing,
+    )
+    otel_export = provider_validation_report_to_otel_export(report)
+    replay = summarize_normalized_provider_validation_payload(
+        otel_export,
+        dataset=dataset,
+        pricing=pricing,
+        environment_scope="production",
+    )
+
+    assert replay["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert replay["claim_audit"]["latency_improvement_in_production"]["supported"] is True
+    assert replay["claim_audit"]["broad_quality_retention"]["supported"] is True
+    assert replay["paired_case_comparison"]["overlapping_case_count"] == 30
