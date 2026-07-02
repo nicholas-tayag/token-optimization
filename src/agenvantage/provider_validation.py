@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import statistics
@@ -498,10 +499,21 @@ def _response_schema() -> dict[str, Any]:
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "additionalProperties": True,
+                    "additionalProperties": False,
                     "properties": {
                         "tool": {"type": "string"},
-                        "arguments": {"type": "object", "additionalProperties": True},
+                        "arguments": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "service": {"type": ["string", "null"]},
+                                "metric": {"type": ["string", "null"]},
+                                "window": {"type": ["string", "null"]},
+                                "query": {"type": ["string", "null"]},
+                                "flag_name": {"type": ["string", "null"]},
+                            },
+                            "required": ["service", "metric", "window", "query", "flag_name"],
+                        },
                     },
                     "required": ["tool", "arguments"],
                 },
@@ -712,6 +724,16 @@ def _extract_usage(raw_response: dict[str, Any]) -> tuple[int, int, int]:
     return input_tokens, cached_input_tokens, output_tokens
 
 
+def _prompt_cache_key(
+    prefix: str,
+    dataset_id: str,
+    policy_name: str,
+) -> str:
+    suffix = hashlib.sha1(f"{dataset_id}:{policy_name}".encode("utf-8")).hexdigest()[:16]
+    base_prefix = prefix[: min(len(prefix), 40)].rstrip(":")
+    return f"{base_prefix}:{suffix}"
+
+
 def run_provider_validation(
     dataset: ProviderValidationDataset,
     counter: TokenCounter,
@@ -735,8 +757,10 @@ def run_provider_validation(
             for policy_name in policy_order:
                 package = packages[policy_name]
                 started_at = time.time()
-                prompt_cache_key = (
-                    f"{prompt_cache_key_prefix}:{dataset.dataset_id}:{policy_name}"
+                prompt_cache_key = _prompt_cache_key(
+                    prompt_cache_key_prefix,
+                    dataset.dataset_id,
+                    policy_name,
                 )
                 request_payload = {
                     "model": model,
