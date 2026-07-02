@@ -95,6 +95,11 @@ def build_claim_status_report(
             f"Provider validation artifact present with {provider_summary.get('record_count', 0)} recorded requests.",
             f"Environment scope: {environment_scope or 'unknown'}.",
         ]
+        cost_reconciliation = provider_report.get("cost_reconciliation")
+        if isinstance(cost_reconciliation, dict):
+            provider_evidence.append(
+                "Cost reconciliation data is present for request-level versus organization-level spend."
+            )
     else:
         provider_summary = None
         claim_audit = {}

@@ -767,6 +767,7 @@ def run_provider_validation(
                         "policy_id": policy_name,
                         "repeat_index": repeat_index,
                         "model": model,
+                        "started_at_unix_s": int(started_at),
                         "input_tokens": input_tokens,
                         "cached_input_tokens": cached_input_tokens,
                         "output_tokens": output_tokens,
@@ -1243,6 +1244,16 @@ def _coerce_float(value: Any) -> float:
     return float(str(value).strip())
 
 
+def _coerce_optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return int(str(value).strip())
+
+
 def _extract_usage_from_record(record: dict[str, Any]) -> tuple[int, int, int]:
     if "usage" in record and isinstance(record["usage"], dict):
         usage = record["usage"]
@@ -1333,6 +1344,14 @@ def _normalize_provider_record(
         2,
     )
     record["request_cost_usd"] = round(_coerce_float(request_cost_usd), 8)
+    started_at_unix_s = _coerce_optional_int(
+        raw_record.get("started_at_unix_s")
+        or raw_record.get("request_timestamp")
+        or raw_record.get("created_at")
+        or raw_record.get("timestamp")
+    )
+    if started_at_unix_s is not None:
+        record["started_at_unix_s"] = started_at_unix_s
 
     if "repeat_index" in raw_record:
         record["repeat_index"] = _coerce_int(raw_record.get("repeat_index"))
@@ -1476,6 +1495,13 @@ def _normalize_otel_span_record(
         "output_tokens": _coerce_int(attributes.get("gen_ai.usage.output_tokens")),
         "latency_ms": _latency_ms_from_otel_span(span),
     }
+    started_at_unix_s = (
+        round(_coerce_float(span.get("startTimeUnixNano")) / 1_000_000_000)
+        if span.get("startTimeUnixNano") not in (None, "")
+        else None
+    )
+    if started_at_unix_s is not None:
+        record["started_at_unix_s"] = _coerce_int(started_at_unix_s)
     grade = _grade_from_otel_attributes(attributes)
     if grade is not None:
         record["grade"] = grade
@@ -1530,6 +1556,104 @@ def normalize_provider_records_payload(
     raise ValueError(
         "Unsupported provider-validation payload. Expected records, requests, or OTLP-style spans."
     )
+
+
+def summarize_cost_api_buckets(raw_payload: Any) -> dict[str, Any]:
+    if isinstance(raw_payload, dict) and isinstance(raw_payload.get("data"), list):
+        buckets = [item for item in raw_payload["data"] if isinstance(item, dict)]
+    elif isinstance(raw_payload, list):
+        buckets = [item for item in raw_payload if isinstance(item, dict)]
+    else:
+        raise ValueError("Unsupported costs payload. Expected a Costs API response object or bucket list.")
+
+    total_cost_usd = 0.0
+    currencies: set[str] = set()
+    project_ids: set[str] = set()
+    line_item_totals: dict[str, float] = {}
+    bucket_starts: list[int] = []
+    bucket_ends: list[int] = []
+
+    for bucket in buckets:
+        start_time = _coerce_optional_int(bucket.get("start_time"))
+        end_time = _coerce_optional_int(bucket.get("end_time"))
+        if start_time is not None:
+            bucket_starts.append(start_time)
+        if end_time is not None:
+            bucket_ends.append(end_time)
+        for result in bucket.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            amount = result.get("amount") or {}
+            value = _coerce_float(amount.get("value"))
+            currency = str(amount.get("currency", "")).strip().lower()
+            if currency:
+                currencies.add(currency)
+            total_cost_usd += value
+            line_item = str(result.get("line_item", "")).strip() or "unattributed"
+            line_item_totals[line_item] = round(line_item_totals.get(line_item, 0.0) + value, 8)
+            project_id = str(result.get("project_id", "")).strip()
+            if project_id:
+                project_ids.add(project_id)
+
+    return {
+        "bucket_count": len(buckets),
+        "start_time": min(bucket_starts) if bucket_starts else None,
+        "end_time": max(bucket_ends) if bucket_ends else None,
+        "currency": next(iter(currencies)) if len(currencies) == 1 else None,
+        "currency_count": len(currencies),
+        "total_cost_usd": round(total_cost_usd, 8),
+        "project_ids": sorted(project_ids),
+        "line_items": [
+            {"line_item": line_item, "amount_usd": amount}
+            for line_item, amount in sorted(line_item_totals.items())
+        ],
+    }
+
+
+def reconcile_provider_costs(report: dict[str, Any], raw_costs_payload: Any) -> dict[str, Any]:
+    cost_summary = summarize_cost_api_buckets(raw_costs_payload)
+    records = [record for record in report.get("records", []) if isinstance(record, dict)]
+    estimated_total_cost_usd = round(
+        sum(_coerce_float(record.get("request_cost_usd")) for record in records),
+        8,
+    )
+    timestamps = [
+        timestamp
+        for timestamp in (
+            _coerce_optional_int(record.get("started_at_unix_s")) for record in records
+        )
+        if timestamp is not None
+    ]
+    estimated_start = min(timestamps) if timestamps else None
+    estimated_end = max(timestamps) if timestamps else None
+    recorded_total_cost_usd = _coerce_float(cost_summary.get("total_cost_usd"))
+    difference_usd = round(recorded_total_cost_usd - estimated_total_cost_usd, 8)
+    denominator = estimated_total_cost_usd or 1.0
+    difference_ratio = round(difference_usd / denominator, 6)
+    time_window_overlap = (
+        estimated_start is not None
+        and estimated_end is not None
+        and cost_summary.get("start_time") is not None
+        and cost_summary.get("end_time") is not None
+        and estimated_start >= int(cost_summary["start_time"])
+        and estimated_end <= int(cost_summary["end_time"])
+    )
+    return {
+        "estimated_request_level_total_cost_usd": estimated_total_cost_usd,
+        "recorded_organization_total_cost_usd": round(recorded_total_cost_usd, 8),
+        "difference_usd": difference_usd,
+        "difference_ratio_vs_estimate": difference_ratio,
+        "experiment_request_count": len(records),
+        "experiment_start_time": estimated_start,
+        "experiment_end_time": estimated_end,
+        "organization_cost_start_time": cost_summary.get("start_time"),
+        "organization_cost_end_time": cost_summary.get("end_time"),
+        "time_window_overlap": time_window_overlap,
+        "project_ids": cost_summary.get("project_ids", []),
+        "line_items": cost_summary.get("line_items", []),
+        "bucket_count": cost_summary.get("bucket_count"),
+        "currency": cost_summary.get("currency"),
+    }
 
 
 def summarize_provider_validation_records(

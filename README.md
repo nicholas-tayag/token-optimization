@@ -44,7 +44,8 @@ The current local workflow provides:
   replay recorded provider results, or collect OpenAI Responses API usage,
   latency, and deterministic grading data when credentials and a pricing
   snapshot are supplied, with readiness reporting for claim-sufficiency gaps
-  and paired-bootstrap reporting for measured deltas; and
+  and paired-bootstrap reporting for measured deltas, plus optional Costs API
+  reconciliation; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:

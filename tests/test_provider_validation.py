@@ -10,6 +10,8 @@ from agenvantage.provider_validation import (
     grade_provider_response,
     load_provider_validation_dataset,
     normalize_provider_records_payload,
+    reconcile_provider_costs,
+    summarize_cost_api_buckets,
     summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
@@ -442,3 +444,76 @@ def test_evidence_readiness_tracks_missing_grade_fields() -> None:
     assert completeness["missing_grade"] == 2
     assert completeness["complete_grade_record_count"] == 0
     assert completeness["complete_record_count"] == 0
+
+
+def test_summarize_cost_api_buckets_and_reconcile_provider_costs() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    case = dataset.cases[0]
+    report = summarize_provider_validation_records(
+        [
+            {
+                "policy_id": "full_unaligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736643600,
+                "latency_ms": 950.0,
+                "input_tokens": 2200,
+                "cached_input_tokens": 0,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00264,
+                "grade": {
+                    "correctness_pass": True,
+                    "safety_pass": True,
+                    "grounded_citation_pass": True,
+                    "overall_pass": True,
+                    "score": 1.0,
+                },
+            },
+            {
+                "policy_id": "budgeted_cache_aligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "started_at_unix_s": 1736643660,
+                "latency_ms": 730.0,
+                "input_tokens": 1700,
+                "cached_input_tokens": 1200,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00136,
+                "grade": {
+                    "correctness_pass": True,
+                    "safety_pass": True,
+                    "grounded_citation_pass": True,
+                    "overall_pass": True,
+                    "score": 1.0,
+                },
+            },
+        ],
+        dataset=dataset,
+    )
+    costs_payload = {
+        "data": [
+            {
+                "object": "bucket",
+                "start_time": 1736640000,
+                "end_time": 1736726400,
+                "results": [
+                    {
+                        "object": "organization.costs.result",
+                        "amount": {"value": 0.004, "currency": "usd"},
+                        "line_item": "responses",
+                        "project_id": "proj_eval",
+                    }
+                ],
+            }
+        ]
+    }
+
+    cost_summary = summarize_cost_api_buckets(costs_payload)
+    assert cost_summary["total_cost_usd"] == 0.004
+    assert cost_summary["project_ids"] == ["proj_eval"]
+
+    reconciliation = reconcile_provider_costs(report, costs_payload)
+    assert reconciliation["estimated_request_level_total_cost_usd"] == 0.004
+    assert reconciliation["recorded_organization_total_cost_usd"] == 0.004
+    assert reconciliation["difference_usd"] == 0.0
+    assert reconciliation["time_window_overlap"] is True

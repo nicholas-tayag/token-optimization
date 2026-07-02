@@ -117,6 +117,7 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
     records_path = tmp_path / "records.json"
     output_path = tmp_path / "provider-validation.json"
     pricing_path = tmp_path / "pricing.json"
+    costs_path = tmp_path / "costs.json"
     records_path.write_text(
         json.dumps(
             [
@@ -176,6 +177,30 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
+    costs_path.write_text(
+        json.dumps(
+            {
+                "data": [
+                    {
+                        "object": "bucket",
+                        "start_time": 0,
+                        "end_time": 9999999999,
+                        "results": [
+                            {
+                                "object": "organization.costs.result",
+                                "amount": {"value": 0.004, "currency": "usd"},
+                                "line_item": "responses",
+                                "project_id": "proj_eval",
+                            }
+                        ],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     completed = subprocess.run(
         [
@@ -189,6 +214,8 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
             str(pricing_path),
             "--environment-scope",
             "production",
+            "--reconcile-costs",
+            str(costs_path),
             "--records",
             str(output_path),
             "--summary",
@@ -201,9 +228,11 @@ def test_validate_provider_normalize_records_summary(tmp_path: Path) -> None:
     assert "AgenVantage provider validation" in completed.stdout
     assert "Paired deltas (candidate - baseline):" in completed.stdout
     assert "Evidence readiness:" in completed.stdout
+    assert "Cost reconciliation:" in completed.stdout
     report = json.loads(output_path.read_text(encoding="utf-8"))
     assert report["environment_scope"] == "production"
     assert report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert report["cost_reconciliation"]["recorded_organization_total_cost_usd"] == 0.004
 
 
 def test_format_pack_summary_reports_budget_and_files() -> None:

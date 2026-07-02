@@ -93,6 +93,7 @@ normalize them into the same provider-validation shape:
   --normalize artifacts/provider-otel-export.json \
   --pricing artifacts/openai-pricing.json \
   --environment-scope production \
+  --reconcile-costs artifacts/openai-costs.json \
   --records artifacts/provider-validation.json \
   --summary
 ```
@@ -111,7 +112,9 @@ prints paired case deltas with bootstrap confidence intervals for cost,
 latency, and quality metrics so the result can be defended case-by-case rather
 than only through aggregate means. Those paired intervals now back the stronger
 cost, latency, and broad-quality support gates when a provider artifact is
-present.
+present. If you also export the OpenAI Costs API, `--reconcile-costs` compares
+the request-level estimated experiment total against organization-recorded
+costs over the supplied window.
 
 ## Claim Status
 

@@ -18,6 +18,7 @@ from agenvantage.provider_validation import (
     fixture_readiness_report,
     load_pricing_snapshot,
     load_provider_validation_dataset,
+    reconcile_provider_costs,
     run_provider_validation,
     summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
@@ -217,6 +218,14 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Optional evidence scope override such as synthetic_local or production. "
             "Use only when the saved artifact came from that environment."
+        ),
+    )
+    validate_provider.add_argument(
+        "--reconcile-costs",
+        type=Path,
+        help=(
+            "Optional OpenAI Costs API export used to reconcile request-level "
+            "estimated costs against organization-level recorded costs."
         ),
     )
 
@@ -505,6 +514,29 @@ def _format_provider_validation_summary(report: dict[str, Any]) -> str:
         if missing_fields:
             lines.append(f"  missing_fields: {', '.join(missing_fields)}")
 
+    reconciliation = report.get("cost_reconciliation", {})
+    if reconciliation:
+        lines.extend(
+            [
+                "",
+                "Cost reconciliation:",
+                (
+                    "  "
+                    f"estimated=${reconciliation.get('estimated_request_level_total_cost_usd', 0.0):.6f} "
+                    f"recorded=${reconciliation.get('recorded_organization_total_cost_usd', 0.0):.6f} "
+                    f"diff=${reconciliation.get('difference_usd', 0.0):.6f}"
+                ),
+                (
+                    "  "
+                    f"ratio_vs_estimate={reconciliation.get('difference_ratio_vs_estimate')} "
+                    f"time_window_overlap={reconciliation.get('time_window_overlap')} "
+                    f"buckets={reconciliation.get('bucket_count')}"
+                ),
+            ]
+        )
+        if reconciliation.get("project_ids"):
+            lines.append(f"  project_ids: {', '.join(reconciliation['project_ids'])}")
+
     return "\n".join(lines)
 
 
@@ -772,6 +804,12 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
                 repeats=args.repeats,
                 max_cases=args.max_cases,
             )
+
+    if args.reconcile_costs is not None:
+        if not args.reconcile_costs.is_file():
+            raise SystemExit(f"Costs reconciliation input not found: {args.reconcile_costs}")
+        costs_payload = json.loads(args.reconcile_costs.read_text(encoding="utf-8"))
+        report["cost_reconciliation"] = reconcile_provider_costs(report, costs_payload)
 
     if args.summary:
         if args.dry_run and args.replay is None:
