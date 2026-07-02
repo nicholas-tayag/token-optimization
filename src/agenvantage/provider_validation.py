@@ -805,7 +805,7 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 def _claim_audit(
     summary_by_policy: dict[str, dict[str, Any]],
-    dataset: ProviderValidationDataset | None,
+    audit_requirements: dict[str, Any] | None,
 ) -> dict[str, Any]:
     baseline = summary_by_policy.get("full_unaligned")
     candidate = summary_by_policy.get("budgeted_cache_aligned")
@@ -817,16 +817,15 @@ def _claim_audit(
             }
         }
 
-    minimum_latency_samples = (
-        dataset.recommended_warm_requests_per_policy if dataset else 30
+    requirements = audit_requirements or {}
+    minimum_latency_samples = int(requirements.get("recommended_warm_requests_per_policy", 30))
+    minimum_broad_case_count = int(
+        requirements.get("minimum_distinct_cases_for_broad_claim", 30)
     )
-    minimum_broad_case_count = (
-        dataset.minimum_distinct_cases_for_broad_claim if dataset else 30
+    minimum_failure_type_count = int(
+        requirements.get("minimum_failure_types_for_broad_claim", 6)
     )
-    minimum_failure_type_count = (
-        dataset.minimum_failure_types_for_broad_claim if dataset else 6
-    )
-    environment_scope = dataset.environment_scope if dataset else "unknown"
+    environment_scope = str(requirements.get("environment_scope", "unknown"))
 
     cost_supported = (
         candidate["request_count"] >= 1
@@ -907,9 +906,22 @@ def _claim_audit(
     }
 
 
+def _dataset_requirements(dataset: ProviderValidationDataset | None) -> dict[str, Any] | None:
+    if dataset is None:
+        return None
+    return {
+        "dataset_id": dataset.dataset_id,
+        "environment_scope": dataset.environment_scope,
+        "recommended_warm_requests_per_policy": dataset.recommended_warm_requests_per_policy,
+        "minimum_distinct_cases_for_broad_claim": dataset.minimum_distinct_cases_for_broad_claim,
+        "minimum_failure_types_for_broad_claim": dataset.minimum_failure_types_for_broad_claim,
+    }
+
+
 def summarize_provider_validation_records(
     records: list[dict[str, Any]],
     dataset: ProviderValidationDataset | None = None,
+    dataset_requirements: dict[str, Any] | None = None,
     pricing: PricingSnapshot | None = None,
 ) -> dict[str, Any]:
     summary_by_policy: dict[str, dict[str, Any]] = {}
@@ -1001,9 +1013,32 @@ def summarize_provider_validation_records(
     return {
         "dataset_id": dataset.dataset_id if dataset else None,
         "environment_scope": dataset.environment_scope if dataset else None,
+        "dataset_requirements": (
+            _dataset_requirements(dataset) if dataset is not None else dataset_requirements
+        ),
         "pricing_snapshot": pricing.to_dict() if pricing else None,
         "record_count": len(records),
         "policies": policies,
-        "claim_audit": _claim_audit(policies, dataset),
+        "claim_audit": _claim_audit(
+            policies,
+            _dataset_requirements(dataset) if dataset is not None else dataset_requirements,
+        ),
         "records": records,
     }
+
+
+def summarize_saved_provider_validation_report(
+    raw_report: dict[str, Any],
+    dataset: ProviderValidationDataset | None = None,
+    pricing: PricingSnapshot | None = None,
+) -> dict[str, Any]:
+    pricing_snapshot = pricing
+    if pricing_snapshot is None and isinstance(raw_report.get("pricing_snapshot"), dict):
+        pricing_snapshot = PricingSnapshot.from_dict(raw_report["pricing_snapshot"])
+
+    return summarize_provider_validation_records(
+        raw_report.get("records", []),
+        dataset=dataset,
+        dataset_requirements=raw_report.get("dataset_requirements"),
+        pricing=pricing_snapshot,
+    )

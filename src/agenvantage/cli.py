@@ -19,6 +19,7 @@ from agenvantage.provider_validation import (
     load_pricing_snapshot,
     load_provider_validation_dataset,
     run_provider_validation,
+    summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
 from agenvantage.presets import DEFAULT_PRESET, get_preset, preset_names
@@ -608,13 +609,19 @@ def _run_pack(args: argparse.Namespace) -> None:
 
 def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     counter = TokenCounter(args.model)
+    dataset = (
+        load_provider_validation_dataset(args.fixture)
+        if args.fixture.is_file()
+        else None
+    )
 
     if args.replay is not None:
         if not args.replay.is_file():
             raise SystemExit(f"Replay report not found: {args.replay}")
         replay_report = json.loads(args.replay.read_text(encoding="utf-8"))
-        report = summarize_provider_validation_records(
-            replay_report.get("records", []),
+        report = summarize_saved_provider_validation_report(
+            replay_report,
+            dataset=dataset,
             pricing=(
                 load_pricing_snapshot(args.pricing)
                 if args.pricing is not None
@@ -624,7 +631,7 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     else:
         if not args.fixture.is_file():
             raise SystemExit(f"Provider-validation fixture not found: {args.fixture}")
-        dataset = load_provider_validation_dataset(args.fixture)
+        assert dataset is not None
         if args.dry_run:
             report = fixture_readiness_report(dataset, counter, args.budget)
         else:

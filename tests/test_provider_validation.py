@@ -9,6 +9,7 @@ from agenvantage.provider_validation import (
     fixture_readiness_report,
     grade_provider_response,
     load_provider_validation_dataset,
+    summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
 from agenvantage.tokenizer import TokenCounter
@@ -150,3 +151,59 @@ def test_claim_audit_requires_latency_and_quality_evidence() -> None:
     assert report["claim_audit"]["latency_improvement_in_production"]["supported"] is False
     assert report["claim_audit"]["broad_quality_retention"]["supported"] is False
     assert report["claim_audit"]["end_to_end_context_overload"]["supported"] is False
+
+
+def test_saved_provider_report_preserves_dataset_requirements_for_replay() -> None:
+    dataset = load_provider_validation_dataset(FIXTURE)
+    pricing = PricingSnapshot(
+        provider="openai",
+        model="gpt-test",
+        captured_at="2026-07-01",
+        source_url="https://developers.openai.com/api/docs/pricing",
+        input_price_per_million=1.0,
+        cached_input_price_per_million=0.1,
+        output_price_per_million=2.0,
+    )
+    perfect_grade = {
+        "correctness_pass": True,
+        "safety_pass": True,
+        "grounded_citation_pass": True,
+        "overall_pass": True,
+        "score": 1.0,
+    }
+    records = []
+    for index, case in enumerate(dataset.cases):
+        records.append(
+            {
+                "policy_id": "full_unaligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "latency_ms": 920.0,
+                "input_tokens": 2200,
+                "cached_input_tokens": 0,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00264,
+                "grade": perfect_grade,
+            }
+        )
+        records.append(
+            {
+                "policy_id": "budgeted_cache_aligned",
+                "case_id": case.case_id,
+                "failure_type": case.failure_type,
+                "latency_ms": 700.0,
+                "input_tokens": 1700,
+                "cached_input_tokens": 1200,
+                "output_tokens": 220,
+                "request_cost_usd": 0.00136,
+                "grade": perfect_grade,
+            }
+        )
+
+    saved_report = summarize_provider_validation_records(records, dataset=dataset, pricing=pricing)
+    replay_report = summarize_saved_provider_validation_report(saved_report)
+
+    assert replay_report["dataset_requirements"]["minimum_distinct_cases_for_broad_claim"] == 30
+    assert replay_report["claim_audit"]["real_api_cost_savings"]["supported"] is True
+    assert replay_report["claim_audit"]["broad_quality_retention"]["supported"] is True
+    assert replay_report["claim_audit"]["latency_improvement_in_production"]["supported"] is False

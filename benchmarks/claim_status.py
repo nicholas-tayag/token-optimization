@@ -8,6 +8,7 @@ from typing import Any
 from agenvantage.provider_validation import (
     fixture_readiness_report,
     load_provider_validation_dataset,
+    summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
 from agenvantage.tokenizer import TokenCounter
@@ -77,14 +78,16 @@ def _unsupported_claim(
 def build_claim_status_report(
     use_case_report: dict[str, Any] | None,
     provider_report: dict[str, Any] | None,
+    provider_dataset: Any,
     provider_fixture_report: dict[str, Any],
 ) -> dict[str, Any]:
     narrow_claim = _narrow_claim_status(use_case_report)
     use_case_summary = (use_case_report or {}).get("summary", {})
 
     if provider_report is not None:
-        provider_summary = summarize_provider_validation_records(
-            provider_report.get("records", [])
+        provider_summary = summarize_saved_provider_validation_report(
+            provider_report,
+            dataset=provider_dataset,
         )
         claim_audit = provider_summary.get("claim_audit", {})
         environment_scope = provider_summary.get("environment_scope")
@@ -277,7 +280,12 @@ def main() -> None:
 
     dataset = load_provider_validation_dataset(args.provider_fixture)
     provider_fixture = fixture_readiness_report(dataset, TokenCounter())
-    report = build_claim_status_report(use_case_report, provider_report, provider_fixture)
+    report = build_claim_status_report(
+        use_case_report,
+        provider_report,
+        dataset,
+        provider_fixture,
+    )
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_md.parent.mkdir(parents=True, exist_ok=True)
