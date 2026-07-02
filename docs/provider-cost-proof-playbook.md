@@ -87,6 +87,9 @@ Record the exact model and pricing capture date used for the run.
 
 ### 2. Run The Live Validation
 
+Put your keys in [`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env)
+or export them manually.
+
 ```bash
 export OPENAI_API_KEY=...
 

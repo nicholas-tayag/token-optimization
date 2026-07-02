@@ -11,6 +11,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from agenvantage.env import load_dotenv
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -94,6 +96,7 @@ def _fetch_json(url: str, api_key: str) -> dict[str, Any]:
 
 
 def main() -> None:
+    load_dotenv()
     args = _parser().parse_args()
     if args.end_time <= args.start_time:
         raise SystemExit("--end-time must be greater than --start-time.")

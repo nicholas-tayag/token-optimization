@@ -75,6 +75,10 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 agenvantage demo
 ```
 
+For live provider validation, you can store local keys in
+[`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env).
+The CLI and helper scripts load that file automatically if it exists.
+
 `agenvantage demo` runs the synthetic on-call scenario, writes
 `artifacts/oncall-report.json`, prints a short summary, and opens the policy
 explorer dashboard.

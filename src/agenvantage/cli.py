@@ -12,6 +12,7 @@ from typing import Any
 
 from agenvantage import __version__
 from agenvantage.config import PackConfig, load_pack_config
+from agenvantage.env import load_dotenv
 from agenvantage.experiment import load_scenario, run_experiment
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
@@ -848,6 +849,7 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
+    load_dotenv()
     args = _parser().parse_args()
     if args.command == "demo":
         _run_experiment(
