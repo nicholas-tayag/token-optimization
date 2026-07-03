@@ -178,6 +178,17 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
         "selected_chunk_count": len(report["selected_chunks"]),
         "selected_context_tokens": report["selected_context_tokens"],
         "candidate_context_tokens": report["candidate_context_tokens"],
+        "prompt_token_accounting": report["prompt_token_accounting"],
+        "original_user_prompt_tokens": report["prompt_token_accounting"][
+            "original_user_prompt_tokens"
+        ],
+        "full_scan_prompt_tokens": report["prompt_token_accounting"][
+            "full_scan_prompt_tokens"
+        ],
+        "packed_prompt_tokens": report["prompt_token_accounting"]["packed_prompt_tokens"],
+        "prompt_tokens_saved_vs_full_scan": report["prompt_token_accounting"][
+            "prompt_tokens_saved_vs_full_scan"
+        ],
         "token_reduction_percent": report["local_reduction_percent_vs_candidate_context"],
         "edit_target_recall": round(edit_recall, 4),
         "test_target_recall": round(test_recall, 4),
@@ -200,6 +211,9 @@ def _mean(values: list[float]) -> float:
 
 def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[str, Any]:
     token_reductions = [case["token_reduction_percent"] for case in cases]
+    prompt_tokens_saved = [case["prompt_tokens_saved_vs_full_scan"] for case in cases]
+    packed_prompt_tokens = [case["packed_prompt_tokens"] for case in cases]
+    full_scan_prompt_tokens = [case["full_scan_prompt_tokens"] for case in cases]
     summary = {
         "case_count": len(cases),
         "repositories": sorted({case["repository"] for case in cases}),
@@ -220,6 +234,19 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
         "median_token_reduction_percent": round(
             statistics.median(token_reductions) if token_reductions else 0.0, 2
         ),
+        "median_full_scan_prompt_tokens": round(
+            statistics.median(full_scan_prompt_tokens) if full_scan_prompt_tokens else 0.0,
+            2,
+        ),
+        "median_packed_prompt_tokens": round(
+            statistics.median(packed_prompt_tokens) if packed_prompt_tokens else 0.0,
+            2,
+        ),
+        "median_prompt_tokens_saved_vs_full_scan": round(
+            statistics.median(prompt_tokens_saved) if prompt_tokens_saved else 0.0,
+            2,
+        ),
+        "total_prompt_tokens_saved_vs_full_scan": sum(prompt_tokens_saved),
         "mean_selected_chunk_count": round(
             _mean([case["selected_chunk_count"] for case in cases]), 2
         ),
@@ -261,6 +288,10 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Required-observation recall: `{summary['required_observation_recall']}`",
         f"- Answer-plan pass rate: `{summary['answer_plan_pass_rate']}`",
         f"- Median token reduction: `{summary['median_token_reduction_percent']}%`",
+        f"- Median full-scan prompt: `{summary['median_full_scan_prompt_tokens']}` tokens",
+        f"- Median packed prompt: `{summary['median_packed_prompt_tokens']}` tokens",
+        f"- Median prompt tokens saved: `{summary['median_prompt_tokens_saved_vs_full_scan']}`",
+        f"- Total prompt tokens saved: `{summary['total_prompt_tokens_saved_vs_full_scan']}`",
         f"- Mean selected chunks: `{summary['mean_selected_chunk_count']}`",
         f"- Missing-signal warning rate: `{summary['missing_signal_warning_rate']}`",
         f"- Acceptance pass: `{summary['acceptance']['overall_pass']}`",
@@ -279,6 +310,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Observation recall: `{case['required_observation_recall']}`",
                 f"- Answer-plan pass: `{case['answer_plan_pass']}`",
                 f"- Token reduction: `{case['token_reduction_percent']}%`",
+                f"- Prompt tokens: user `{case['original_user_prompt_tokens']}`, full-scan `{case['full_scan_prompt_tokens']}`, packed `{case['packed_prompt_tokens']}`",
+                f"- Prompt tokens saved: `{case['prompt_tokens_saved_vs_full_scan']}`",
                 f"- Surface edit targets: `{case['surface_edit_targets']}`",
                 f"- Surface test targets: `{case['surface_test_targets']}`",
                 f"- Selected files: `{case['selected_unique_paths'][:8]}`",

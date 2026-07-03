@@ -400,6 +400,13 @@ def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     assert "rateLimiter.ts" in markdown
     assert report["selected_context_tokens"] <= report["budget"]
     assert report["local_tokens_omitted_vs_candidate_context"] > 0
+    prompt_accounting = report["prompt_token_accounting"]
+    assert prompt_accounting["original_user_prompt_tokens"] > 0
+    assert prompt_accounting["full_scan_prompt_tokens"] == report["candidate_context_tokens"]
+    assert prompt_accounting["packed_prompt_tokens"] == report["selected_context_tokens"]
+    assert prompt_accounting["prompt_tokens_saved_vs_full_scan"] == report[
+        "local_tokens_omitted_vs_candidate_context"
+    ]
     assert "redis" in report["covered_query_terms"]
 
 

@@ -915,7 +915,12 @@ def build_multi_repo_context_package(
     selected_tokens = counter.count(rendered)
     full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
     candidate_corpus_tokens = counter.count(full_rendered)
+    user_prompt_tokens = counter.count(task)
     savings = candidate_corpus_tokens - selected_tokens
+    packed_context_plus_instructions_tokens = max(selected_tokens - user_prompt_tokens, 0)
+    full_scan_context_plus_instructions_tokens = max(
+        candidate_corpus_tokens - user_prompt_tokens, 0
+    )
     query_concepts = _query_concepts(task)
     matched_selected_terms = {term for chunk in selected for term in chunk.matched_terms}
     covered_terms = sorted(
@@ -945,6 +950,23 @@ def build_multi_repo_context_package(
         "local_reduction_percent_vs_candidate_context": round(
             savings / candidate_corpus_tokens * 100, 2
         ),
+        "prompt_token_accounting": {
+            "original_user_prompt_tokens": user_prompt_tokens,
+            "full_scan_prompt_tokens": candidate_corpus_tokens,
+            "packed_prompt_tokens": selected_tokens,
+            "prompt_tokens_saved_vs_full_scan": savings,
+            "prompt_reduction_percent_vs_full_scan": round(
+                savings / candidate_corpus_tokens * 100, 2
+            )
+            if candidate_corpus_tokens
+            else 0.0,
+            "full_scan_context_plus_instructions_tokens": full_scan_context_plus_instructions_tokens,
+            "packed_context_plus_instructions_tokens": packed_context_plus_instructions_tokens,
+            "context_plus_instructions_tokens_saved": (
+                full_scan_context_plus_instructions_tokens
+                - packed_context_plus_instructions_tokens
+            ),
+        },
         "query_terms": sorted({label for label, _ in query_concepts}),
         "covered_query_terms": covered_terms,
         "uncovered_query_terms": uncovered_terms,
@@ -972,6 +994,7 @@ def build_multi_repo_context_package(
         ),
         "measurement_notes": [
             "This compares local packaged context with the scanned eligible source corpus.",
+            "Prompt token accounting treats the task text as the user-authored prompt and compares the rendered packed prompt with a full-scan prompt containing every eligible chunk.",
             "It does not measure provider API tokens, cache hits, response quality, or cost savings.",
             "Tracked files plus untracked, non-ignored worktree files are scanned when the target is a Git repository.",
             "Optional git provenance sections are counted inside the packaged context budget when enabled.",

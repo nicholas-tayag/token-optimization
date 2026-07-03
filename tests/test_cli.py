@@ -251,6 +251,13 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
         "candidate_context_tokens": 2048,
         "local_reduction_percent_vs_candidate_context": 75.0,
         "local_tokens_omitted_vs_candidate_context": 1536,
+        "prompt_token_accounting": {
+            "original_user_prompt_tokens": 5,
+            "full_scan_prompt_tokens": 2048,
+            "packed_prompt_tokens": 512,
+            "prompt_tokens_saved_vs_full_scan": 1536,
+            "prompt_reduction_percent_vs_full_scan": 75.0,
+        },
         "candidate_chunks": 9,
         "uncovered_query_terms": ["retry"],
         "provenance": {"enabled": True, "include_diff": True, "include_log": False, "selected_provenance_tokens": 40},
@@ -266,6 +273,8 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
     assert "Preset:  review" in summary
     assert "512 / 6000 tokens used" in summary
     assert "75.0%" in summary
+    assert "Prompt tokens: user=5 full-scan=2048 packed=512" in summary
+    assert "Prompt savings: 1536 tokens (75.0%)" in summary
     assert "Uncovered concepts: retry" in summary
     assert "src/rate_limiter.py" in summary
 
@@ -280,6 +289,13 @@ def test_format_pack_summary_reports_feature_change_surface() -> None:
         "candidate_context_tokens": 4000,
         "local_reduction_percent_vs_candidate_context": 82.5,
         "local_tokens_omitted_vs_candidate_context": 3300,
+        "prompt_token_accounting": {
+            "original_user_prompt_tokens": 4,
+            "full_scan_prompt_tokens": 4000,
+            "packed_prompt_tokens": 700,
+            "prompt_tokens_saved_vs_full_scan": 3300,
+            "prompt_reduction_percent_vs_full_scan": 82.5,
+        },
         "candidate_chunks": 12,
         "uncovered_query_terms": [],
         "provenance": {"enabled": False},
@@ -382,6 +398,8 @@ def test_pack_feature_handoff_json_emits_agent_ready_payload(tmp_path: Path) -> 
     assert payload["task_suffix"] == "Add tests for rate limiter Redis fail open behavior"
     assert "# AgenVantage Context Package" in payload["system_prefix"]
     assert "prompt_markdown" in payload
+    assert payload["prompt_token_accounting"]["packed_prompt_tokens"] > 0
+    assert "prompt_tokens_saved_vs_full_scan" in payload["prompt_token_accounting"]
     assert payload["selected_chunks"]
     assert "src/rate_limiter.py" in payload["change_surface"]["edit_targets"]
     assert "tests/test_rate_limiter.py" in payload["change_surface"]["test_targets"]

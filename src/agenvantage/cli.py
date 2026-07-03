@@ -378,6 +378,7 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
     top_files = sorted(file_tokens.items(), key=lambda item: item[1], reverse=True)[:8]
 
     provenance = report.get("provenance", {})
+    prompt_accounting = report.get("prompt_token_accounting", {})
     lines = [
         "AgenVantage context package",
         "",
@@ -392,6 +393,22 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
         ),
         f"Chunks:  {len(report.get('selected_chunks', []))} selected of {report['candidate_chunks']} candidates",
     ]
+    if prompt_accounting:
+        lines.extend(
+            [
+                (
+                    "Prompt tokens: "
+                    f"user={prompt_accounting['original_user_prompt_tokens']} "
+                    f"full-scan={prompt_accounting['full_scan_prompt_tokens']} "
+                    f"packed={prompt_accounting['packed_prompt_tokens']}"
+                ),
+                (
+                    "Prompt savings: "
+                    f"{prompt_accounting['prompt_tokens_saved_vs_full_scan']} tokens "
+                    f"({prompt_accounting['prompt_reduction_percent_vs_full_scan']}%)"
+                ),
+            ]
+        )
     if provenance.get("enabled"):
         bits = []
         if provenance.get("include_diff"):
@@ -453,6 +470,7 @@ def _build_handoff_payload(markdown: str, report: dict[str, Any], preset_name: s
             "supporting_targets": [item["path"] for item in change_surface.get("supporting_targets", [])],
             "missing_signals": list(change_surface.get("missing_signals", [])),
         },
+        "prompt_token_accounting": report.get("prompt_token_accounting", {}),
         "selected_chunks": report.get("selected_chunks", []),
         "prompt_markdown": markdown,
     }

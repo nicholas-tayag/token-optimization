@@ -57,6 +57,12 @@ separates retrieval sufficiency from answer-plan sufficiency and reports:
   start work.
 - `median_token_reduction_percent`: selected context reduction versus scanned
   eligible repository context.
+- `median_full_scan_prompt_tokens`: median tokens in a rendered prompt that
+  includes the user task plus every scanned eligible source chunk.
+- `median_packed_prompt_tokens`: median tokens in the actual packed prompt that
+  would be handed to a coding agent.
+- `median_prompt_tokens_saved_vs_full_scan`: median token savings for the
+  prompt a user would actually send after AgenVantage packs context.
 - `missing_signal_warning_rate`: how often the planner explicitly reports
   insufficient signals instead of inventing certainty.
 
@@ -76,6 +82,10 @@ Current local result from July 2, 2026:
 - required-observation recall: `1.0`
 - answer-plan pass rate: `0.8333`
 - median token reduction: `90.91%`
+- median full-scan prompt: `80,648.5` tokens
+- median packed prompt: `5,938.5` tokens
+- median prompt tokens saved: `74,760.0`
+- total prompt tokens saved across 12 cases: `1,067,887`
 - acceptance pass: `true`
 
 ## Provider Validation
