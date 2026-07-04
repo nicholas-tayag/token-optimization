@@ -75,6 +75,16 @@ def test_source_files_respect_exclude_globs(tmp_path: Path) -> None:
 
     assert "src/rateLimiter.ts" in files
     assert "src/mapView.ts" not in files
+def test_source_files_include_readme_and_container_build_variants(tmp_path: Path) -> None:
+    (tmp_path / "README").write_text("Project overview.\n", encoding="utf-8")
+    (tmp_path / "Dockerfile.prod").write_text("FROM node:20-alpine\n", encoding="utf-8")
+    (tmp_path / "Containerfile.dev").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert "README" in files
+    assert "Dockerfile.prod" in files
+    assert "Containerfile.dev" in files
 
 
 def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:

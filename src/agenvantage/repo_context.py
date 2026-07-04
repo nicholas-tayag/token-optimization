@@ -45,9 +45,16 @@ _SUPPORTED_NAMES = {
     "dockerfile",
     "makefile",
     "package.json",
+    "readme",
     "pyproject.toml",
     "readme.md",
 }
+_SUPPORTED_NAME_PREFIXES = (
+    "containerfile.",
+    "dockerfile.",
+    "makefile.",
+    "readme.",
+)
 _IGNORED_PARTS = {
     ".git",
     ".venv",
@@ -291,7 +298,12 @@ def _eligible_file(path: Path, repo: Path) -> bool:
         return False
     if path.name.lower().startswith(".env"):
         return False
-    return path.suffix.lower() in _SUPPORTED_SUFFIXES or path.name.lower() in _SUPPORTED_NAMES
+    lowered_name = path.name.lower()
+    return (
+        path.suffix.lower() in _SUPPORTED_SUFFIXES
+        or lowered_name in _SUPPORTED_NAMES
+        or lowered_name.startswith(_SUPPORTED_NAME_PREFIXES)
+    )
 
 
 def _is_test_path(relative_path: str) -> bool:
