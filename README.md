@@ -132,6 +132,7 @@ agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
 agenvantage pack --preset feature --task "..." --multimodal artifact
+agenvantage rehydrate --manifest artifacts/context-images/<pack-id>/manifest.json --verify
 agenvantage rehydrate --manifest artifacts/context-images/<pack-id>/manifest.json --list
 agenvantage view --report artifacts/oncall-report.json
 make test
@@ -162,7 +163,9 @@ text-only instead of assuming an unsupported image-ingestion path.
 
 When artifact mode images background context, the manifest records recoverable
 `rec_...` blocks. Use `agenvantage rehydrate --manifest ... --id rec_...` to
-recover exact source text instead of transcribing from image pages.
+recover exact source text instead of transcribing from image pages. Use
+`--verify` to confirm image attachments exist and recoverable source hashes
+still match the manifest.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

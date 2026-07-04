@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -540,6 +541,132 @@ def test_rehydrate_writes_recovered_source_to_output(tmp_path: Path) -> None:
 
     assert output.read_text(encoding="utf-8") == "exact recovered text\n"
     assert "Recovered source written" in completed.stdout
+
+
+def test_rehydrate_verifies_artifact_manifest_integrity(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifact"
+    recoverable_dir = artifact_root / "recoverable"
+    image_dir = artifact_root / "images"
+    recoverable_dir.mkdir(parents=True)
+    image_dir.mkdir()
+    source_text = "exact recovered text\n"
+    source_path = recoverable_dir / "rec_ok.txt"
+    source_path.write_text(source_text, encoding="utf-8")
+    image_path = image_dir / "page.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nminimal")
+    manifest = artifact_root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "image_attachments": [{"path": str(image_path)}],
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_ok",
+                        "path": "docs/notes.md",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--verify",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Artifact verification passed" in completed.stdout
+    assert "Recoverable blocks: 1" in completed.stdout
+    assert "Image attachments: 1" in completed.stdout
+
+
+def test_rehydrate_verify_fails_on_hash_mismatch(tmp_path: Path) -> None:
+    source_path = tmp_path / "rec_bad.txt"
+    source_path.write_text("tampered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_bad",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(b"original text\n").hexdigest(),
+                    }
+                ],
+                "image_attachments": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--verify",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "Artifact verification failed" in completed.stdout
+    assert "hash mismatch" in completed.stdout
+
+
+def test_rehydrate_refuses_to_print_tampered_recoverable_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "rec_bad.txt"
+    source_path.write_text("tampered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_bad",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(b"original text\n").hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_bad",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "hash mismatch" in completed.stderr
 
 
 def test_rehydrate_errors_on_unknown_block_id(tmp_path: Path) -> None:

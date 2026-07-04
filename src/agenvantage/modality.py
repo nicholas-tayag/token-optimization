@@ -915,7 +915,8 @@ def apply_multimodal_pack(
         for block in imageable:
             rec_id = recoverable_block_id("source_chunk", block.rendered, block.block_id)
             rec_path = recoverable_dir / f"{rec_id}.txt"
-            rec_path.write_text(block.rendered.rstrip() + "\n", encoding="utf-8")
+            recoverable_text = block.rendered.rstrip() + "\n"
+            rec_path.write_text(recoverable_text, encoding="utf-8")
             recoverable_blocks.append(
                 {
                     "id": rec_id,
@@ -923,7 +924,7 @@ def apply_multimodal_pack(
                     "path": block.path,
                     "start_line": block.start_line,
                     "end_line": block.end_line,
-                    "text_sha256": hashlib.sha256(block.rendered.encode("utf-8")).hexdigest(),
+                    "text_sha256": hashlib.sha256(recoverable_text.encode("utf-8")).hexdigest(),
                     "text_path": str(rec_path),
                 }
             )
@@ -943,7 +944,9 @@ def apply_multimodal_pack(
                 "path": block.path,
                 "start_line": block.start_line,
                 "end_line": block.end_line,
-                "text_sha256": hashlib.sha256(block.rendered.encode("utf-8")).hexdigest(),
+                "text_sha256": hashlib.sha256(
+                    (block.rendered.rstrip() + "\n").encode("utf-8")
+                ).hexdigest(),
                 "text_path": str(
                     artifact_root
                     / "recoverable"

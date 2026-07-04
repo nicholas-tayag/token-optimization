@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from agenvantage.modality import (
@@ -162,6 +163,9 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert "GIST_IMAGE_CONTEXT" in mixed
     image_path = Path(plan["image_attachments"][0]["path"])
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    for block in plan["recoverable_blocks"]:
+        persisted = Path(block["text_path"]).read_bytes()
+        assert hashlib.sha256(persisted).hexdigest() == block["text_sha256"]
     assert (tmp_path / "mixed" / "manifest.json").exists()
 
 

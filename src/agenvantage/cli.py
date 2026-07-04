@@ -579,6 +579,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List recoverable block ids instead of printing block text.",
     )
+    rehydrate.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify image attachments and recoverable source hashes in the manifest.",
+    )
     rehydrate.add_argument("--output", type=Path, help="Optional output path for recovered text.")
     return parser
 
@@ -1357,13 +1362,20 @@ def _run_session(args: argparse.Namespace) -> None:
     raise SystemExit(f"Unknown session command: {args.session_command}")
 
 
-def _recoverable_blocks_from_manifest(manifest_path: Path) -> list[dict[str, Any]]:
+def _load_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
     if not manifest_path.is_file():
         raise SystemExit(f"Mixed-modality manifest not found: {manifest_path}")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Could not parse mixed-modality manifest: {manifest_path}") from exc
+    if not isinstance(manifest, dict):
+        raise SystemExit("Mixed-modality manifest must be a JSON object.")
+    return manifest
+
+
+def _recoverable_blocks_from_manifest(manifest_path: Path) -> list[dict[str, Any]]:
+    manifest = _load_mixed_modality_manifest(manifest_path)
     blocks = manifest.get("recoverable_blocks", [])
     if not isinstance(blocks, list):
         raise SystemExit("Mixed-modality manifest has an invalid recoverable_blocks field.")
@@ -1384,6 +1396,80 @@ def _resolve_recoverable_text_path(manifest_path: Path, block: dict[str, Any]) -
     return text_path
 
 
+def _resolve_artifact_path(manifest_path: Path, raw_path: Any) -> Path:
+    path_text = str(raw_path or "").strip()
+    if not path_text:
+        return Path("")
+    path = Path(path_text)
+    if path.is_absolute():
+        return path
+    manifest_parent_candidate = manifest_path.parent / path
+    if manifest_parent_candidate.exists():
+        return manifest_parent_candidate
+    return (Path.cwd() / path).resolve()
+
+
+def _verify_recoverable_block(manifest_path: Path, block: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    block_id = str(block.get("id") or "<missing-id>")
+    try:
+        text_path = _resolve_recoverable_text_path(manifest_path, block)
+    except SystemExit as exc:
+        return [str(exc)]
+    if not text_path.is_file():
+        return [f"Recoverable source file not found for {block_id}: {text_path}"]
+    expected_hash = str(block.get("text_sha256") or "").strip()
+    if expected_hash:
+        actual_hash = _sha256_file(text_path)
+        if actual_hash != expected_hash:
+            errors.append(
+                f"Recoverable source hash mismatch for {block_id}: expected {expected_hash}, got {actual_hash}"
+            )
+    return errors
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
+    manifest = _load_mixed_modality_manifest(manifest_path)
+    blocks_raw = manifest.get("recoverable_blocks", [])
+    images_raw = manifest.get("image_attachments", [])
+    if not isinstance(blocks_raw, list):
+        raise SystemExit("Mixed-modality manifest has an invalid recoverable_blocks field.")
+    if not isinstance(images_raw, list):
+        raise SystemExit("Mixed-modality manifest has an invalid image_attachments field.")
+
+    errors: list[str] = []
+    recoverable_blocks = [block for block in blocks_raw if isinstance(block, dict)]
+    image_attachments = [item for item in images_raw if isinstance(item, dict)]
+    for block in recoverable_blocks:
+        errors.extend(_verify_recoverable_block(manifest_path, block))
+    for image in image_attachments:
+        image_path = _resolve_artifact_path(manifest_path, image.get("path"))
+        if not image_path.is_file():
+            errors.append(f"Image attachment not found: {image_path}")
+            continue
+        header = image_path.read_bytes()[:8]
+        if header != b"\x89PNG\r\n\x1a\n":
+            errors.append(f"Image attachment is not a PNG: {image_path}")
+
+    return {
+        "ok": not errors,
+        "recoverable_block_count": len(recoverable_blocks),
+        "image_attachment_count": len(image_attachments),
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
 def _format_recoverable_block_list(blocks: list[dict[str, Any]]) -> str:
     if not blocks:
         return "No recoverable blocks were recorded in this manifest."
@@ -1401,8 +1487,28 @@ def _format_recoverable_block_list(blocks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_artifact_verification(summary: dict[str, Any]) -> str:
+    status = "passed" if summary["ok"] else "failed"
+    lines = [
+        f"Artifact verification {status}",
+        f"Recoverable blocks: {summary['recoverable_block_count']}",
+        f"Image attachments: {summary['image_attachment_count']}",
+        f"Errors: {summary['error_count']}",
+    ]
+    for error in summary["errors"]:
+        lines.append(f"- {error}")
+    return "\n".join(lines)
+
+
 def _run_rehydrate(args: argparse.Namespace) -> None:
     blocks = _recoverable_blocks_from_manifest(args.manifest)
+    if args.verify:
+        summary = _verify_mixed_modality_manifest(args.manifest)
+        print(_format_artifact_verification(summary))
+        if not summary["ok"]:
+            raise SystemExit(1)
+        if not args.recoverable_id and not args.list:
+            return
     if args.list:
         print(_format_recoverable_block_list(blocks))
         return
@@ -1416,6 +1522,9 @@ def _run_rehydrate(args: argparse.Namespace) -> None:
     text_path = _resolve_recoverable_text_path(args.manifest, block)
     if not text_path.is_file():
         raise SystemExit(f"Recoverable source file not found: {text_path}")
+    errors = _verify_recoverable_block(args.manifest, block)
+    if errors:
+        raise SystemExit(errors[0])
     text = text_path.read_text(encoding="utf-8")
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

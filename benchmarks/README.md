@@ -85,7 +85,7 @@ Current local result from July 2, 2026:
 - median full-scan prompt: `80,921.5` tokens
 - median packed prompt: `5,892.5` tokens
 - median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,243,681`
+- total prompt tokens saved across 12 cases: `1,251,666`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -232,6 +232,10 @@ Recover exact text for an imaged block with:
 ```bash
 .venv/bin/python -m agenvantage rehydrate \
   --manifest artifacts/modality-context-images/<case-id>/manifest.json \
+  --verify
+
+.venv/bin/python -m agenvantage rehydrate \
+  --manifest artifacts/modality-context-images/<case-id>/manifest.json \
   --list
 
 .venv/bin/python -m agenvantage rehydrate \
@@ -244,14 +248,14 @@ Current local result from July 4, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.18%`
+- full-scan theoretical modality reduction before safety gate: `76.22%`
 - full-scan image-candidate rate after safety gate: `0.0`
 - packed median text prompt: `5,939.5` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
 - packed theoretical modality reduction before safety gate: `19.84%`
 - packed image-candidate rate after safety gate: `0.1667`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,243,681`
+- total retrieval tokens saved across 12 cases: `1,251,666`
 - total rough-estimator incremental modality tokens saved after packing: `2,501`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
