@@ -18,11 +18,15 @@ latency, caching, cost, and quality measurements.
 The current local workflow provides:
 
 - an `agenvantage pack` command for real coding questions over local
-  repositories, including multi-repository tasks with repeated `--repo` flags;
+  repositories, including multi-repository tasks with repeated `--repo` flags,
+  smart defaults (`--repo .`, default budget), task presets
+  (`explain`/`feature`/`review`/`debug`/`change`/`compare`), clipboard/stdout output, and
+  optional `.agenvantage.toml` project defaults;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
-- a persistent local repository-metadata index that caches per-file symbols and
-  imports outside the worktree for reuse across runs;
+- a persistent local repository-metadata index that caches per-file symbols,
+  line-addressed symbol occurrences, local imports, and reverse import edges
+  outside the worktree for reuse across runs;
 - optional git diff and recent commit-log provenance sections for changed-
   behavior and review-style tasks;
 - optional include and exclude path globs for narrowing eligible repository
@@ -31,11 +35,23 @@ The current local workflow provides:
 - chunk-local anchor symbols plus file-level symbol and import boosts layered
   onto chunk ranking, with a diversity-aware candidate pool and
   imported-helper expansion before budget selection;
+- a deterministic feature-work planner that separates candidate exploration
+  from final packing, reserves room for likely edit files, tests, config/schema
+  evidence, and supporting neighbors, and can emit a structured handoff JSON
+  artifact for agent workflows;
 - Markdown context packages and JSON decision manifests under a token budget;
 - local candidate-context reduction metrics that do not pretend to be API
   savings; and
-- a use-case benchmark that scores required behavioral observations against the
-  selected excerpts, not just file recall; and
+- use-case and feature-work benchmarks that score required behavioral
+  observations against the selected excerpts, not just file recall;
+- an experimental `agenvantage validate-provider` workflow that can dry-run a
+  cache-eligible synthetic dataset locally, normalize raw usage artifacts
+  including OTLP spans/logs/per-request metrics, replay recorded provider
+  results, or collect OpenAI Responses API usage,
+  latency, and deterministic grading data when credentials and a pricing
+  snapshot are supplied, with readiness reporting for claim-sufficiency gaps
+  and paired-bootstrap reporting for measured deltas, plus optional Costs API
+  reconciliation; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:
@@ -47,12 +63,12 @@ The experiment harness also provides:
 - a `budgeted` policy that retains required context and selects optional
   sections under a configurable token budget;
 - `tiktoken`-based token measurements for repeatable local experiments;
-- optional OpenTelemetry spans for policy runs; and
+- optional OpenTelemetry spans for policy runs and live provider-validation
+  requests; and
 - a synthetic on-call incident scenario, with no private or employer data.
 
-It does **not** yet make model calls, measure real provider cache hits or
-billed cost, assess generated-answer quality, or represent a production
-enterprise system.
+It does **not** yet include checked-in provider-backed result artifacts, prove
+broad workload quality retention, or represent a production enterprise system.
 
 ## Quick Start
 
@@ -63,6 +79,10 @@ make setup
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 agenvantage demo
 ```
+
+For live provider validation, you can store local keys in
+[`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env).
+The CLI and helper scripts load that file automatically if it exists.
 
 `agenvantage demo` runs the synthetic on-call scenario, writes
 `artifacts/oncall-report.json`, prints a short summary, and opens the policy
@@ -97,27 +117,101 @@ If `python` is not available, install Python 3.10+ or use
 ```bash
 agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
+agenvantage validate-provider --dry-run --summary
 agenvantage view --report artifacts/oncall-report.json
 make test
 ```
 
-Build a context package for a coding task in one of your own repositories:
+`validate-provider --dry-run` now verifies that the synthetic provider-eval
+fixture is actually cache-eligible before any API spend. The current fixture
+contains `30` distinct cases across `6` failure types, produces a `1066`-token
+stable prefix for cache-aligned runs, and applies enough budget pressure to
+reduce selected context by about `12.82%` on average in the dry run.
+
+For the end-to-end billed-cost proof workflow, including live request spans,
+OTLP export, and provider-cost reconciliation, see
+[docs/provider-cost-proof-playbook.md](docs/provider-cost-proof-playbook.md).
+
+## Pack: your day-to-day token saver
+
+`agenvantage pack` is the developer workflow: it selects the repository context
+that matters for a task, fits it under a token budget, and hands you a
+ready-to-paste package. Run it from inside a repo with just a task:
 
 ```bash
-agenvantage pack \
-  --repo /path/to/your/repo \
-  --task "Explain the Redis-backed rate limiter, including fail-open behavior and tests." \
-  --budget 1800 \
-  --output artifacts/rate-limiter-context.md \
-  --manifest artifacts/rate-limiter-manifest.json
+agenvantage pack --task "Explain the rate limiter and its fail-open behavior."
 ```
 
-Build a shared context package across multiple local repositories:
+That uses smart defaults (`--repo .`, a default budget, and the `explain`
+preset) and prints a readable summary of what was selected and how many tokens
+were saved versus scanning the whole repo.
+
+Send the package straight into your prompt with the clipboard or stdout:
+
+```bash
+agenvantage pack --task "Why do the checkout tests fail?" --preset debug --copy
+agenvantage pack --task "token budget selection" --stdout | pbcopy
+```
+
+### Task presets
+
+Presets pick good instructions and provenance so you do not have to remember
+flags:
+
+| Preset  | Focus                              | Includes diff | Includes log |
+|---------|------------------------------------|---------------|--------------|
+| explain | describe behavior (default)        | no            | no           |
+| feature | start implementing a feature       | no            | no           |
+| review  | correctness, edge cases, risk      | yes           | no           |
+| debug   | localize a bug from evidence       | yes           | yes          |
+| change  | plan a minimal, correct edit       | yes           | yes          |
+| compare | contrast implementations per repo  | no            | no           |
+
+```bash
+agenvantage pack --preset feature --task "Add upload limit smoke-test coverage."
+agenvantage pack --preset review --task "Review the new upload limit change."
+```
+
+The `feature` preset prints likely edit files, tests to inspect, config/schema
+targets, supporting files, covered concepts, missing signals, and token
+reduction. It is tuned for the first prompt of a coding-agent workflow.
+
+### Output modes
+
+```bash
+agenvantage pack --task "..."                 # human summary (default)
+agenvantage pack --task "..." --stdout        # only the Markdown package (pipe-friendly)
+agenvantage pack --task "..." --json          # full JSON decision manifest
+agenvantage pack --task "..." --preset feature --handoff-json
+                                               # structured agent handoff payload
+agenvantage pack --task "..." --copy          # copy the package to the clipboard
+agenvantage pack --task "..." \
+  --output artifacts/context.md \
+  --manifest artifacts/manifest.json          # write files
+```
+
+### Project defaults (`.agenvantage.toml`)
+
+Drop a config file at a repo root to stop repeating flags. CLI flags always
+override it.
+
+```toml
+[pack]
+budget = 6000
+model = "gpt-4o-mini"
+preset = "explain"
+top_k = 20
+include_glob = ["src/*"]
+exclude_glob = ["docs/*", "**/*.min.js"]
+```
+
+### Multi-repo packages
 
 ```bash
 agenvantage pack \
   --repo /path/to/repo-a \
   --repo /path/to/repo-b \
+  --preset compare \
   --task "Compare the local static server hardening in both apps." \
   --include-glob "scripts/*" \
   --exclude-glob "docs/*" \
@@ -125,6 +219,9 @@ agenvantage pack \
   --output artifacts/multi-repo-context.md \
   --manifest artifacts/multi-repo-manifest.json
 ```
+
+See [docs/prd-developer-workflow.md](docs/prd-developer-workflow.md) for the
+product requirements behind this workflow.
 
 Write a report and display OpenTelemetry spans locally:
 
@@ -180,9 +277,9 @@ hit or provider cost reduction.
 ## Repository Layout
 
 ```text
-src/agenvantage/     Context model, policies, tracing, and CLI
+src/agenvantage/     Context model, policies, presets, config, tracing, and CLI
 examples/             Secondary synthetic context scenarios
 viz/                  Browser dashboard for experiment reports
-tests/                Deterministic policy tests
-docs/                 Research basis and implementation roadmap
+tests/                Deterministic policy, CLI, preset, and config tests
+docs/                 Research basis, PRD, and implementation roadmap
 ```

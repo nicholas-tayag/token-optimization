@@ -2,7 +2,9 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
+.env
 dist/
 build/
 artifacts/*.json
 artifacts/*.md
+external/
