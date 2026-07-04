@@ -199,6 +199,54 @@ For the concrete billed-cost proof sequence, including how to reconcile the
 saved report against an OpenAI Costs API export, see
 [docs/provider-cost-proof-playbook.md](../docs/provider-cost-proof-playbook.md).
 
+## Modality Tradeoff Validation
+
+`modality_tradeoff_validation.py` estimates whether pxpipe-style image-token
+packing could add value after AgenVantage has already selected the relevant
+repository context. It does not send images to a provider. It is a theoretical
+gate that asks whether a prompt is bulky, token-dense, and safe to treat as
+gist-level context instead of byte-exact text.
+
+The estimator is intentionally conservative:
+
+- token math uses pxpipe-inspired defaults of `92,000` chars per image page and
+  `4,761` image tokens per page;
+- large prompts with hashes, UUIDs, redaction markers, or line-addressed
+  references stay text;
+- image packing is only considered when the estimated token reduction clears a
+  minimum threshold and the content is large enough to be worth compressing.
+
+Run it with:
+
+```bash
+.venv/bin/python benchmarks/modality_tradeoff_validation.py \
+  --output-json artifacts/modality-tradeoff-validation.json \
+  --output-md artifacts/modality-tradeoff-validation.md \
+  --summary
+```
+
+Current local result from July 4, 2026:
+
+- cases: `12`
+- full-scan median text prompt: `80,968.5` tokens
+- full-scan median theoretical image prompt: `19,044.0` tokens
+- full-scan theoretical modality reduction before safety gate: `76.18%`
+- full-scan image-candidate rate after safety gate: `0.0`
+- packed median text prompt: `5,952.5` tokens
+- packed median theoretical image prompt: `4,761.0` tokens
+- packed theoretical modality reduction before safety gate: `20.02%`
+- packed image-candidate rate after safety gate: `0.1667`
+- median retrieval tokens saved before modality: `74,985.0`
+- total retrieval tokens saved across 12 cases: `1,185,417`
+- total incremental modality tokens saved after packing: `2,501`
+- median end-to-end safe candidate reduction: `91.5%`
+
+Interpretation: pxpipe's core idea is valuable as a future second-stage
+compression gate, especially for token-dense gist-level bulk. On the current
+feature-work prompts, AgenVantage's retrieval step does most of the real work;
+the modality gate adds selective upside and protects exact repository evidence
+from lossy conversion.
+
 ## Claim Status
 
 To collapse the current evidence into one durable, human-readable answer about

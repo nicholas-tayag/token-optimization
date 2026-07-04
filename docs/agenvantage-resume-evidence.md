@@ -1,6 +1,6 @@
 # AgenVantage Resume Evidence
 
-Last updated: 2026-07-02
+Last updated: 2026-07-04
 
 ## Project Scope
 
@@ -23,6 +23,9 @@ Current implemented scope:
   prompt-token accounting
 - Validation harness: 12 manually annotated feature-work tasks across
   `token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`
+- Pxpipe-inspired modality tradeoff estimator: theoretical second-stage gate
+  for deciding whether bulky, gist-tolerant context could be cheaper as image
+  tokens while exact identifiers and secrets remain text
 
 Out of scope for verified resume claims right now:
 
@@ -30,6 +33,7 @@ Out of scope for verified resume claims right now:
 - Production latency reduction
 - Broad downstream answer-quality retention across many workloads
 - Embedding/vector search or background indexing daemon
+- Actual image-packed provider requests
 
 ## Verified Metrics
 
@@ -78,6 +82,28 @@ Session cache-readiness benchmark:
 - Median estimated warm reduction versus full scan: `99.86%`
 - Total estimated warm tokens saved versus full scan: `1,236,065`
 - Acceptance result: `passed`
+
+Pxpipe-inspired modality tradeoff benchmark:
+
+- Cases: `12`
+- Scope: theoretical image-token estimate, not live image transport or billed
+  provider savings
+- Full-scan median text prompt: `80,968.5` tokens
+- Full-scan median estimated image prompt: `19,044.0` tokens
+- Full-scan theoretical modality reduction before safety gate: `76.18%`
+- Full-scan image-candidate rate after safety gate: `0.0`
+- Packed median text prompt: `5,952.5` tokens
+- Packed median estimated image prompt: `4,761.0` tokens
+- Packed theoretical modality reduction before safety gate: `20.02%`
+- Packed image-candidate rate after safety gate: `0.1667`
+- Median retrieval tokens saved before modality: `74,985.0`
+- Total retrieval tokens saved across 12 cases: `1,185,417`
+- Total incremental modality tokens saved after packing: `2,501`
+- Median end-to-end safe candidate reduction: `91.5%`
+
+Interpretation: image-token packing is not a replacement for retrieval on this
+workload. It is a future selective compression layer for token-dense,
+gist-tolerant bulk after AgenVantage has already found the right code context.
 
 Practical Mesh feature validation:
 
@@ -158,6 +184,12 @@ Cache-readiness bullet:
 Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 5.9K-token median stable prefixes, 89.5-token median dynamic packets, and 98.47% reusable-prefix share.
 ```
 
+Forward-looking compression bullet:
+
+```text
+Prototyped a pxpipe-inspired modality gate that estimates when selected coding-agent context is safe to compress as image tokens; benchmarked 12 feature tasks and found retrieval saved 1.18M tokens first, with selective modality packing adding 2.5K more estimated tokens only when exact-evidence risks were absent.
+```
+
 ## Interview Explanation
 
 Short version:
@@ -181,6 +213,17 @@ telemetry showing that smaller, cache-aligned prompts produce lower billed input
 cost without a quality regression.
 ```
 
+If asked about pxpipe-style image compression:
+
+```text
+I researched pxpipe and borrowed the production idea, not the claim. The useful
+pattern is a compression gate: measure text-token cost, estimate image-token
+cost, and reject lossy conversion when the context contains exact IDs, hashes,
+secrets, or line evidence. In my benchmark, the gate showed image packing could
+be useful later, but retrieval is still the main verified value because code
+tasks usually need exact file evidence.
+```
+
 If asked why the Mesh plain-agent baseline also succeeded:
 
 ```text
@@ -199,10 +242,13 @@ implementation.
   `artifacts/feature-provider-validation-dry-run.json`
 - Session cache-readiness JSON: `artifacts/session-cache-validation.json`
 - Session cache-readiness Markdown: `artifacts/session-cache-validation.md`
+- Modality tradeoff JSON: `artifacts/modality-tradeoff-validation.json`
+- Modality tradeoff Markdown: `artifacts/modality-tradeoff-validation.md`
 - Mesh context-vs-plain comparison:
   `artifacts/mesh-context-vs-plain-feature-validation.md`
 - Feature benchmark fixture: `examples/feature_work_validation_cases.json`
 - Feature benchmark runner: `benchmarks/feature_work_validation.py`
 - Session cache benchmark runner: `benchmarks/session_cache_validation.py`
+- Modality tradeoff runner: `benchmarks/modality_tradeoff_validation.py`
 - Mesh PR: <https://github.com/nicholas-tayag/mesh/pull/1>
 - AgenVantage PR: <https://github.com/nicholas-tayag/token-optimization/pull/2>
