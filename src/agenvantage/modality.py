@@ -87,6 +87,7 @@ PROVIDER_PROFILES: dict[str, ModalityProviderProfile] = {
         supported_model_prefixes=("gpt-", "o"),
     ),
 }
+DEFAULT_AUTO_PROFILE_ID = "openai_estimate"
 
 _SOURCE_BLOCK_RE = re.compile(
     r"(?P<rendered>\[SOURCE:(?P<id>[^\]]+)\]\n```(?P<language>[^\n`]*)\n"
@@ -369,6 +370,22 @@ def model_supported_by_profile(model: str, profile: ModalityProviderProfile) -> 
         return False
     lowered = model.lower()
     return any(lowered.startswith(prefix) for prefix in profile.supported_model_prefixes)
+
+
+def resolve_provider_profile(
+    profile_id: str = "auto",
+    *,
+    model: str | None = None,
+) -> ModalityProviderProfile:
+    if profile_id != "auto":
+        return get_provider_profile(profile_id)
+    if model:
+        lowered = model.lower()
+        if lowered.startswith("claude-"):
+            return get_provider_profile("anthropic_standard")
+        if lowered.startswith(("gpt-", "o")):
+            return get_provider_profile("openai_estimate")
+    return get_provider_profile(DEFAULT_AUTO_PROFILE_ID)
 
 
 def _fact_kind(token: str, default_kind: str) -> str:
@@ -759,7 +776,8 @@ def apply_multimodal_pack(
     *,
     mode: str = "off",
     output_dir: Path | None = None,
-    profile_id: str = "anthropic_standard",
+    profile_id: str = "auto",
+    model: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if mode not in {"off", "estimate", "artifact"}:
         raise ValueError("multimodal mode must be one of: off, estimate, artifact")
@@ -767,9 +785,53 @@ def apply_multimodal_pack(
         report["multimodal"] = {"mode": "off", "enabled": False}
         return markdown, report
 
-    profile = get_provider_profile(profile_id)
+    profile = resolve_provider_profile(profile_id, model=model)
     pack_id = _pack_id(report)
     artifact_root = output_dir or (Path("artifacts") / "context-images" / pack_id)
+    if model and not model_supported_by_profile(model, profile):
+        original_packed_tokens = int(
+            report.get("prompt_token_accounting", {}).get(
+                "packed_prompt_tokens",
+                report.get("selected_context_tokens", counter.count(markdown)),
+            )
+        )
+        report["multimodal"] = {
+            "mode": mode,
+            "enabled": True,
+            "pack_id": pack_id,
+            "profile": profile.to_dict(),
+            "requested_profile_id": profile_id,
+            "model": model,
+            "artifact_root": str(artifact_root),
+            "manifest_path": str(artifact_root / "manifest.json"),
+            "decision_reason": "unsupported_model_for_profile",
+            "should_image": False,
+            "artifacts_written": False,
+            "candidate_block_count": 0,
+            "exact_text_block_count": 0,
+            "text_counterfactual_tokens": 0,
+            "factsheet_tokens": 0,
+            "estimated_image_tokens": 0,
+            "estimated_mixed_prompt_tokens": original_packed_tokens,
+            "mixed_prompt_text_tokens": counter.count(markdown),
+            "estimated_tokens_saved_vs_packed_text": 0,
+            "estimated_reduction_percent_vs_packed_text": 0.0,
+            "estimated_tokens_saved_vs_full_scan": 0,
+            "estimated_reduction_percent_vs_full_scan": 0.0,
+            "candidate_reduction_percent": 0.0,
+            "render_reflow_enabled": False,
+            "render_reflowed_chars": 0,
+            "estimated_image_pages": [],
+            "image_attachments": [],
+            "factsheets": [],
+            "recoverable_blocks": [],
+            "block_plan": [],
+            "notes": [
+                "Requested model is not allowlisted for the selected modality profile.",
+                "Context stayed text-only to avoid unsupported image-ingestion assumptions.",
+            ],
+        }
+        return markdown, report
     blocks = parse_source_blocks(markdown, report, counter)
     target_paths = _target_path_sets(report)
     classified: list[SourceBlock] = []

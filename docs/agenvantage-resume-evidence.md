@@ -51,17 +51,17 @@ Feature-work benchmark:
 - Mean selected chunk count: `14.08`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `5,902.0` tokens
+- Median packed prompt: `5,905.5` tokens
 - Median prompt tokens saved: `74,985.0`
 - Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,285,646`
+- Total prompt tokens saved across 12 cases: `1,236,523`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,949.0` tokens
+- Median AgenVantage packed prompt: `5,952.5` tokens
 - Median prompt reduction: `90.85%`
 - Median estimated full-scan cold input cost: `$0.02024212`
 - Median estimated packed warm input cost: `$0.00015538`
@@ -92,12 +92,12 @@ Pxpipe-inspired mixed-modality artifact benchmark:
 - Full-scan median estimated image prompt: `19,044.0` tokens
 - Full-scan theoretical modality reduction before safety gate: `76.18%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,949.0` tokens
+- Packed median text prompt: `5,952.5` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `19.97%`
+- Packed theoretical modality reduction before safety gate: `20.02%`
 - Packed image-candidate rate after safety gate: `0.1667`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,233,293`
+- Total retrieval tokens saved across 12 cases: `1,236,523`
 - Total rough-estimator incremental modality tokens saved after packing: `2,501`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`

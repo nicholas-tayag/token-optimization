@@ -9,6 +9,7 @@ from agenvantage.modality import (
     factsheet_text,
     get_provider_profile,
     recoverable_block_id,
+    resolve_provider_profile,
     summarize_modality_tradeoffs,
 )
 from agenvantage.tokenizer import TokenCounter
@@ -64,6 +65,14 @@ def test_provider_profile_uses_deterministic_patch_estimate() -> None:
 
     assert profile.estimate_page_tokens() == 1456
     assert profile.to_dict()["token_formula"] == "anthropic_patches_28"
+
+
+def test_auto_provider_profile_resolves_from_model_family() -> None:
+    assert resolve_provider_profile("auto", model="gpt-4o-mini").profile_id == "openai_estimate"
+    assert (
+        resolve_provider_profile("auto", model="claude-sonnet-4-5").profile_id
+        == "anthropic_standard"
+    )
 
 
 def test_factsheet_extracts_exact_identifier_shapes() -> None:
@@ -154,3 +163,48 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     image_path = Path(plan["image_attachments"][0]["path"])
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert (tmp_path / "mixed" / "manifest.json").exists()
+
+
+def test_apply_multimodal_pack_keeps_text_for_unsupported_model_profile(tmp_path) -> None:
+    markdown = (
+        "# AgenVantage Context Package\n\n"
+        "## Instructions\n\nUse context.\n\n"
+        "## Task\n\nExplain docs.\n\n"
+        "## Selected Repository Context\n\n"
+        "[SOURCE:docs/notes.md#L1-L5]\n"
+        "```markdown\n"
+        + " ".join("[]{}():;,./#L" for _ in range(3500))
+        + "\n```\n"
+    )
+    report = {
+        "task": "Explain docs.",
+        "selected_chunks": [
+            {
+                "id": "docs/notes.md#L1-L5",
+                "path": "docs/notes.md",
+                "start_line": 1,
+                "end_line": 5,
+                "tokens": 9000,
+                "redaction_count": 0,
+            }
+        ],
+        "prompt_token_accounting": {
+            "packed_prompt_tokens": TokenCounter().count(markdown),
+            "full_scan_prompt_tokens": TokenCounter().count(markdown),
+        },
+    }
+
+    mixed, updated = apply_multimodal_pack(
+        markdown,
+        report,
+        TokenCounter(),
+        mode="artifact",
+        output_dir=tmp_path / "mixed",
+        profile_id="anthropic_standard",
+        model="gpt-4o-mini",
+    )
+
+    assert mixed == markdown
+    assert updated["multimodal"]["decision_reason"] == "unsupported_model_for_profile"
+    assert updated["multimodal"]["image_attachments"] == []
+    assert not (tmp_path / "mixed" / "manifest.json").exists()

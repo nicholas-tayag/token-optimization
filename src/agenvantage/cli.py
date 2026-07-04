@@ -467,9 +467,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     pack.add_argument(
         "--modality-profile",
-        choices=tuple(sorted(PROVIDER_PROFILES)),
-        default="anthropic_standard",
-        help="Provider image-token profile used for multimodal estimates.",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+        help="Provider image-token profile used for multimodal estimates (default: auto from --model).",
     )
     pack.add_argument(
         "--modality-output-dir",
@@ -1163,6 +1163,7 @@ def _run_pack(args: argparse.Namespace) -> None:
         mode=args.multimodal,
         output_dir=args.modality_output_dir,
         profile_id=args.modality_profile,
+        model=settings["model"],
     )
     write_package_outputs(markdown, report, args.output, args.manifest)
 

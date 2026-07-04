@@ -432,6 +432,7 @@ def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> 
 
     payload = json.loads(completed.stdout)
     assert payload["modality_plan"]["mode"] == "estimate"
+    assert payload["modality_plan"]["profile"]["profile_id"] == "openai_estimate"
     assert "image_attachments" in payload
     assert "factsheets" in payload
     assert "recoverable_blocks" in payload

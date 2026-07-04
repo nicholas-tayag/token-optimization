@@ -154,6 +154,11 @@ benchmark can write PNG context pages, factsheets, and recoverable source
 manifests, but still reports estimated token deltas rather than provider-billed
 savings.
 
+`pack --multimodal` uses `--modality-profile auto` by default: GPT/o-series
+models use the conservative OpenAI estimate and Claude models use the standard
+Claude vision estimate. Forcing an incompatible profile keeps the package
+text-only instead of assuming an unsupported image-ingestion path.
+
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see
 [docs/provider-cost-proof-playbook.md](docs/provider-cost-proof-playbook.md).
