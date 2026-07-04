@@ -14,6 +14,7 @@ from agenvantage.modality import (
     apply_multimodal_pack,
     estimate_modality_tradeoff,
     summarize_modality_tradeoffs,
+    verify_mixed_modality_manifest,
 )
 from agenvantage.tokenizer import TokenCounter
 
@@ -69,6 +70,34 @@ def _run_case(
         profile_id="anthropic_standard",
     )
     artifact_plan = artifact_report["multimodal"]
+    artifact_manifest_written = bool(artifact_plan.get("artifacts_written"))
+    artifact_verification = {
+        "ok": False,
+        "recoverable_block_count": 0,
+        "image_attachment_count": 0,
+        "error_count": 0,
+        "errors": [],
+    }
+    if artifact_manifest_written:
+        try:
+            artifact_verification = verify_mixed_modality_manifest(
+                Path(str(artifact_plan["manifest_path"]))
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            artifact_verification = {
+                "ok": False,
+                "recoverable_block_count": 0,
+                "image_attachment_count": 0,
+                "error_count": 1,
+                "errors": [str(exc)],
+            }
+    artifact_verification_status = (
+        "verified"
+        if artifact_manifest_written and artifact_verification["ok"]
+        else "failed"
+        if artifact_manifest_written
+        else "not_written"
+    )
     artifact_estimated_tokens = int(artifact_plan["estimated_mixed_prompt_tokens"])
     incremental_modality_tokens_saved = (
         packed.local_prompt_tokens - safe_multimodal_candidate_tokens
@@ -109,6 +138,13 @@ def _run_case(
         "artifact_recoverable_block_count": len(artifact_plan.get("recoverable_blocks", [])),
         "artifact_factsheet_tokens": int(artifact_plan.get("factsheet_tokens", 0)),
         "artifact_decision_reason": artifact_plan.get("decision_reason"),
+        "artifact_manifest_written": artifact_manifest_written,
+        "artifact_manifest_verified": bool(
+            artifact_manifest_written and artifact_verification["ok"]
+        ),
+        "artifact_manifest_verification_status": artifact_verification_status,
+        "artifact_verification_error_count": int(artifact_verification["error_count"]),
+        "artifact_verification_errors": artifact_verification["errors"],
         "artifact_manifest_path": artifact_plan.get("manifest_path"),
         "selected_paths": manifest["selected_paths"],
     }
@@ -132,6 +168,10 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
         float(case["end_to_end_safe_candidate_reduction_percent"]) for case in cases
     ]
     artifact_image_cases = sum(1 for case in cases if case["artifact_image_count"] > 0)
+    artifact_manifest_cases = [case for case in cases if case["artifact_manifest_written"]]
+    artifact_verified_cases = sum(
+        1 for case in artifact_manifest_cases if case["artifact_manifest_verified"]
+    )
     return {
         "case_count": len(cases),
         "repositories": sorted({case["repository"] for case in cases}),
@@ -154,10 +194,21 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "total_artifact_recoverable_blocks": sum(
             int(case["artifact_recoverable_block_count"]) for case in cases
         ),
+        "artifact_manifest_written_case_count": len(artifact_manifest_cases),
+        "artifact_manifest_verified_case_count": artifact_verified_cases,
+        "artifact_manifest_verified_case_rate": (
+            round(artifact_verified_cases / len(artifact_manifest_cases), 4)
+            if artifact_manifest_cases
+            else 0.0
+        ),
+        "artifact_manifest_verification_error_count": sum(
+            int(case["artifact_verification_error_count"]) for case in cases
+        ),
         "notes": [
             "Retrieval reduction is shipped AgenVantage behavior.",
             "Artifact-mode modality reduction is a local text+PNG handoff estimate, not billed provider usage.",
             "Exact edit/test/config/support chunks stay text; imaged blocks are recoverable.",
+            "Generated artifact manifests are verified for recoverable-source hashes and PNG signatures.",
         ],
     }
 
@@ -192,6 +243,10 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Artifact image case rate: `{summary['artifact_image_case_rate']}`",
         f"- Total artifact images: `{summary['total_artifact_image_count']}`",
         f"- Total recoverable blocks: `{summary['total_artifact_recoverable_blocks']}`",
+        f"- Artifact manifests written: `{summary['artifact_manifest_written_case_count']}`",
+        f"- Artifact manifests verified: `{summary['artifact_manifest_verified_case_count']}`",
+        f"- Artifact manifest verification rate: `{summary['artifact_manifest_verified_case_rate']}`",
+        f"- Artifact manifest verification errors: `{summary['artifact_manifest_verification_error_count']}`",
         f"- Median end-to-end safe candidate reduction: `{summary['median_end_to_end_safe_candidate_reduction_percent']}%`",
         "",
         "## Cases",
@@ -214,6 +269,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Artifact decision: `{case['artifact_decision_reason']}`",
                 f"- Artifact images: `{case['artifact_image_count']}`",
                 f"- Recoverable blocks: `{case['artifact_recoverable_block_count']}`",
+                f"- Artifact manifest verification: `{case['artifact_manifest_verification_status']}`",
+                f"- Artifact verification errors: `{case['artifact_verification_error_count']}`",
                 f"- Risk labels: `{', '.join(packed_tradeoff['risk_labels']) or 'none'}`",
                 "",
             ]

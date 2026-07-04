@@ -1091,3 +1091,110 @@ def apply_multimodal_pack(
         artifact_root.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(modality_plan, indent=2) + "\n", encoding="utf-8")
     return mixed_markdown, report
+
+
+def load_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
+    manifest_path = Path(manifest_path)
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Mixed-modality manifest not found: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Could not parse mixed-modality manifest: {manifest_path}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Mixed-modality manifest must be a JSON object.")
+    return manifest
+
+
+def recoverable_blocks_from_manifest(manifest_path: Path) -> list[dict[str, Any]]:
+    manifest = load_mixed_modality_manifest(manifest_path)
+    blocks = manifest.get("recoverable_blocks", [])
+    if not isinstance(blocks, list):
+        raise ValueError("Mixed-modality manifest has an invalid recoverable_blocks field.")
+    return [block for block in blocks if isinstance(block, dict)]
+
+
+def resolve_recoverable_text_path(manifest_path: Path, block: dict[str, Any]) -> Path:
+    raw_text_path = str(block.get("text_path", "")).strip()
+    if not raw_text_path:
+        block_id = block.get("id", "<unknown>")
+        raise ValueError(f"Recoverable block {block_id} does not include a text_path.")
+    text_path = Path(raw_text_path)
+    if not text_path.is_absolute():
+        manifest_parent_candidate = Path(manifest_path).parent / text_path
+        if manifest_parent_candidate.is_file():
+            return manifest_parent_candidate
+        return (Path.cwd() / text_path).resolve()
+    return text_path
+
+
+def resolve_artifact_path(manifest_path: Path, raw_path: Any) -> Path:
+    path_text = str(raw_path or "").strip()
+    if not path_text:
+        return Path("")
+    path = Path(path_text)
+    if path.is_absolute():
+        return path
+    manifest_parent_candidate = Path(manifest_path).parent / path
+    if manifest_parent_candidate.exists():
+        return manifest_parent_candidate
+    return (Path.cwd() / path).resolve()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_recoverable_block(manifest_path: Path, block: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    block_id = str(block.get("id") or "<missing-id>")
+    try:
+        text_path = resolve_recoverable_text_path(manifest_path, block)
+    except ValueError as exc:
+        return [str(exc)]
+    if not text_path.is_file():
+        return [f"Recoverable source file not found for {block_id}: {text_path}"]
+    expected_hash = str(block.get("text_sha256") or "").strip()
+    if expected_hash:
+        actual_hash = _sha256_file(text_path)
+        if actual_hash != expected_hash:
+            errors.append(
+                f"Recoverable source hash mismatch for {block_id}: expected {expected_hash}, got {actual_hash}"
+            )
+    return errors
+
+
+def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
+    manifest = load_mixed_modality_manifest(manifest_path)
+    blocks_raw = manifest.get("recoverable_blocks", [])
+    images_raw = manifest.get("image_attachments", [])
+    if not isinstance(blocks_raw, list):
+        raise ValueError("Mixed-modality manifest has an invalid recoverable_blocks field.")
+    if not isinstance(images_raw, list):
+        raise ValueError("Mixed-modality manifest has an invalid image_attachments field.")
+
+    errors: list[str] = []
+    recoverable_blocks = [block for block in blocks_raw if isinstance(block, dict)]
+    image_attachments = [item for item in images_raw if isinstance(item, dict)]
+    for block in recoverable_blocks:
+        errors.extend(verify_recoverable_block(manifest_path, block))
+    for image in image_attachments:
+        image_path = resolve_artifact_path(manifest_path, image.get("path"))
+        if not image_path.is_file():
+            errors.append(f"Image attachment not found: {image_path}")
+            continue
+        header = image_path.read_bytes()[:8]
+        if header != b"\x89PNG\r\n\x1a\n":
+            errors.append(f"Image attachment is not a PNG: {image_path}")
+
+    return {
+        "ok": not errors,
+        "recoverable_block_count": len(recoverable_blocks),
+        "image_attachment_count": len(image_attachments),
+        "error_count": len(errors),
+        "errors": errors,
+    }

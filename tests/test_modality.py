@@ -1,3 +1,4 @@
+import json
 import hashlib
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from agenvantage.modality import (
     recoverable_block_id,
     resolve_provider_profile,
     summarize_modality_tradeoffs,
+    verify_mixed_modality_manifest,
 )
 from agenvantage.tokenizer import TokenCounter
 
@@ -167,6 +169,10 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
         persisted = Path(block["text_path"]).read_bytes()
         assert hashlib.sha256(persisted).hexdigest() == block["text_sha256"]
     assert (tmp_path / "mixed" / "manifest.json").exists()
+    verification = verify_mixed_modality_manifest(Path(plan["manifest_path"]))
+    assert verification["ok"] is True
+    assert verification["image_attachment_count"] == len(plan["image_attachments"])
+    assert verification["recoverable_block_count"] == len(plan["recoverable_blocks"])
 
 
 def test_apply_multimodal_pack_keeps_text_for_unsupported_model_profile(tmp_path) -> None:
@@ -212,3 +218,34 @@ def test_apply_multimodal_pack_keeps_text_for_unsupported_model_profile(tmp_path
     assert updated["multimodal"]["decision_reason"] == "unsupported_model_for_profile"
     assert updated["multimodal"]["image_attachments"] == []
     assert not (tmp_path / "mixed" / "manifest.json").exists()
+
+
+def test_verify_mixed_modality_manifest_reports_recoverable_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "recoverable.txt"
+    source_path.write_text("changed recovered text\n", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_bad",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(
+                            b"original recovered text\n"
+                        ).hexdigest(),
+                    }
+                ],
+                "image_attachments": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    verification = verify_mixed_modality_manifest(manifest_path)
+
+    assert verification["ok"] is False
+    assert verification["error_count"] == 1
+    assert "hash mismatch" in verification["errors"][0]

@@ -75,7 +75,7 @@ Run it with:
   --summary
 ```
 
-Current local result from July 2, 2026:
+Current local result from July 4, 2026:
 
 - edit-target recall: `1.0`
 - test-target recall: `0.8333`
@@ -83,9 +83,9 @@ Current local result from July 2, 2026:
 - answer-plan pass rate: `0.8333`
 - median token reduction: `90.93%`
 - median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `5,892.5` tokens
+- median packed prompt: `5,905.5` tokens
 - median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,251,666`
+- total prompt tokens saved across 12 cases: `1,255,543`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -205,7 +205,8 @@ saved report against an OpenAI Costs API export, see
 pipeline after AgenVantage has already selected the relevant repository
 context. It can write PNG context pages, factsheets, and recoverable source
 manifests. It still does not send images to a provider, so the token deltas are
-estimated rather than provider-billed savings.
+estimated rather than provider-billed savings. The benchmark verifies every
+generated artifact manifest for recoverable-source hashes and PNG signatures.
 
 The estimator is intentionally conservative:
 
@@ -248,19 +249,21 @@ Current local result from July 4, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.22%`
+- full-scan theoretical modality reduction before safety gate: `76.3%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `5,939.5` tokens
+- packed median text prompt: `5,952.5` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `19.84%`
+- packed theoretical modality reduction before safety gate: `20.02%`
 - packed image-candidate rate after safety gate: `0.1667`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,251,666`
+- total retrieval tokens saved across 12 cases: `1,255,543`
 - total rough-estimator incremental modality tokens saved after packing: `2,501`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
 - total recoverable blocks: `36`
 - total artifact incremental tokens saved after packing: `3,099`
+- artifact manifests verified: `3/3`
+- artifact manifest verification errors: `0`
 - median end-to-end safe candidate reduction: `91.5%`
 
 Interpretation: retrieval still does nearly all of the work. The implemented

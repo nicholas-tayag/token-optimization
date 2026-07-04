@@ -154,7 +154,8 @@ are planning metrics, not billed-provider proof.
 mixed-modality artifact path after retrieval has already selected context. The
 benchmark can write PNG context pages, factsheets, and recoverable source
 manifests, but still reports estimated token deltas rather than provider-billed
-savings.
+savings. The benchmark also verifies every generated artifact manifest for PNG
+attachments and recoverable-source hash integrity.
 
 `pack --multimodal` uses `--modality-profile auto` by default: GPT/o-series
 models use the conservative OpenAI estimate and Claude models use the standard

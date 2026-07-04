@@ -52,26 +52,26 @@ Feature-work benchmark:
 - Selected test-target recall: `1.0`
 - Required-observation recall: `1.0`
 - Answer-plan pass rate: `0.8333`
-- Mean selected chunk count: `14.08`
+- Mean selected chunk count: `14.25`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `5,892.5` tokens
+- Median packed prompt: `5,905.5` tokens
 - Median prompt tokens saved: `74,985.0`
 - Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,251,666`
+- Total prompt tokens saved across 12 cases: `1,255,543`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,939.5` tokens
+- Median AgenVantage packed prompt: `5,952.5` tokens
 - Median prompt reduction: `90.85%`
 - Median estimated full-scan cold input cost: `$0.02024212`
-- Median estimated packed warm input cost: `$0.00015519`
+- Median estimated packed warm input cost: `$0.00015538`
 - Median estimated warm input savings: `99.23%`
-- Total estimated full-scan cold input cost: `$0.30612`
-- Total estimated packed warm input cost: `$0.00184323`
+- Total estimated full-scan cold input cost: `$0.3316065`
+- Total estimated packed warm input cost: `$0.00184501`
 - Cost scope: theoretical input-only estimate from a saved pricing snapshot,
   not provider-billed usage
 
@@ -94,19 +94,21 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.22%`
+- Full-scan theoretical modality reduction before safety gate: `76.3%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,939.5` tokens
+- Packed median text prompt: `5,952.5` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `19.84%`
+- Packed theoretical modality reduction before safety gate: `20.02%`
 - Packed image-candidate rate after safety gate: `0.1667`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,251,666`
+- Total retrieval tokens saved across 12 cases: `1,255,543`
 - Total rough-estimator incremental modality tokens saved after packing: `2,501`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
 - Total recoverable source blocks: `36`
 - Total artifact incremental tokens saved after packing: `3,099`
+- Artifact manifests verified: `3/3`
+- Artifact manifest verification errors: `0`
 - Recoverability: `agenvantage rehydrate` verifies artifacts, lists `rec_...`
   blocks, and retrieves exact source text with hash checks
 - Median end-to-end safe candidate reduction: `91.5%`
