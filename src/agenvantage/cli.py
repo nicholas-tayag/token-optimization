@@ -554,6 +554,32 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Copy the cache-aligned prompt to the system clipboard.",
     )
+
+    rehydrate = subparsers.add_parser(
+        "rehydrate",
+        help="Recover exact source text from a mixed-modality artifact manifest.",
+        description=(
+            "List or print recoverable rec_... blocks written by "
+            "agenvantage pack --multimodal artifact."
+        ),
+    )
+    rehydrate.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="Mixed-modality artifact manifest.json path.",
+    )
+    rehydrate.add_argument(
+        "--id",
+        dest="recoverable_id",
+        help="Recoverable block id to print, for example rec_ab12cd34ef56.",
+    )
+    rehydrate.add_argument(
+        "--list",
+        action="store_true",
+        help="List recoverable block ids instead of printing block text.",
+    )
+    rehydrate.add_argument("--output", type=Path, help="Optional output path for recovered text.")
     return parser
 
 
@@ -1331,6 +1357,74 @@ def _run_session(args: argparse.Namespace) -> None:
     raise SystemExit(f"Unknown session command: {args.session_command}")
 
 
+def _recoverable_blocks_from_manifest(manifest_path: Path) -> list[dict[str, Any]]:
+    if not manifest_path.is_file():
+        raise SystemExit(f"Mixed-modality manifest not found: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Could not parse mixed-modality manifest: {manifest_path}") from exc
+    blocks = manifest.get("recoverable_blocks", [])
+    if not isinstance(blocks, list):
+        raise SystemExit("Mixed-modality manifest has an invalid recoverable_blocks field.")
+    return [block for block in blocks if isinstance(block, dict)]
+
+
+def _resolve_recoverable_text_path(manifest_path: Path, block: dict[str, Any]) -> Path:
+    raw_text_path = str(block.get("text_path", "")).strip()
+    if not raw_text_path:
+        block_id = block.get("id", "<unknown>")
+        raise SystemExit(f"Recoverable block {block_id} does not include a text_path.")
+    text_path = Path(raw_text_path)
+    if not text_path.is_absolute():
+        manifest_parent_candidate = manifest_path.parent / text_path
+        if manifest_parent_candidate.is_file():
+            return manifest_parent_candidate
+        return (Path.cwd() / text_path).resolve()
+    return text_path
+
+
+def _format_recoverable_block_list(blocks: list[dict[str, Any]]) -> str:
+    if not blocks:
+        return "No recoverable blocks were recorded in this manifest."
+    lines = ["Recoverable blocks:"]
+    for block in blocks:
+        line = f"  {block.get('id', '<missing-id>')}"
+        path = block.get("path")
+        if path:
+            line += f"  {path}"
+            start = block.get("start_line")
+            end = block.get("end_line")
+            if start and end:
+                line += f"#L{start}-L{end}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _run_rehydrate(args: argparse.Namespace) -> None:
+    blocks = _recoverable_blocks_from_manifest(args.manifest)
+    if args.list:
+        print(_format_recoverable_block_list(blocks))
+        return
+    if not args.recoverable_id:
+        raise SystemExit("Rehydrate requires --id unless --list is used.")
+    block = next((item for item in blocks if item.get("id") == args.recoverable_id), None)
+    if block is None:
+        available = ", ".join(str(item.get("id")) for item in blocks[:8] if item.get("id"))
+        hint = f" Available ids: {available}" if available else ""
+        raise SystemExit(f"Recoverable block not found: {args.recoverable_id}.{hint}")
+    text_path = _resolve_recoverable_text_path(args.manifest, block)
+    if not text_path.is_file():
+        raise SystemExit(f"Recoverable source file not found: {text_path}")
+    text = text_path.read_text(encoding="utf-8")
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8")
+        print(f"Recovered source written to {args.output.resolve()}")
+    else:
+        print(text, end="" if text.endswith("\n") else "\n")
+
+
 def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     if args.trace_console:
         configure_console_tracing()
@@ -1528,6 +1622,9 @@ def main() -> None:
         return
     if args.command == "session":
         _run_session(args)
+        return
+    if args.command == "rehydrate":
+        _run_rehydrate(args)
         return
     if args.command == "validate-provider":
         _run_provider_validation(args)

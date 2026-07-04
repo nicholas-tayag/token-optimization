@@ -26,6 +26,8 @@ Current implemented scope:
 - Pxpipe-inspired mixed-modality artifact mode: estimates or writes local PNG
   pages for bulky gist-level context while exact implementation evidence,
   factsheets, and recoverable source blocks remain text
+- Exact-source recovery CLI: `agenvantage rehydrate --manifest ... --id rec_...`
+  retrieves original text for imaged blocks
 
 Out of scope for verified resume claims right now:
 
@@ -51,20 +53,20 @@ Feature-work benchmark:
 - Mean selected chunk count: `14.08`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `5,905.5` tokens
+- Median packed prompt: `5,892.5` tokens
 - Median prompt tokens saved: `74,985.0`
 - Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,236,523`
+- Total prompt tokens saved across 12 cases: `1,243,681`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,952.5` tokens
+- Median AgenVantage packed prompt: `5,939.5` tokens
 - Median prompt reduction: `90.85%`
 - Median estimated full-scan cold input cost: `$0.02024212`
-- Median estimated packed warm input cost: `$0.00015538`
+- Median estimated packed warm input cost: `$0.00015519`
 - Median estimated warm input savings: `99.23%`
 - Total estimated full-scan cold input cost: `$0.30612`
 - Total estimated packed warm input cost: `$0.00184323`
@@ -92,17 +94,18 @@ Pxpipe-inspired mixed-modality artifact benchmark:
 - Full-scan median estimated image prompt: `19,044.0` tokens
 - Full-scan theoretical modality reduction before safety gate: `76.18%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,952.5` tokens
+- Packed median text prompt: `5,939.5` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `20.02%`
+- Packed theoretical modality reduction before safety gate: `19.84%`
 - Packed image-candidate rate after safety gate: `0.1667`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,236,523`
+- Total retrieval tokens saved across 12 cases: `1,243,681`
 - Total rough-estimator incremental modality tokens saved after packing: `2,501`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
 - Total recoverable source blocks: `36`
 - Total artifact incremental tokens saved after packing: `3,099`
+- Recoverability: `agenvantage rehydrate` lists and retrieves `rec_...` blocks
 - Median end-to-end safe candidate reduction: `91.5%`
 
 Interpretation: image-token packing is not a replacement for retrieval on this

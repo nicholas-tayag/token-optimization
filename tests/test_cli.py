@@ -438,6 +438,136 @@ def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> 
     assert "recoverable_blocks" in payload
 
 
+def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifact"
+    recoverable_dir = artifact_root / "recoverable"
+    recoverable_dir.mkdir(parents=True)
+    source_text = "[SOURCE:docs/notes.md#L1-L2]\n```markdown\nexact recovered text\n```\n"
+    source_path = recoverable_dir / "rec_abc123.txt"
+    source_path.write_text(source_text, encoding="utf-8")
+    manifest = artifact_root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_abc123",
+                        "path": "docs/notes.md",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "text_path": str(source_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    listed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--list",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    recovered = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_abc123",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "rec_abc123" in listed.stdout
+    assert "docs/notes.md#L1-L2" in listed.stdout
+    assert recovered.stdout == source_text
+
+
+def test_rehydrate_writes_recovered_source_to_output(tmp_path: Path) -> None:
+    recoverable_dir = tmp_path / "recoverable"
+    recoverable_dir.mkdir()
+    source_path = recoverable_dir / "rec_def456.txt"
+    source_path.write_text("exact recovered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_def456",
+                        "path": "docs/notes.md",
+                        "text_path": str(source_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_def456",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert output.read_text(encoding="utf-8") == "exact recovered text\n"
+    assert "Recovered source written" in completed.stdout
+
+
+def test_rehydrate_errors_on_unknown_block_id(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"recoverable_blocks": [{"id": "rec_known", "text_path": "missing.txt"}]}),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_missing",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "Recoverable block not found" in completed.stderr
+
+
 def test_pack_preset_debug_enables_provenance_in_manifest(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
 
