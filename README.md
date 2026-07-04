@@ -166,7 +166,9 @@ When artifact mode images background context, the manifest records recoverable
 `rec_...` blocks. Use `agenvantage rehydrate --manifest ... --id rec_...` to
 recover exact source text instead of transcribing from image pages. Use
 `--verify` to confirm image attachments exist and recoverable source hashes
-still match the manifest.
+still match the manifest. Line-addressed references and identifier-dense
+blocks stay text-only so exact implementation evidence does not depend on image
+OCR.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

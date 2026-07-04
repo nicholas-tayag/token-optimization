@@ -58,7 +58,7 @@ Feature-work benchmark:
 - Median packed prompt: `5,905.5` tokens
 - Median prompt tokens saved: `74,985.0`
 - Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,255,543`
+- Total prompt tokens saved across 12 cases: `1,259,318`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
@@ -70,8 +70,8 @@ Feature-provider dry-run with pricing snapshot:
 - Median estimated full-scan cold input cost: `$0.02024212`
 - Median estimated packed warm input cost: `$0.00015538`
 - Median estimated warm input savings: `99.23%`
-- Total estimated full-scan cold input cost: `$0.3316065`
-- Total estimated packed warm input cost: `$0.00184501`
+- Total estimated full-scan cold input cost: `$0.3325575`
+- Total estimated packed warm input cost: `$0.00184574`
 - Cost scope: theoretical input-only estimate from a saved pricing snapshot,
   not provider-billed usage
 
@@ -94,15 +94,15 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.3%`
+- Full-scan theoretical modality reduction before safety gate: `76.36%`
 - Full-scan image-candidate rate after safety gate: `0.0`
 - Packed median text prompt: `5,952.5` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
 - Packed theoretical modality reduction before safety gate: `20.02%`
-- Packed image-candidate rate after safety gate: `0.1667`
+- Packed image-candidate rate after safety gate: `0.0`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,255,543`
-- Total rough-estimator incremental modality tokens saved after packing: `2,501`
+- Total retrieval tokens saved across 12 cases: `1,259,318`
+- Total rough-estimator incremental modality tokens saved after packing: `0`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
 - Total recoverable source blocks: `36`
@@ -111,11 +111,13 @@ Pxpipe-inspired mixed-modality artifact benchmark:
 - Artifact manifest verification errors: `0`
 - Recoverability: `agenvantage rehydrate` verifies artifacts, lists `rec_...`
   blocks, and retrieves exact source text with hash checks
-- Median end-to-end safe candidate reduction: `91.5%`
+- Median end-to-end safe candidate reduction: `90.85%`
 
 Interpretation: image-token packing is not a replacement for retrieval on this
-workload. It is a selective compression layer for token-dense, gist-tolerant
-background context after AgenVantage has already found the right code context.
+workload. The whole-prompt estimator now refuses packed prompts with exact
+identifier density, while the block-level artifact pipeline still images safe
+gist-tolerant background chunks after AgenVantage has found the right code
+context.
 
 Practical Mesh feature validation:
 

@@ -17,6 +17,7 @@ DEFAULT_IMAGE_PAGE_TOKENS = 4_761
 DEFAULT_MIN_TEXT_TOKEN_SAVINGS_PERCENT = 20.0
 DEFAULT_MIN_IMAGE_CANDIDATE_CHARS = 6_000
 DEFAULT_ARTIFACT_MIN_SAVINGS_PERCENT = 5.0
+HIGH_DENSITY_IDENTIFIER_THRESHOLD = 12
 
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(
@@ -124,6 +125,20 @@ _FACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _MAX_FACTSHEET_SCAN = 262_144
 _MAX_FACTSHEET_ENTRIES = 64
+
+
+def count_exact_identifier_signals(text: str) -> int:
+    scan = text[:_MAX_FACTSHEET_SCAN]
+    tokens: set[str] = set()
+    for kind, pattern in _FACT_PATTERNS:
+        if kind in {"large_number", "decimal"}:
+            continue
+        for match in pattern.finditer(scan):
+            token = (match.group(1) if match.lastindex else match.group(0)).strip()
+            token = token.rstrip(".,;:!?")
+            if 3 <= len(token) <= 160:
+                tokens.add(token)
+    return len(tokens)
 
 
 @dataclass(frozen=True)
@@ -247,10 +262,14 @@ def classify_verbatim_risk(text: str, path: str = "") -> dict[str, Any]:
         risk_labels.append("hex_or_hash_like_identifier")
     if _LINE_REF_RE.search(text) or re.search(r":\d+(-\d+)?$", path):
         risk_labels.append("line_addressed_reference")
+    identifier_count = count_exact_identifier_signals(text)
+    if identifier_count >= HIGH_DENSITY_IDENTIFIER_THRESHOLD:
+        risk_labels.append("high_density_exact_identifiers")
     risk_labels = sorted(set(risk_labels))
     return {
         "path": path,
         "risk_labels": risk_labels,
+        "exact_identifier_signal_count": identifier_count,
         "requires_verbatim_text": bool(risk_labels),
     }
 
@@ -567,6 +586,8 @@ def _block_role(block: SourceBlock, target_paths: dict[str, set[str]]) -> str:
         "redacted_secret_marker",
         "uuid_or_exact_identifier",
         "hex_or_hash_like_identifier",
+        "line_addressed_reference",
+        "high_density_exact_identifiers",
     }
     if block.path in exact_paths:
         return "exact_text"

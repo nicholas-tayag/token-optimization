@@ -85,7 +85,7 @@ Current local result from July 4, 2026:
 - median full-scan prompt: `80,921.5` tokens
 - median packed prompt: `5,905.5` tokens
 - median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,255,543`
+- total prompt tokens saved across 12 cases: `1,259,318`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -210,8 +210,8 @@ generated artifact manifest for recoverable-source hashes and PNG signatures.
 
 The estimator is intentionally conservative:
 
-- exact edit, test, config, supporting, secret-like, hash, and UUID-bearing
-  chunks stay text;
+- exact edit, test, config, supporting, line-referenced, identifier-dense,
+  secret-like, hash, and UUID-bearing chunks stay text;
 - gist-level background chunks are rendered into deterministic dense PNG pages
   only when the provider-profile estimate beats text after factsheet overhead;
 - each imaged block gets deterministic factsheet text and a recoverable source
@@ -249,26 +249,28 @@ Current local result from July 4, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.3%`
+- full-scan theoretical modality reduction before safety gate: `76.36%`
 - full-scan image-candidate rate after safety gate: `0.0`
 - packed median text prompt: `5,952.5` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
 - packed theoretical modality reduction before safety gate: `20.02%`
-- packed image-candidate rate after safety gate: `0.1667`
+- packed image-candidate rate after safety gate: `0.0`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,255,543`
-- total rough-estimator incremental modality tokens saved after packing: `2,501`
+- total retrieval tokens saved across 12 cases: `1,259,318`
+- total rough-estimator incremental modality tokens saved after packing: `0`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
 - total recoverable blocks: `36`
 - total artifact incremental tokens saved after packing: `3,099`
 - artifact manifests verified: `3/3`
 - artifact manifest verification errors: `0`
-- median end-to-end safe candidate reduction: `91.5%`
+- median end-to-end safe candidate reduction: `90.85%`
 
 Interpretation: retrieval still does nearly all of the work. The implemented
-artifact layer adds selective upside on background/gist chunks, but correctly
-leaves exact coding evidence in text and makes every imaged block recoverable.
+artifact layer adds selective upside on background/gist chunks even when the
+whole-prompt estimator refuses image mode because the packed prompt contains
+exact identifiers. Exact coding evidence stays text and every imaged block is
+recoverable.
 
 ## Claim Status
 

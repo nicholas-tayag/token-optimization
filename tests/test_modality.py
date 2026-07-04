@@ -5,6 +5,7 @@ from pathlib import Path
 from agenvantage.modality import (
     apply_multimodal_pack,
     classify_verbatim_risk,
+    count_exact_identifier_signals,
     extract_factsheet_entries,
     estimate_image_tokens,
     estimate_modality_tradeoff,
@@ -47,6 +48,22 @@ def test_verbatim_risky_context_stays_text() -> None:
 
     assert "hex_or_hash_like_identifier" in risk["risk_labels"]
     assert "redacted_secret_marker" in risk["risk_labels"]
+    assert tradeoff["should_image"] is False
+    assert tradeoff["decision_reason"] == "verbatim_risk_keep_text"
+
+
+def test_high_density_exact_identifiers_stay_text() -> None:
+    text = "\n".join(
+        f"GET /api/resource/{index} uses --feature-flag-{index} "
+        f"and docs/service_{index}.yaml"
+        for index in range(14)
+    )
+    text = f"{text}\n" + ("background narrative " * 1200)
+    risk = classify_verbatim_risk(text)
+    tradeoff = estimate_modality_tradeoff(text, text_tokens=20_000)
+
+    assert count_exact_identifier_signals(text) >= 14
+    assert "high_density_exact_identifiers" in risk["risk_labels"]
     assert tradeoff["should_image"] is False
     assert tradeoff["decision_reason"] == "verbatim_risk_keep_text"
 
@@ -173,6 +190,64 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert verification["ok"] is True
     assert verification["image_attachment_count"] == len(plan["image_attachments"])
     assert verification["recoverable_block_count"] == len(plan["recoverable_blocks"])
+
+
+def test_apply_multimodal_pack_keeps_line_referenced_docs_as_text(tmp_path) -> None:
+    line_references = "\n".join(
+        f"Inspect src/service_{index}.py#L{index + 1}-L{index + 3} before changing behavior."
+        for index in range(120)
+    )
+    markdown = (
+        "# AgenVantage Context Package\n\n"
+        "## Instructions\n\nUse context.\n\n"
+        "## Task\n\nPlan a feature.\n\n"
+        "## Selected Repository Context\n\n"
+        "[SOURCE:docs/line-map.md#L1-L120]\n"
+        "```markdown\n"
+        f"{line_references}\n"
+        "```\n"
+    )
+    report = {
+        "task": "Plan a feature.",
+        "selected_chunks": [
+            {
+                "id": "docs/line-map.md#L1-L120",
+                "path": "docs/line-map.md",
+                "start_line": 1,
+                "end_line": 120,
+                "tokens": 1200,
+                "redaction_count": 0,
+            }
+        ],
+        "change_surface": {
+            "edit_targets": [],
+            "test_targets": [],
+            "config_targets": [],
+            "supporting_targets": [],
+        },
+        "prompt_token_accounting": {
+            "packed_prompt_tokens": TokenCounter().count(markdown),
+            "full_scan_prompt_tokens": TokenCounter().count(markdown),
+        },
+    }
+
+    mixed, updated = apply_multimodal_pack(
+        markdown,
+        report,
+        TokenCounter(),
+        mode="artifact",
+        output_dir=tmp_path / "mixed",
+    )
+    plan = updated["multimodal"]
+    block_plan = plan["block_plan"][0]
+
+    assert mixed == markdown
+    assert plan["should_image"] is False
+    assert plan["decision_reason"] == "no_gist_candidate_blocks"
+    assert plan["image_attachments"] == []
+    assert block_plan["role"] == "exact_text"
+    assert "line_addressed_reference" in block_plan["risk_labels"]
+    assert not (tmp_path / "mixed" / "manifest.json").exists()
 
 
 def test_apply_multimodal_pack_keeps_text_for_unsupported_model_profile(tmp_path) -> None:
