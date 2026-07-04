@@ -7,4 +7,6 @@ dist/
 build/
 artifacts/*.json
 artifacts/*.md
+artifacts/context-images/
+artifacts/modality-context-images/
 external/

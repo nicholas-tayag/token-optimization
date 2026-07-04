@@ -10,7 +10,11 @@ from agenvantage.feature_provider_validation import (
     assemble_feature_prompt_variants,
     load_feature_provider_dataset,
 )
-from agenvantage.modality import estimate_modality_tradeoff, summarize_modality_tradeoffs
+from agenvantage.modality import (
+    apply_multimodal_pack,
+    estimate_modality_tradeoff,
+    summarize_modality_tradeoffs,
+)
 from agenvantage.tokenizer import TokenCounter
 
 
@@ -19,6 +23,7 @@ DEFAULT_FIXTURE = REPO_ROOT / "examples" / "feature_work_validation_cases.json"
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "artifacts" / "modality-tradeoff-validation.json"
 DEFAULT_OUTPUT_MD = REPO_ROOT / "artifacts" / "modality-tradeoff-validation.md"
 DEFAULT_REPOS_ROOT = REPO_ROOT.parent
+DEFAULT_ARTIFACT_ROOT = REPO_ROOT / "artifacts" / "modality-context-images"
 
 
 def _percent_reduction(baseline: int, candidate: int) -> float:
@@ -27,7 +32,13 @@ def _percent_reduction(baseline: int, candidate: int) -> float:
     return round(((baseline - candidate) / baseline) * 100, 2)
 
 
-def _run_case(dataset: Any, case: Any, repos_root: Path, counter: TokenCounter) -> dict[str, Any]:
+def _run_case(
+    dataset: Any,
+    case: Any,
+    repos_root: Path,
+    counter: TokenCounter,
+    artifact_root: Path,
+) -> dict[str, Any]:
     variants, manifest = assemble_feature_prompt_variants(dataset, case, repos_root, counter)
     full = variants["full_unaligned"]
     packed = variants["budgeted_unaligned"]
@@ -49,6 +60,16 @@ def _run_case(dataset: Any, case: Any, repos_root: Path, counter: TokenCounter) 
         if packed_tradeoff["should_image"]
         else packed.local_prompt_tokens
     )
+    _, artifact_report = apply_multimodal_pack(
+        packed.prompt,
+        manifest,
+        counter,
+        mode="artifact",
+        output_dir=artifact_root / str(case.case_id),
+        profile_id="anthropic_standard",
+    )
+    artifact_plan = artifact_report["multimodal"]
+    artifact_estimated_tokens = int(artifact_plan["estimated_mixed_prompt_tokens"])
     incremental_modality_tokens_saved = (
         packed.local_prompt_tokens - safe_multimodal_candidate_tokens
     )
@@ -76,6 +97,19 @@ def _run_case(dataset: Any, case: Any, repos_root: Path, counter: TokenCounter) 
         ),
         "full_scan_tradeoff": full_tradeoff,
         "packed_tradeoff": packed_tradeoff,
+        "artifact_mixed_estimated_tokens": artifact_estimated_tokens,
+        "artifact_incremental_tokens_saved_after_packing": (
+            packed.local_prompt_tokens - artifact_estimated_tokens
+        ),
+        "artifact_incremental_reduction_percent_after_packing": _percent_reduction(
+            packed.local_prompt_tokens,
+            artifact_estimated_tokens,
+        ),
+        "artifact_image_count": len(artifact_plan.get("image_attachments", [])),
+        "artifact_recoverable_block_count": len(artifact_plan.get("recoverable_blocks", [])),
+        "artifact_factsheet_tokens": int(artifact_plan.get("factsheet_tokens", 0)),
+        "artifact_decision_reason": artifact_plan.get("decision_reason"),
+        "artifact_manifest_path": artifact_plan.get("manifest_path"),
         "selected_paths": manifest["selected_paths"],
     }
 
@@ -91,24 +125,39 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
     incremental_saved = [
         float(case["incremental_modality_tokens_saved_after_packing"]) for case in cases
     ]
+    artifact_incremental_saved = [
+        float(case["artifact_incremental_tokens_saved_after_packing"]) for case in cases
+    ]
     end_reduction = [
         float(case["end_to_end_safe_candidate_reduction_percent"]) for case in cases
     ]
+    artifact_image_cases = sum(1 for case in cases if case["artifact_image_count"] > 0)
     return {
         "case_count": len(cases),
         "repositories": sorted({case["repository"] for case in cases}),
-        "scope": "theoretical_pxpipe_inspired_modality_gate_not_live_image_transport",
+        "scope": "local_pxpipe_inspired_artifact_pipeline_not_live_provider_usage",
         "full_scan_tradeoffs": summarize_modality_tradeoffs(full_tradeoffs),
         "packed_tradeoffs": summarize_modality_tradeoffs(packed_tradeoffs),
         "median_retrieval_tokens_saved": _median(retrieval_saved),
         "median_incremental_modality_tokens_saved_after_packing": _median(incremental_saved),
+        "median_artifact_incremental_tokens_saved_after_packing": _median(
+            artifact_incremental_saved
+        ),
         "median_end_to_end_safe_candidate_reduction_percent": _median(end_reduction),
         "total_retrieval_tokens_saved": int(sum(retrieval_saved)),
         "total_incremental_modality_tokens_saved_after_packing": int(sum(incremental_saved)),
+        "total_artifact_incremental_tokens_saved_after_packing": int(
+            sum(artifact_incremental_saved)
+        ),
+        "artifact_image_case_rate": round(artifact_image_cases / len(cases), 4) if cases else 0.0,
+        "total_artifact_image_count": sum(int(case["artifact_image_count"]) for case in cases),
+        "total_artifact_recoverable_blocks": sum(
+            int(case["artifact_recoverable_block_count"]) for case in cases
+        ),
         "notes": [
             "Retrieval reduction is shipped AgenVantage behavior.",
-            "Modality reduction is a theoretical estimate inspired by pxpipe's image-token packing.",
-            "Rows with verbatim-risk labels are conservatively kept as text.",
+            "Artifact-mode modality reduction is a local text+PNG handoff estimate, not billed provider usage.",
+            "Exact edit/test/config/support chunks stay text; imaged blocks are recoverable.",
         ],
     }
 
@@ -119,9 +168,9 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
     lines = [
         "# Modality Tradeoff Validation",
         "",
-        "This report estimates whether pxpipe-style image packing could add value after AgenVantage selects repository context.",
+        "This report validates the local pxpipe-style artifact pipeline after AgenVantage selects repository context.",
         "",
-        "It is theoretical: AgenVantage does not send image-packed prompts in this benchmark, and these numbers are not provider-billed savings.",
+        "It writes local PNG context pages when the safety and profitability gates pass. These numbers are still not provider-billed savings.",
         "",
         "## Summary",
         "",
@@ -138,6 +187,11 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Packed risk keep-text rate: `{packed['risk_keep_text_rate']}`",
         f"- Median retrieval tokens saved: `{summary['median_retrieval_tokens_saved']}`",
         f"- Median incremental modality tokens saved after packing: `{summary['median_incremental_modality_tokens_saved_after_packing']}`",
+        f"- Median artifact incremental tokens saved after packing: `{summary['median_artifact_incremental_tokens_saved_after_packing']}`",
+        f"- Total artifact incremental tokens saved after packing: `{summary['total_artifact_incremental_tokens_saved_after_packing']}`",
+        f"- Artifact image case rate: `{summary['artifact_image_case_rate']}`",
+        f"- Total artifact images: `{summary['total_artifact_image_count']}`",
+        f"- Total recoverable blocks: `{summary['total_artifact_recoverable_blocks']}`",
         f"- Median end-to-end safe candidate reduction: `{summary['median_end_to_end_safe_candidate_reduction_percent']}%`",
         "",
         "## Cases",
@@ -155,6 +209,11 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Packed estimated image tokens: `{packed_tradeoff['estimated_image_tokens']}`",
                 f"- Packed modality decision: `{packed_tradeoff['decision_reason']}`",
                 f"- Incremental modality reduction after packing: `{case['incremental_modality_reduction_percent_after_packing']}%`",
+                f"- Artifact mixed estimated tokens: `{case['artifact_mixed_estimated_tokens']}`",
+                f"- Artifact incremental savings: `{case['artifact_incremental_tokens_saved_after_packing']}`",
+                f"- Artifact decision: `{case['artifact_decision_reason']}`",
+                f"- Artifact images: `{case['artifact_image_count']}`",
+                f"- Recoverable blocks: `{case['artifact_recoverable_block_count']}`",
                 f"- Risk labels: `{', '.join(packed_tradeoff['risk_labels']) or 'none'}`",
                 "",
             ]
@@ -167,10 +226,14 @@ def run_modality_tradeoff_validation(
     repos_root: Path = DEFAULT_REPOS_ROOT,
     output_json: Path | None = DEFAULT_OUTPUT_JSON,
     output_md: Path | None = DEFAULT_OUTPUT_MD,
+    artifact_root: Path = DEFAULT_ARTIFACT_ROOT,
 ) -> dict[str, Any]:
     dataset = load_feature_provider_dataset(fixture)
     counter = TokenCounter()
-    cases = [_run_case(dataset, case, repos_root, counter) for case in dataset.cases]
+    cases = [
+        _run_case(dataset, case, repos_root, counter, artifact_root)
+        for case in dataset.cases
+    ]
     summary = _summarize(cases)
     report = {"summary": summary, "cases": cases}
     if output_json is not None:
@@ -188,6 +251,7 @@ def main() -> None:
     parser.add_argument("--repos-root", type=Path, default=DEFAULT_REPOS_ROOT)
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--output-md", type=Path, default=DEFAULT_OUTPUT_MD)
+    parser.add_argument("--artifact-root", type=Path, default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--summary", action="store_true")
     args = parser.parse_args()
     report = run_modality_tradeoff_validation(
@@ -195,6 +259,7 @@ def main() -> None:
         repos_root=args.repos_root,
         output_json=args.output_json,
         output_md=args.output_md,
+        artifact_root=args.artifact_root,
     )
     if args.summary:
         print(json.dumps(report["summary"], indent=2))

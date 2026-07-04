@@ -81,11 +81,11 @@ Current local result from July 2, 2026:
 - test-target recall: `0.8333`
 - required-observation recall: `1.0`
 - answer-plan pass rate: `0.8333`
-- median token reduction: `90.91%`
-- median full-scan prompt: `80,648.5` tokens
-- median packed prompt: `5,938.5` tokens
-- median prompt tokens saved: `74,760.0`
-- total prompt tokens saved across 12 cases: `1,067,887`
+- median token reduction: `90.93%`
+- median full-scan prompt: `80,921.5` tokens
+- median packed prompt: `5,902.0` tokens
+- median prompt tokens saved: `74,985.0`
+- total prompt tokens saved across 12 cases: `1,285,646`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -201,20 +201,20 @@ saved report against an OpenAI Costs API export, see
 
 ## Modality Tradeoff Validation
 
-`modality_tradeoff_validation.py` estimates whether pxpipe-style image-token
-packing could add value after AgenVantage has already selected the relevant
-repository context. It does not send images to a provider. It is a theoretical
-gate that asks whether a prompt is bulky, token-dense, and safe to treat as
-gist-level context instead of byte-exact text.
+`modality_tradeoff_validation.py` validates the local pxpipe-style artifact
+pipeline after AgenVantage has already selected the relevant repository
+context. It can write PNG context pages, factsheets, and recoverable source
+manifests. It still does not send images to a provider, so the token deltas are
+estimated rather than provider-billed savings.
 
 The estimator is intentionally conservative:
 
-- token math uses pxpipe-inspired defaults of `92,000` chars per image page and
-  `4,761` image tokens per page;
-- large prompts with hashes, UUIDs, redaction markers, or line-addressed
-  references stay text;
-- image packing is only considered when the estimated token reduction clears a
-  minimum threshold and the content is large enough to be worth compressing.
+- exact edit, test, config, supporting, secret-like, hash, and UUID-bearing
+  chunks stay text;
+- gist-level background chunks are rendered into deterministic dense PNG pages
+  only when the provider-profile estimate beats text after factsheet overhead;
+- each imaged block gets deterministic factsheet text and a recoverable source
+  file keyed by a stable `rec_...` identifier.
 
 Run it with:
 
@@ -232,20 +232,22 @@ Current local result from July 4, 2026:
 - full-scan median theoretical image prompt: `19,044.0` tokens
 - full-scan theoretical modality reduction before safety gate: `76.18%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `5,952.5` tokens
+- packed median text prompt: `5,949.0` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `20.02%`
+- packed theoretical modality reduction before safety gate: `19.97%`
 - packed image-candidate rate after safety gate: `0.1667`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,185,417`
-- total incremental modality tokens saved after packing: `2,501`
+- total retrieval tokens saved across 12 cases: `1,233,293`
+- total rough-estimator incremental modality tokens saved after packing: `2,501`
+- artifact image case rate: `0.25`
+- total artifact images written: `3`
+- total recoverable blocks: `36`
+- total artifact incremental tokens saved after packing: `3,099`
 - median end-to-end safe candidate reduction: `91.5%`
 
-Interpretation: pxpipe's core idea is valuable as a future second-stage
-compression gate, especially for token-dense gist-level bulk. On the current
-feature-work prompts, AgenVantage's retrieval step does most of the real work;
-the modality gate adds selective upside and protects exact repository evidence
-from lossy conversion.
+Interpretation: retrieval still does nearly all of the work. The implemented
+artifact layer adds selective upside on background/gist chunks, but correctly
+leaves exact coding evidence in text and makes every imaged block recoverable.
 
 ## Claim Status
 

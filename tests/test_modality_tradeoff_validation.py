@@ -17,14 +17,17 @@ def test_modality_tradeoff_validation_writes_report(tmp_path: Path) -> None:
         repos_root=repos_root,
         output_json=output_json,
         output_md=output_md,
+        artifact_root=tmp_path / "images",
     )
 
     assert report["summary"]["case_count"] == 12
     assert report["summary"]["scope"] == (
-        "theoretical_pxpipe_inspired_modality_gate_not_live_image_transport"
+        "local_pxpipe_inspired_artifact_pipeline_not_live_provider_usage"
     )
     assert "full_scan_tradeoffs" in report["summary"]
     assert "packed_tradeoffs" in report["summary"]
+    assert "total_artifact_image_count" in report["summary"]
+    assert "artifact_mixed_estimated_tokens" in report["cases"][0]
     assert output_json.exists()
     assert output_md.exists()
     assert json.loads(output_json.read_text(encoding="utf-8"))["cases"]

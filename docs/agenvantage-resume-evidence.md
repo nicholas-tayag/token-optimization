@@ -23,9 +23,9 @@ Current implemented scope:
   prompt-token accounting
 - Validation harness: 12 manually annotated feature-work tasks across
   `token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`
-- Pxpipe-inspired modality tradeoff estimator: theoretical second-stage gate
-  for deciding whether bulky, gist-tolerant context could be cheaper as image
-  tokens while exact identifiers and secrets remain text
+- Pxpipe-inspired mixed-modality artifact mode: estimates or writes local PNG
+  pages for bulky gist-level context while exact implementation evidence,
+  factsheets, and recoverable source blocks remain text
 
 Out of scope for verified resume claims right now:
 
@@ -50,18 +50,18 @@ Feature-work benchmark:
 - Answer-plan pass rate: `0.8333`
 - Mean selected chunk count: `14.08`
 - Missing-signal warning rate: `0.5833`
-- Median full-scan prompt: `80,648.5` tokens
-- Median packed prompt: `5,938.5` tokens
-- Median prompt tokens saved: `74,760.0`
-- Median prompt reduction: `90.91%`
-- Total prompt tokens saved across 12 cases: `1,067,887`
+- Median full-scan prompt: `80,921.5` tokens
+- Median packed prompt: `5,902.0` tokens
+- Median prompt tokens saved: `74,985.0`
+- Median prompt reduction: `90.93%`
+- Total prompt tokens saved across 12 cases: `1,285,646`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,952.5` tokens
+- Median AgenVantage packed prompt: `5,949.0` tokens
 - Median prompt reduction: `90.85%`
 - Median estimated full-scan cold input cost: `$0.02024212`
 - Median estimated packed warm input cost: `$0.00015538`
@@ -83,27 +83,31 @@ Session cache-readiness benchmark:
 - Total estimated warm tokens saved versus full scan: `1,236,065`
 - Acceptance result: `passed`
 
-Pxpipe-inspired modality tradeoff benchmark:
+Pxpipe-inspired mixed-modality artifact benchmark:
 
 - Cases: `12`
-- Scope: theoretical image-token estimate, not live image transport or billed
-  provider savings
+- Scope: local PNG artifact pipeline with estimated token accounting, not live
+  provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
 - Full-scan theoretical modality reduction before safety gate: `76.18%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,952.5` tokens
+- Packed median text prompt: `5,949.0` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `20.02%`
+- Packed theoretical modality reduction before safety gate: `19.97%`
 - Packed image-candidate rate after safety gate: `0.1667`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,185,417`
-- Total incremental modality tokens saved after packing: `2,501`
+- Total retrieval tokens saved across 12 cases: `1,233,293`
+- Total rough-estimator incremental modality tokens saved after packing: `2,501`
+- Artifact image case rate: `0.25`
+- Total artifact images written: `3`
+- Total recoverable source blocks: `36`
+- Total artifact incremental tokens saved after packing: `3,099`
 - Median end-to-end safe candidate reduction: `91.5%`
 
 Interpretation: image-token packing is not a replacement for retrieval on this
-workload. It is a future selective compression layer for token-dense,
-gist-tolerant bulk after AgenVantage has already found the right code context.
+workload. It is a selective compression layer for token-dense, gist-tolerant
+background context after AgenVantage has already found the right code context.
 
 Practical Mesh feature validation:
 
@@ -187,7 +191,7 @@ Added cache-aware feature sessions that split stable repository context from per
 Forward-looking compression bullet:
 
 ```text
-Prototyped a pxpipe-inspired modality gate that estimates when selected coding-agent context is safe to compress as image tokens; benchmarked 12 feature tasks and found retrieval saved 1.18M tokens first, with selective modality packing adding 2.5K more estimated tokens only when exact-evidence risks were absent.
+Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with factsheets and recoverable source IDs; benchmarked 12 feature tasks with 3 local image artifacts, 36 recoverable blocks, and 3.1K additional estimated tokens saved after retrieval.
 ```
 
 ## Interview Explanation
@@ -216,12 +220,12 @@ cost without a quality regression.
 If asked about pxpipe-style image compression:
 
 ```text
-I researched pxpipe and borrowed the production idea, not the claim. The useful
-pattern is a compression gate: measure text-token cost, estimate image-token
-cost, and reject lossy conversion when the context contains exact IDs, hashes,
-secrets, or line evidence. In my benchmark, the gate showed image packing could
-be useful later, but retrieval is still the main verified value because code
-tasks usually need exact file evidence.
+I researched pxpipe and borrowed the production pattern, not the billed-savings
+claim. AgenVantage now has a local mixed-modality path that keeps edit/test
+evidence as text, renders only safe background chunks as PNGs, adds factsheets
+for exact identifiers, and writes recoverable source blocks. The benchmark
+showed retrieval remains the main win, with image artifacts adding selective
+estimated savings after the context is already packed.
 ```
 
 If asked why the Mesh plain-agent baseline also succeeded:

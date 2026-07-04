@@ -60,9 +60,9 @@ The current local workflow provides:
   provider usage and deterministic answer-plan grading; and
 - a cache-aware `agenvantage session` workflow that freezes stable feature
   context once and emits smaller dynamic task packets for repeated prompts; and
-- a pxpipe-inspired theoretical modality tradeoff benchmark that estimates when
-  bulky, gist-tolerant context could be cheaper as image tokens while exact
-  identifiers, secrets, hashes, and line-addressed evidence stay text; and
+- a pxpipe-inspired mixed-modality pack mode that can estimate or write local
+  PNG context pages for bulky gist-level context while exact identifiers,
+  secrets, hashes, edit/test/config chunks, and recoverable source stay text; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:
@@ -130,7 +130,8 @@ agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
-python benchmarks/modality_tradeoff_validation.py --summary
+.venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
+agenvantage pack --preset feature --task "..." --multimodal artifact
 agenvantage view --report artifacts/oncall-report.json
 make test
 ```
@@ -147,10 +148,10 @@ provided, it also reports estimated cold and warm input-only cost deltas; these
 are planning metrics, not billed-provider proof.
 
 `benchmarks/modality_tradeoff_validation.py` is inspired by
-[pxpipe](https://github.com/teamchong/pxpipe). It estimates whether a
-second-stage image-token compression gate could add value after retrieval has
-already selected context. The current benchmark keeps risky exact evidence as
-text and reports the result as theoretical modality upside, not provider-billed
+[pxpipe](https://github.com/teamchong/pxpipe). It validates the local
+mixed-modality artifact path after retrieval has already selected context. The
+benchmark can write PNG context pages, factsheets, and recoverable source
+manifests, but still reports estimated token deltas rather than provider-billed
 savings.
 
 For the end-to-end billed-cost proof workflow, including live request spans,

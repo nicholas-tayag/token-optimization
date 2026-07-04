@@ -407,6 +407,36 @@ def test_pack_feature_handoff_json_emits_agent_ready_payload(tmp_path: Path) -> 
     assert "tests/test_rate_limiter.py" in payload["change_surface"]["test_targets"]
 
 
+def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "pack",
+            "--preset",
+            "feature",
+            "--task",
+            "Add diagnostics for rate limiter Redis fail open behavior",
+            "--multimodal",
+            "estimate",
+            "--handoff-json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["modality_plan"]["mode"] == "estimate"
+    assert "image_attachments" in payload
+    assert "factsheets" in payload
+    assert "recoverable_blocks" in payload
+
+
 def test_pack_preset_debug_enables_provenance_in_manifest(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
 

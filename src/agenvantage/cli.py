@@ -20,6 +20,7 @@ from agenvantage.feature_provider_validation import (
     run_feature_provider_validation,
     summarize_saved_feature_provider_validation_report,
 )
+from agenvantage.modality import PROVIDER_PROFILES, apply_multimodal_pack
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
     fixture_readiness_report,
@@ -456,6 +457,26 @@ def _parser() -> argparse.ArgumentParser:
         help="Print a structured agent handoff payload for IDE or agent workflows.",
     )
     pack.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help=(
+            "Optional mixed-modality context mode: off keeps text-only output, "
+            "estimate reports modality math, artifact writes local PNG context pages."
+        ),
+    )
+    pack.add_argument(
+        "--modality-profile",
+        choices=tuple(sorted(PROVIDER_PROFILES)),
+        default="anthropic_standard",
+        help="Provider image-token profile used for multimodal estimates.",
+    )
+    pack.add_argument(
+        "--modality-output-dir",
+        type=Path,
+        help="Directory for multimodal artifacts (default: artifacts/context-images/<pack-id>).",
+    )
+    pack.add_argument(
         "--copy",
         action="store_true",
         help="Copy the Markdown context package to the system clipboard.",
@@ -624,6 +645,22 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
             "Safety: "
             f"redacted {safety['selected_secret_redaction_count']} secret-looking value(s)"
         )
+    multimodal = report.get("multimodal") or {}
+    if multimodal.get("enabled"):
+        lines.append(
+            "Multimodal: "
+            f"{multimodal.get('mode')} "
+            f"decision={multimodal.get('decision_reason')} "
+            f"images={len(multimodal.get('image_attachments', []))} "
+            f"estimated_mixed={multimodal.get('estimated_mixed_prompt_tokens')} tokens"
+        )
+        if multimodal.get("estimated_tokens_saved_vs_packed_text", 0) > 0:
+            lines.append(
+                "Multimodal savings: "
+                f"{multimodal['estimated_tokens_saved_vs_packed_text']} tokens "
+                f"({multimodal['estimated_reduction_percent_vs_packed_text']}%) "
+                "vs packed text"
+            )
     if report.get("uncovered_query_terms"):
         lines.append(f"Uncovered concepts: {', '.join(report['uncovered_query_terms'])}")
     change_surface = report.get("change_surface") or {}
@@ -676,6 +713,10 @@ def _build_handoff_payload(markdown: str, report: dict[str, Any], preset_name: s
             "missing_signals": list(change_surface.get("missing_signals", [])),
         },
         "prompt_token_accounting": report.get("prompt_token_accounting", {}),
+        "modality_plan": report.get("multimodal", {}),
+        "image_attachments": (report.get("multimodal") or {}).get("image_attachments", []),
+        "factsheets": (report.get("multimodal") or {}).get("factsheets", []),
+        "recoverable_blocks": (report.get("multimodal") or {}).get("recoverable_blocks", []),
         "selected_chunks": report.get("selected_chunks", []),
         "prompt_markdown": markdown,
     }
@@ -1083,13 +1124,14 @@ def _run_pack(args: argparse.Namespace) -> None:
     settings = _resolve_pack_settings(args)
     preset = settings["preset"]
     repos = settings["repos"]
+    counter = TokenCounter(settings["model"])
 
     if len(repos) == 1:
         markdown, report = build_context_package(
             repos[0],
             args.task,
             settings["budget"],
-            TokenCounter(settings["model"]),
+            counter,
             settings["top_k"],
             instructions=preset.instructions,
             include_diff=settings["include_diff"],
@@ -1103,7 +1145,7 @@ def _run_pack(args: argparse.Namespace) -> None:
             repos,
             args.task,
             settings["budget"],
-            TokenCounter(settings["model"]),
+            counter,
             settings["top_k"],
             instructions=preset.instructions,
             include_diff=settings["include_diff"],
@@ -1114,6 +1156,14 @@ def _run_pack(args: argparse.Namespace) -> None:
         )
 
     report["preset"] = settings["preset_name"]
+    markdown, report = apply_multimodal_pack(
+        markdown,
+        report,
+        counter,
+        mode=args.multimodal,
+        output_dir=args.modality_output_dir,
+        profile_id=args.modality_profile,
+    )
     write_package_outputs(markdown, report, args.output, args.manifest)
 
     if args.stdout:
@@ -1137,6 +1187,9 @@ def _run_pack(args: argparse.Namespace) -> None:
         notices.append(f"Context package written to {args.output.resolve()}")
     if args.manifest:
         notices.append(f"Decision manifest written to {args.manifest.resolve()}")
+    multimodal = report.get("multimodal") or {}
+    if args.multimodal == "artifact" and multimodal.get("image_attachments"):
+        notices.append(f"Multimodal artifacts written to {multimodal.get('artifact_root')}")
 
     machine_readable = args.stdout or args.as_json or args.handoff_json
     if notices:

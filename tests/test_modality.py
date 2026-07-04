@@ -1,9 +1,17 @@
+from pathlib import Path
+
 from agenvantage.modality import (
+    apply_multimodal_pack,
     classify_verbatim_risk,
+    extract_factsheet_entries,
     estimate_image_tokens,
     estimate_modality_tradeoff,
+    factsheet_text,
+    get_provider_profile,
+    recoverable_block_id,
     summarize_modality_tradeoffs,
 )
+from agenvantage.tokenizer import TokenCounter
 
 
 def test_estimate_image_tokens_uses_fixed_page_cost() -> None:
@@ -49,3 +57,100 @@ def test_summarize_modality_tradeoffs_counts_candidates_and_risks() -> None:
     assert summary["item_count"] == 2
     assert summary["image_candidate_rate"] == 0.5
     assert summary["risk_keep_text_rate"] == 0.5
+
+
+def test_provider_profile_uses_deterministic_patch_estimate() -> None:
+    profile = get_provider_profile("anthropic_standard")
+
+    assert profile.estimate_page_tokens() == 1456
+    assert profile.to_dict()["token_formula"] == "anthropic_patches_28"
+
+
+def test_factsheet_extracts_exact_identifier_shapes() -> None:
+    entries = extract_factsheet_entries(
+        "POST /api/memory/search uses src/server.js#L10-L20 with "
+        "TRACE_ID=abc123ef and --max-results v1.2.3 testMemorySearch."
+    )
+    text = factsheet_text(entries)
+
+    assert "/api/memory/search" in text
+    assert "src/server.js#L10-L20" in text
+    assert "--max-results" in text
+    assert "v1.2.3" in text
+
+
+def test_recoverable_block_id_is_stable_and_content_sensitive() -> None:
+    first = recoverable_block_id("source_chunk", "same text", "docs.md")
+    second = recoverable_block_id("source_chunk", "same text", "docs.md")
+    changed = recoverable_block_id("source_chunk", "changed text", "docs.md")
+
+    assert first == second
+    assert first.startswith("rec_")
+    assert first != changed
+
+
+def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) -> None:
+    background = " ".join("[]{}():;,./#L" for _ in range(3500))
+    markdown = (
+        "# AgenVantage Context Package\n\n"
+        "## Instructions\n\nUse context.\n\n"
+        "## Task\n\nAdd diagnostics.\n\n"
+        "## Selected Repository Context\n\n"
+        "[SOURCE:src/server.js#L1-L3]\n"
+        "```javascript\n"
+        "function searchMemory() { return true; }\n"
+        "```\n\n"
+        "[SOURCE:docs/memory-search.md#L1-L900]\n"
+        "```markdown\n"
+        f"{background}\n"
+        "```\n"
+    )
+    report = {
+        "task": "Add diagnostics.",
+        "selected_chunks": [
+            {
+                "id": "src/server.js#L1-L3",
+                "path": "src/server.js",
+                "start_line": 1,
+                "end_line": 3,
+                "tokens": 30,
+                "redaction_count": 0,
+            },
+            {
+                "id": "docs/memory-search.md#L1-L900",
+                "path": "docs/memory-search.md",
+                "start_line": 1,
+                "end_line": 900,
+                "tokens": 9000,
+                "redaction_count": 0,
+            },
+        ],
+        "change_surface": {
+            "edit_targets": [{"path": "src/server.js"}],
+            "test_targets": [],
+            "config_targets": [],
+            "supporting_targets": [],
+        },
+        "prompt_token_accounting": {
+            "packed_prompt_tokens": TokenCounter().count(markdown),
+            "full_scan_prompt_tokens": TokenCounter().count(markdown),
+        },
+    }
+
+    mixed, updated = apply_multimodal_pack(
+        markdown,
+        report,
+        TokenCounter(),
+        mode="artifact",
+        output_dir=tmp_path / "mixed",
+    )
+    plan = updated["multimodal"]
+
+    assert plan["should_image"] is True
+    assert plan["image_attachments"]
+    assert plan["recoverable_blocks"]
+    assert plan["estimated_tokens_saved_vs_packed_text"] > 0
+    assert "GIST_IMAGE_CONTEXT" in mixed
+    image_path = Path(plan["image_attachments"][0]["path"])
+    assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert (tmp_path / "mixed" / "manifest.json").exists()
