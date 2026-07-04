@@ -1,0 +1,12 @@
+{
+  "provider": "openai",
+  "model": "replace-with-tested-model",
+  "captured_at": "YYYY-MM-DD",
+  "source_url": "https://developers.openai.com/api/docs/pricing",
+  "note": "Replace these values with the published rates used for your experiment before making live cost claims.",
+  "prices_per_million": {
+    "input": 0.0,
+    "cached_input": 0.0,
+    "output": 0.0
+  }
+}

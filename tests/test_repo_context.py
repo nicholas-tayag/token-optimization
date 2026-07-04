@@ -1,7 +1,15 @@
 from pathlib import Path
 import subprocess
 
-from agenvantage.repo_context import build_context_package, source_files
+from agenvantage.repo_context import (
+    CodeChunk,
+    build_context_package,
+    build_multi_repo_context_package,
+    chunks_for_repo,
+    rank_chunks,
+    source_files,
+)
+from agenvantage.repo_index import build_repository_index
 from agenvantage.tokenizer import TokenCounter
 
 
@@ -44,6 +52,29 @@ def test_source_files_include_shell_scripts(tmp_path: Path) -> None:
     assert "scripts/deploy.sh" in files
 
 
+def test_source_files_respect_include_globs(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    files = {
+        path.relative_to(tmp_path).as_posix()
+        for path in source_files(tmp_path, include_globs=("scripts/*.sh",))
+    }
+
+    assert files == {"scripts/deploy.sh"}
+
+
+def test_source_files_respect_exclude_globs(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+
+    files = {
+        path.relative_to(tmp_path).as_posix()
+        for path in source_files(tmp_path, exclude_globs=("src/mapView.ts",))
+    }
+
+    assert "src/rateLimiter.ts" in files
+    assert "src/mapView.ts" not in files
 def test_source_files_include_readme_and_container_build_variants(tmp_path: Path) -> None:
     (tmp_path / "README").write_text("Project overview.\n", encoding="utf-8")
     (tmp_path / "Dockerfile.prod").write_text("FROM node:20-alpine\n", encoding="utf-8")
@@ -77,6 +108,294 @@ def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) ->
     assert "ignored.ts" not in files
 
 
+def test_context_package_can_include_git_provenance(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "app.js").write_text(
+        "export const uploadLimit = 10;\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "add", "app.js"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "Add upload limit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "app.js").write_text(
+        "export const uploadLimit = 25;\n", encoding="utf-8"
+    )
+
+    markdown, report = build_context_package(
+        tmp_path,
+        "Identify changed behavior around upload limit configuration",
+        budget=700,
+        counter=TokenCounter(),
+        include_diff=True,
+        include_log=True,
+    )
+
+    provenance = report["provenance"]
+    assert provenance["enabled"] is True
+    assert provenance["section_count"] >= 1
+    assert provenance["selected_provenance_tokens"] > 0
+    assert "## Repository Provenance" in markdown
+    assert "Working tree changes" in markdown or "Add upload limit" in markdown
+
+
+def test_repository_index_resolves_local_import_targets(tmp_path: Path) -> None:
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "server.mjs").write_text(
+        'import { buildAutofillPlan } from "./lib/form-autofill.mjs";\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "form-autofill.mjs").write_text(
+        "export function buildAutofillPlan() { return []; }\n",
+        encoding="utf-8",
+    )
+
+    files = source_files(tmp_path)
+    index_result = build_repository_index(tmp_path, files)
+
+    assert (
+        "lib/form-autofill.mjs"
+        in index_result.entries["server.mjs"].local_import_paths
+    )
+    assert "server.mjs" in index_result.entries["lib/form-autofill.mjs"].imported_by_paths
+    assert any(
+        item.name == "buildAutofillPlan" and item.line_number == 1
+        for item in index_result.entries["lib/form-autofill.mjs"].symbol_occurrences
+    )
+
+
+def test_context_package_graph_expands_to_imported_helpers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_root = tmp_path.parent / "agenvantage-cache-graph"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+    (tmp_path / "lib").mkdir(parents=True)
+    (tmp_path / "server.mjs").write_text(
+        'import { buildAutofillPlan } from "./lib/form-autofill.mjs";\n'
+        'import { analyzeResume } from "./lib/resume-agent.mjs";\n'
+        "export async function handleResumeUpload() {\n"
+        "  return buildAutofillPlan(await analyzeResume());\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "app.js").write_text(
+        "export async function submitResumeUpload() { return fetch('/api/resume'); }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "form-autofill.mjs").write_text(
+        "export function buildAutofillPlan(profile) { return profile.fields ?? []; }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lib" / "resume-agent.mjs").write_text(
+        "export async function analyzeResume() { return { fields: [] }; }\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Compare resume upload and autofill planning flow",
+        budget=700,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "server.mjs" in selected_paths
+    assert "lib/form-autofill.mjs" in selected_paths
+    assert "lib/resume-agent.mjs" in selected_paths
+
+
+def test_feature_context_package_reports_change_surface_with_tests(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_root = tmp_path.parent / "agenvantage-cache-feature"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "rateLimiter.ts").write_text(
+        "export function configureRateLimiter(redis) {\n"
+        "  return redis.consume('ratelimit');\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "rateLimiter.test.ts").write_text(
+        "test('rate limiter fails open when redis is unavailable', () => {\n"
+        "  expect(true).toBe(true);\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Add feature tests for rate limiter Redis fail open behavior",
+        budget=900,
+        counter=TokenCounter(),
+        workflow="feature",
+    )
+
+    change_surface = report["change_surface"]
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert report["pack_workflow"] == "feature"
+    assert "src/rateLimiter.ts" in {
+        item["path"] for item in change_surface["edit_targets"]
+    }
+    assert "tests/rateLimiter.test.ts" in {
+        item["path"] for item in change_surface["test_targets"]
+    }
+    assert "src/rateLimiter.ts" in selected_paths
+    assert "tests/rateLimiter.test.ts" in selected_paths
+
+
+def test_context_package_builds_and_reuses_repository_index(
+    tmp_path: Path, monkeypatch
+) -> None:
+    create_sample_repo(tmp_path)
+    cache_root = tmp_path.parent / "agenvantage-cache"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+
+    _, first_report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=TokenCounter(),
+    )
+    first_index = first_report["repos"][0]["index"]
+    assert Path(first_index["cache_path"]).is_file()
+    assert first_index["rebuilt_files"] == first_index["indexed_files"]
+    assert first_index["reused_files"] == 0
+
+    _, second_report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=TokenCounter(),
+    )
+    second_index = second_report["repos"][0]["index"]
+    assert second_index["reused_files"] == second_index["indexed_files"]
+    assert second_index["rebuilt_files"] == 0
+
+
+def test_rank_chunks_uses_file_level_symbol_metadata() -> None:
+    task = "Explain upload limit configuration"
+    generic_text = "const maxBytes = 10_000;\nreturn maxBytes;\n"
+    chunks = (
+        CodeChunk(
+            chunk_id="src/runtime.ts#L1-L2",
+            relative_path="src/runtime.ts",
+            display_path="src/runtime.ts",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=2,
+            text=generic_text,
+            tokens=20,
+            file_symbols=("configureUploadLimit",),
+            file_imports=(),
+        ),
+        CodeChunk(
+            chunk_id="src/noise.ts#L1-L2",
+            relative_path="src/noise.ts",
+            display_path="src/noise.ts",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=2,
+            text="const notes = 'configuration';\n",
+            tokens=18,
+            file_symbols=(),
+            file_imports=(),
+        ),
+    )
+
+    ranked = rank_chunks(chunks, task)
+
+    assert ranked[0].chunk_id == "src/runtime.ts#L1-L2"
+    assert "upload" in ranked[0].matched_terms
+    assert "limit" in ranked[0].matched_terms
+
+
+def test_rank_chunks_uses_chunk_local_symbol_metadata() -> None:
+    task = "Compare resume upload autofill planning"
+    chunks = (
+        CodeChunk(
+            chunk_id="lib/form-autofill.mjs#L1-L20",
+            relative_path="lib/form-autofill.mjs",
+            display_path="lib/form-autofill.mjs",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=1,
+            end_line=20,
+            text="const SAFE = true;\n",
+            tokens=18,
+            chunk_symbols=("buildAutofillPlan",),
+            file_symbols=("classifyFormField", "buildAutofillPlan"),
+            file_imports=(),
+        ),
+        CodeChunk(
+            chunk_id="lib/form-autofill.mjs#L21-L40",
+            relative_path="lib/form-autofill.mjs",
+            display_path="lib/form-autofill.mjs",
+            repo_label="repo",
+            repo_path="/tmp/repo",
+            start_line=21,
+            end_line=40,
+            text="const SAFE = true;\n",
+            tokens=18,
+            chunk_symbols=(),
+            file_symbols=("classifyFormField", "buildAutofillPlan"),
+            file_imports=(),
+        ),
+    )
+
+    ranked = rank_chunks(chunks, task)
+
+    assert ranked[0].chunk_id == "lib/form-autofill.mjs#L1-L20"
+    assert "autofill" in ranked[0].matched_terms
+
+
+def test_chunks_for_repo_carries_nearby_symbol_anchors_across_large_function_bodies(
+    tmp_path: Path,
+) -> None:
+    content = (
+        "export function handleUpload(file) {\n"
+        + "".join(f"  const step{index} = file && {index};\n" for index in range(95))
+        + "  const cleanStatus = 'complete';\n"
+        + "  return cleanStatus;\n"
+        + "}\n"
+    )
+    (tmp_path / "app.js").write_text(content, encoding="utf-8")
+
+    files = source_files(tmp_path)
+    index_result = build_repository_index(tmp_path, files)
+    chunks = chunks_for_repo(tmp_path, TokenCounter(), files=files, file_index=index_result.entries)
+
+    later_chunk = next(chunk for chunk in chunks if chunk.start_line >= 85)
+
+    assert "handleUpload" in later_chunk.chunk_symbols
+
+
 def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     create_sample_repo(tmp_path)
     markdown, report = build_context_package(
@@ -91,6 +410,13 @@ def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     assert "rateLimiter.ts" in markdown
     assert report["selected_context_tokens"] <= report["budget"]
     assert report["local_tokens_omitted_vs_candidate_context"] > 0
+    prompt_accounting = report["prompt_token_accounting"]
+    assert prompt_accounting["original_user_prompt_tokens"] > 0
+    assert prompt_accounting["full_scan_prompt_tokens"] == report["candidate_context_tokens"]
+    assert prompt_accounting["packed_prompt_tokens"] == report["selected_context_tokens"]
+    assert prompt_accounting["prompt_tokens_saved_vs_full_scan"] == report[
+        "local_tokens_omitted_vs_candidate_context"
+    ]
     assert "redis" in report["covered_query_terms"]
 
 
@@ -151,6 +477,23 @@ def test_context_package_matches_natural_language_to_code_variants(tmp_path: Pat
     assert report["selected_chunks"][0]["path"] == "limiter.ts"
 
 
+def test_context_package_matches_size_limit_language_to_byte_caps(tmp_path: Path) -> None:
+    (tmp_path / "upload.js").write_text(
+        "const defaultMaxUploadBytes = 750 * 1024;\n"
+        "const maxUploadBytes = defaultMaxUploadBytes;\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain configurable upload size limits",
+        budget=260,
+        counter=TokenCounter(),
+    )
+
+    assert report["selected_chunks"][0]["path"] == "upload.js"
+
+
 def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "deploy.sh").write_text(
@@ -168,6 +511,46 @@ def test_context_package_selects_shell_scripts_for_ci_tasks(tmp_path: Path) -> N
     assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
 
 
+def test_context_package_records_active_path_filters(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm run build\n", encoding="utf-8"
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain deploy script",
+        budget=260,
+        counter=TokenCounter(),
+        include_globs=("scripts/*.sh",),
+        exclude_globs=("src/*",),
+    )
+
+    assert report["path_filters"] == {
+        "include_globs": ["scripts/*.sh"],
+        "exclude_globs": ["src/*"],
+    }
+    assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
+
+
+def test_context_package_matches_plural_path_terms_for_concise_tasks(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\nnpm run release\n", encoding="utf-8"
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain deploy script",
+        budget=260,
+        counter=TokenCounter(),
+    )
+
+    assert report["selected_chunks"][0]["path"] == "scripts/deploy.sh"
+    assert "script" in report["covered_query_terms"]
+
+
 def test_context_package_retains_short_registration_chunk(tmp_path: Path) -> None:
     (tmp_path / "index.ts").write_text(
         "if (SERVER_ENV.RATE_LIMIT_ENABLED) app.use('*', rateLimiter);\n",
@@ -180,3 +563,72 @@ def test_context_package_retains_short_registration_chunk(tmp_path: Path) -> Non
         counter=TokenCounter(),
     )
     assert report["selected_chunks"][0]["path"] == "index.ts"
+
+
+def test_multi_repo_context_package_selects_relevant_chunks_across_repositories(
+    tmp_path: Path,
+) -> None:
+    api_repo = tmp_path / "api-service"
+    ops_repo = tmp_path / "ops-service"
+    ui_repo = tmp_path / "ui-service"
+    (api_repo / "src").mkdir(parents=True)
+    (ops_repo / "scripts").mkdir(parents=True)
+    (ui_repo / "src").mkdir(parents=True)
+
+    (api_repo / "src" / "rateLimiter.ts").write_text(
+        "export async function rateLimiter(redis) {\n"
+        "  // fail open when Redis is unavailable\n"
+        "  return redis.consume('requests');\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (ops_repo / "scripts" / "deploy.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "kubectl rollout status deploy/api\n"
+        "kubectl rollout undo deploy/api\n",
+        encoding="utf-8",
+    )
+    (ui_repo / "src" / "dashboard.ts").write_text(
+        "export function renderDashboard() { return 'ok'; }\n",
+        encoding="utf-8",
+    )
+
+    markdown, report = build_multi_repo_context_package(
+        [api_repo, ops_repo, ui_repo],
+        "Explain the Redis rate limiter fail open behavior and deploy rollback flow",
+        budget=420,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "api-service/src/rateLimiter.ts" in selected_paths
+    assert "ops-service/scripts/deploy.sh" in selected_paths
+    assert report["repo_count"] == 3
+    assert report["selected_repo_labels"] == ["api-service", "ops-service"]
+    assert "api-service/src/rateLimiter.ts" in markdown
+    assert "ops-service/scripts/deploy.sh" in markdown
+
+
+def test_multi_repo_context_package_disambiguates_same_relative_paths(tmp_path: Path) -> None:
+    frontend_repo = tmp_path / "frontend"
+    backend_repo = tmp_path / "backend"
+    (frontend_repo / "src").mkdir(parents=True)
+    (backend_repo / "src").mkdir(parents=True)
+
+    (frontend_repo / "src" / "index.ts").write_text(
+        "export const signupFlow = () => 'signup';\n", encoding="utf-8"
+    )
+    (backend_repo / "src" / "index.ts").write_text(
+        "export const webhookRetry = () => 'retry';\n", encoding="utf-8"
+    )
+
+    _, report = build_multi_repo_context_package(
+        [frontend_repo, backend_repo],
+        "Explain the signup flow and webhook retry flow",
+        budget=320,
+        counter=TokenCounter(),
+    )
+
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert "frontend/src/index.ts" in selected_paths
+    assert "backend/src/index.ts" in selected_paths

@@ -189,6 +189,9 @@ For OpenTelemetry GenAI spans, the current specification defines:
 The OpenTelemetry GenAI conventions are still marked `Development`, so record
 the convention version used by the implementation. Datadog currently
 documents ingestion for OpenTelemetry GenAI `1.37+` traces and token usage.
+AgenVantage should preserve a normalization path from OTLP spans, OTLP logs,
+or per-request OTLP metric points into the provider-validation artifact so
+existing observability telemetry can be audited without re-running the model.
 
 ### Cost Formula
 

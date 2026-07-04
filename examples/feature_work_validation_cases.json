@@ -1,0 +1,361 @@
+{
+  "version": 1,
+  "description": "Manually annotated feature-work tasks for validating AgenVantage first-request context packing.",
+  "cases": [
+    {
+      "case_id": "token-optimization-cli-handoff-json",
+      "repository": "token-optimization",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Add or refine a CLI flag that emits a compact JSON agent handoff with selected chunks, change surface targets, and the rendered prompt.",
+      "expected_edit_targets": ["src/agenvantage/cli.py", "src/agenvantage/repo_context.py"],
+      "expected_test_targets": ["tests/test_cli.py"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "pack_cli_already_has_output_modes",
+          "any_of": [["--stdout", "--json", "--manifest"], ["--handoff-json", "selected_chunks"]]
+        },
+        {
+          "label": "repo_context_report_carries_selected_chunks",
+          "any_of": [["selected_chunks", "change_surface"], ["candidate_context_tokens", "selected_context_tokens"]]
+        },
+        {
+          "label": "cli_tests_exercise_pack_command",
+          "any_of": [["test_pack", "subprocess"], ["pack", "--json", "json.loads"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Names the CLI parser and pack execution path as the edit surface.",
+        "Names repo_context reporting as the source of selected chunks/change surface data.",
+        "Names CLI tests as the validation target."
+      ]
+    },
+    {
+      "case_id": "token-optimization-feature-benchmark-metrics",
+      "repository": "token-optimization",
+      "budget": 6000,
+      "top_k": 32,
+      "task": "Add a feature-work benchmark that reports edit target recall, test target recall, required observation recall, answer-plan pass rate, token reduction, and missing-signal warnings.",
+      "expected_edit_targets": ["benchmarks/feature_work_validation.py"],
+      "expected_test_targets": ["tests/test_feature_work_validation.py"],
+      "expected_config_targets": ["examples/feature_work_validation_cases.json"],
+      "required_observations": [
+        {
+          "label": "use_case_validation_has_observation_grading_pattern",
+          "any_of": [["required_observation_recall", "observed_observations"], ["missing_required_observations", "observation_citations"]]
+        },
+        {
+          "label": "benchmarks_write_json_and_markdown_reports",
+          "any_of": [["output_json", "output_md"], ["JSON report written", "write_text"]]
+        },
+        {
+          "label": "feature_cases_fixture_is_first_class",
+          "any_of": [["feature_work_validation_cases", "expected_edit_targets"], ["answer_plan_rubric", "required_observations"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Uses the existing benchmark style instead of a provider call.",
+        "Keeps retrieval sufficiency and answer-plan sufficiency separate.",
+        "Persists machine-readable metrics."
+      ]
+    },
+    {
+      "case_id": "token-optimization-structural-index",
+      "repository": "token-optimization",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Improve deterministic feature retrieval by persisting line-addressed symbol occurrences and reverse local-import relationships in the repository index.",
+      "expected_edit_targets": ["src/agenvantage/repo_index.py", "src/agenvantage/repo_context.py"],
+      "expected_test_targets": ["tests/test_repo_context.py"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "index_serializes_symbol_occurrences",
+          "any_of": [["SymbolOccurrence", "line_number"], ["symbol_occurrences", "to_dict"]]
+        },
+        {
+          "label": "index_tracks_reverse_import_edges",
+          "any_of": [["imported_by_paths", "local_import_paths"], ["reverse", "local_import"]]
+        },
+        {
+          "label": "repo_context_uses_import_neighbors",
+          "any_of": [["file_imported_by_paths", "supporting_targets"], ["local_imports", "imported_by"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Names repo_index as the metadata writer.",
+        "Names repo_context as the consumer of structural anchors.",
+        "Names repo_context tests as the regression target."
+      ]
+    },
+    {
+      "case_id": "mesh-memory-search-fallback",
+      "repository": "mesh",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Add a feature that makes Mesh memory search expose whether results came from Pinecone or local fallback, and cover it in the server smoke test.",
+      "expected_edit_targets": ["server.js"],
+      "expected_test_targets": ["scripts/server-smoke-test.js"],
+      "expected_config_targets": ["lib/config.js"],
+      "required_observations": [
+        {
+          "label": "memory_search_endpoint_exists",
+          "any_of": [["/api/memory/search", "handleMemorySearch"], ["memorySearchResponse", "local"]]
+        },
+        {
+          "label": "fallback_reason_is_reported",
+          "any_of": [["Missing Pinecone or Gemini embedding credentials", "local"], ["Pinecone unavailable", "local fallback"]]
+        },
+        {
+          "label": "smoke_test_indexes_and_searches_memory",
+          "any_of": [["searchPayload", "mesh:stored-doc"], ["searchResponse", "statusCode"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts in server.js memory search response handling.",
+        "Checks config credential gates.",
+        "Updates the server smoke test around index/search behavior."
+      ]
+    },
+    {
+      "case_id": "mesh-live-log-empty-segments",
+      "repository": "mesh",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Add test coverage and polish for the Mesh live logging endpoint when no speech segments are captured yet.",
+      "expected_edit_targets": ["server.js"],
+      "expected_test_targets": ["scripts/server-smoke-test.js"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "live_log_endpoint_exists",
+          "any_of": [["handleLiveLog", "segments"], ["segment_count", "segments"]]
+        },
+        {
+          "label": "empty_transcript_returns_none_fallback",
+          "any_of": [["No speech has been captured yet", "fallback"], ["meeting: null", "source: \"none\""]]
+        },
+        {
+          "label": "smoke_test_pattern_uses_request_helper",
+          "any_of": [["request(port"], ["assert.equal", "statusCode"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts from handleLiveLog.",
+        "Adds a smoke assertion for the empty segment behavior.",
+        "Preserves the existing normalized response shape."
+      ]
+    },
+    {
+      "case_id": "mesh-extraction-heuristic-fallback",
+      "repository": "mesh",
+      "budget": 6000,
+      "top_k": 30,
+      "task": "Improve Mesh transcript extraction fallback tests so local heuristic extraction remains useful when Gemini is unavailable, including decisions, action items, topics, and blockers.",
+      "expected_edit_targets": ["lib/extraction.js"],
+      "expected_test_targets": ["scripts/smoke-test.js"],
+      "expected_config_targets": ["lib/config.js"],
+      "required_observations": [
+        {
+          "label": "extract_meeting_has_gemini_fallback",
+          "any_of": [["extractMeeting", "Gemini extraction failed"], ["fallback", "heuristic"]]
+        },
+        {
+          "label": "heuristic_extracts_meeting_entities",
+          "any_of": [["extractDecisions", "extractActions"], ["extractTopics", "extractProjects"], ["extractBlockers", "severity"]]
+        },
+        {
+          "label": "smoke_test_imports_extraction_helpers",
+          "any_of": [["require(\"../lib/extraction\")"], ["extractMeeting", "assert"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts in lib/extraction.js.",
+        "Keeps Gemini unavailable behavior deterministic.",
+        "Extends scripts/smoke-test.js."
+      ]
+    },
+    {
+      "case_id": "signalfoundry-upload-limit-smoke",
+      "repository": "signalfoundry",
+      "budget": 6000,
+      "top_k": 30,
+      "task": "Add or refine SignalFoundry upload limit behavior so oversized uploads return the configured byte limit and are covered by the server smoke test.",
+      "expected_edit_targets": ["tools/serve.js"],
+      "expected_test_targets": ["tools/server-smoke-test.js"],
+      "expected_config_targets": ["package.json"],
+      "required_observations": [
+        {
+          "label": "serve_has_configurable_upload_limit",
+          "any_of": [["MAX_UPLOAD_BYTES", "defaultMaxUploadBytes"], ["formatByteLimit", "bytes"]]
+        },
+        {
+          "label": "smoke_test_checks_oversized_upload",
+          "any_of": [["oversizedUpload", "413"], ["Upload is larger than the 1 byte local limit"]]
+        },
+        {
+          "label": "package_runs_server_smoke_test",
+          "any_of": [["\"test\"", "server-smoke-test"], ["\"check\"", "tools/serve.js"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts in tools/serve.js upload body limit handling.",
+        "Updates tools/server-smoke-test.js.",
+        "Keeps npm test/check wiring intact."
+      ]
+    },
+    {
+      "case_id": "signalfoundry-clean-export-response",
+      "repository": "signalfoundry",
+      "budget": 6000,
+      "top_k": 30,
+      "task": "Expose cleaned export status and output URLs consistently in SignalFoundry's upload API and upload panel.",
+      "expected_edit_targets": ["tools/serve.js", "app.js"],
+      "expected_test_targets": ["tools/server-smoke-test.js"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "server_builds_clean_export_entry",
+          "any_of": [["outputUrl", "storage/exports"], ["cleanMedia", "buildCleaningPlan"]]
+        },
+        {
+          "label": "ui_reads_cleaning_plan_and_status",
+          "any_of": [["payload.cleaningPlan.plan", "cleanStatus"], ["Cleaned export ready", "cleaningPlan"]]
+        },
+        {
+          "label": "smoke_test_uploads_video_body",
+          "any_of": [["upload(port", "/api/uploads"], ["content-type", "video/mp4"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Touches both API response and browser upload state.",
+        "Covers the upload path with the server smoke test.",
+        "Preserves local fallback when FFmpeg is unavailable."
+      ]
+    },
+    {
+      "case_id": "signalfoundry-agent-fleet-endpoint",
+      "repository": "signalfoundry",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Add smoke coverage for SignalFoundry's agent fleet endpoint and make sure it reads the agent-fleet config safely.",
+      "expected_edit_targets": ["tools/serve.js"],
+      "expected_test_targets": ["tools/server-smoke-test.js"],
+      "expected_config_targets": ["data/agent-fleet.json"],
+      "required_observations": [
+        {
+          "label": "agent_endpoint_reads_config",
+          "any_of": [["/api/agents", "agent-fleet.json"], ["agentsPath", "sendJson"]]
+        },
+        {
+          "label": "agent_fleet_has_upload_lane",
+          "any_of": [["\"id\": \"uploads\"", "write_boundary"], ["\"owns\"", "drag/drop"]]
+        },
+        {
+          "label": "method_not_allowed_pattern_exists",
+          "any_of": [["sendMethodNotAllowed", "allowedMethods"], ["Timed out waiting", "startServer"], ["request(port", "405"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts at /api/agents in tools/serve.js.",
+        "Uses data/agent-fleet.json as the schema/config target.",
+        "Adds endpoint coverage beside the existing method checks."
+      ]
+    },
+    {
+      "case_id": "application-tracker-autofill-safe-field",
+      "repository": "application-tracker",
+      "budget": 6000,
+      "top_k": 30,
+      "task": "Add a safe autofill field type to Application Tracker while preserving the plan-only review boundary and sensitive-field blockers.",
+      "expected_edit_targets": ["lib/form-autofill.mjs"],
+      "expected_test_targets": ["tests/form-autofill.test.mjs"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "autofill_classifies_safe_fields",
+          "any_of": [["buildAutofillPlan", "CLASSIFICATIONS.SAFE"], ["classifyFormField", "proposedValue"]]
+        },
+        {
+          "label": "tests_cover_sensitive_and_review_fields",
+          "any_of": [["unknown required controls", "blockers"], ["CLASSIFICATIONS.REVIEW", "proposedValue"]]
+        },
+        {
+          "label": "plan_only_review_boundary_exists",
+          "any_of": [["maySubmit", "false"], ["reviewBoundary", "finalSubmitExcluded"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts in lib/form-autofill.mjs classification rules.",
+        "Adds focused tests in tests/form-autofill.test.mjs.",
+        "Does not weaken human review and non-submit guarantees."
+      ]
+    },
+    {
+      "case_id": "application-tracker-job-fetch-fallback",
+      "repository": "application-tracker",
+      "budget": 6000,
+      "top_k": 30,
+      "task": "Improve Application Tracker's job URL scan fallback so blocked or unsafe job boards return a clear paste-description recovery message.",
+      "expected_edit_targets": ["server.mjs", "lib/job-application-pipeline.mjs"],
+      "expected_test_targets": ["tests/job-application-pipeline.test.mjs"],
+      "expected_config_targets": [],
+      "required_observations": [
+        {
+          "label": "server_returns_paste_description_fallback",
+          "any_of": [["Paste the job description text", "JOB_FETCH_FAILED"], ["fallback", "job board blocks local fetching"]]
+        },
+        {
+          "label": "pipeline_validates_fetchable_urls",
+          "any_of": [["validateFetchableJobUrl", "assertPublicHostname"], ["private address", "public job page"]]
+        },
+        {
+          "label": "tests_cover_unsafe_job_urls",
+          "any_of": [["rejects unsafe job URLs before fetch"], ["file:///etc/passwd", "localhost"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Touches both server error mapping and URL validation helpers.",
+        "Keeps unsafe/private hosts blocked.",
+        "Extends deterministic node:test coverage."
+      ]
+    },
+    {
+      "case_id": "application-tracker-project-status-summary",
+      "repository": "application-tracker",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Add project-status summary polish that highlights stale active tasks and blocked tasks without changing completed task semantics.",
+      "expected_edit_targets": ["lib/project-status.mjs"],
+      "expected_test_targets": ["tests/project-status.test.mjs"],
+      "expected_config_targets": ["data/project-status.template.json"],
+      "required_observations": [
+        {
+          "label": "project_status_normalizes_registry",
+          "any_of": [["normalizeProjectStatus", "summarizeProjectStatus"], ["deriveOverallProgress", "status"]]
+        },
+        {
+          "label": "tests_cover_stale_and_blocked_tasks",
+          "any_of": [["identifies stale active tasks", "excludes completed tasks"], ["reports blocked tasks", "blocker text"]]
+        },
+        {
+          "label": "template_registry_exists",
+          "any_of": [["project-status.template.json"], ["tasks", "status"]]
+        }
+      ],
+      "answer_plan_rubric": [
+        "Starts in lib/project-status.mjs.",
+        "Uses the template data shape as config context.",
+        "Keeps completed task immutability covered by tests."
+      ]
+    }
+  ],
+  "acceptance": {
+    "minimum_edit_target_recall": 0.9,
+    "minimum_test_target_recall": 0.8,
+    "minimum_required_observation_recall": 0.8,
+    "minimum_answer_plan_pass_rate": 0.8,
+    "minimum_median_token_reduction_percent": 85.0
+  }
+}
