@@ -17,6 +17,7 @@ from agenvantage.tokenizer import TokenCounter
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_USE_CASE_JSON = REPO_ROOT / "artifacts" / "use-case-validation.json"
 DEFAULT_PROVIDER_JSON = REPO_ROOT / "artifacts" / "provider-validation.json"
+DEFAULT_FEATURE_PROVIDER_JSON = REPO_ROOT / "artifacts" / "feature-provider-validation.json"
 DEFAULT_PROVIDER_FIXTURE = REPO_ROOT / "examples" / "provider_validation_cases.json"
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "artifacts" / "claim-status.json"
 DEFAULT_OUTPUT_MD = REPO_ROOT / "docs" / "claim-status.md"
@@ -78,24 +79,31 @@ def _unsupported_claim(
 def build_claim_status_report(
     use_case_report: dict[str, Any] | None,
     provider_report: dict[str, Any] | None,
+    feature_provider_report: dict[str, Any] | None,
     provider_dataset: Any,
     provider_fixture_report: dict[str, Any],
 ) -> dict[str, Any]:
     narrow_claim = _narrow_claim_status(use_case_report)
     use_case_summary = (use_case_report or {}).get("summary", {})
 
-    if provider_report is not None:
+    provider_source = "provider-validation"
+    active_provider_report = provider_report
+    if active_provider_report is None and feature_provider_report is not None:
+        active_provider_report = feature_provider_report
+        provider_source = "feature-provider-validation"
+
+    if active_provider_report is not None:
         provider_summary = summarize_saved_provider_validation_report(
-            provider_report,
+            active_provider_report,
             dataset=provider_dataset,
         )
         claim_audit = provider_summary.get("claim_audit", {})
         environment_scope = provider_summary.get("environment_scope")
         provider_evidence = [
-            f"Provider validation artifact present with {provider_summary.get('record_count', 0)} recorded requests.",
+            f"{provider_source} artifact present with {provider_summary.get('record_count', 0)} recorded requests.",
             f"Environment scope: {environment_scope or 'unknown'}.",
         ]
-        cost_reconciliation = provider_report.get("cost_reconciliation")
+        cost_reconciliation = active_provider_report.get("cost_reconciliation")
         if isinstance(cost_reconciliation, dict):
             provider_evidence.append(
                 "Cost reconciliation data is present for request-level versus organization-level spend."
@@ -196,6 +204,7 @@ def build_claim_status_report(
         "narrow_supported_claim": narrow_claim,
         "use_case_validation_summary": use_case_summary or None,
         "provider_fixture_readiness": provider_fixture_report,
+        "provider_evidence_source": provider_source if active_provider_report is not None else None,
         "provider_validation_summary": provider_summary,
         "resume_claims": resume_claims,
     }
@@ -276,6 +285,11 @@ def main() -> None:
     )
     parser.add_argument("--use-case-json", type=Path, default=DEFAULT_USE_CASE_JSON)
     parser.add_argument("--provider-json", type=Path, default=DEFAULT_PROVIDER_JSON)
+    parser.add_argument(
+        "--feature-provider-json",
+        type=Path,
+        default=DEFAULT_FEATURE_PROVIDER_JSON,
+    )
     parser.add_argument("--provider-fixture", type=Path, default=DEFAULT_PROVIDER_FIXTURE)
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--output-md", type=Path, default=DEFAULT_OUTPUT_MD)
@@ -283,12 +297,14 @@ def main() -> None:
 
     use_case_report = _load_json(args.use_case_json)
     provider_report = _load_json(args.provider_json)
+    feature_provider_report = _load_json(args.feature_provider_json)
 
     dataset = load_provider_validation_dataset(args.provider_fixture)
     provider_fixture = fixture_readiness_report(dataset, TokenCounter())
     report = build_claim_status_report(
         use_case_report,
         provider_report,
+        feature_provider_report,
         dataset,
         provider_fixture,
     )

@@ -410,6 +410,41 @@ def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     assert "redis" in report["covered_query_terms"]
 
 
+def test_context_package_redacts_secret_values_before_rendering(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    raw_secret = "sk-prod1234567890abcdef"
+    raw_bearer = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    (tmp_path / "src" / "payment.ts").write_text(
+        "export const paymentConfig = {\n"
+        f"  OPENAI_API_KEY: \"{raw_secret}\",\n"
+        f"  Authorization: \"Bearer {raw_bearer}\",\n"
+        "  endpoint: \"https://api.example.test/payments\"\n"
+        "};\n",
+        encoding="utf-8",
+    )
+
+    markdown, report = build_context_package(
+        tmp_path,
+        "Explain payment config api key handling",
+        budget=700,
+        counter=TokenCounter(),
+        include_full_scan_prompt=True,
+    )
+
+    selected_chunk = report["selected_chunks"][0]
+    assert raw_secret not in markdown
+    assert raw_bearer not in markdown
+    assert raw_secret not in report["full_scan_prompt_markdown"]
+    assert raw_bearer not in report["full_scan_prompt_markdown"]
+    assert "OPENAI_API_KEY" in markdown
+    assert "[REDACTED_OPENAI_KEY]" in markdown
+    assert "Bearer [REDACTED_BEARER_TOKEN]" in markdown
+    assert selected_chunk["redaction_count"] == 2
+    assert selected_chunk["redaction_types"] == ["bearer_token", "openai_api_key"]
+    assert report["safety"]["selected_secret_redaction_count"] == 2
+    assert report["safety"]["candidate_secret_redaction_count"] == 2
+
+
 def test_context_package_excludes_weak_single_term_noise(tmp_path: Path) -> None:
     create_sample_repo(tmp_path)
     (tmp_path / "src" / "dummy.test.ts").write_text(

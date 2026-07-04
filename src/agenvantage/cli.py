@@ -14,6 +14,12 @@ from agenvantage import __version__
 from agenvantage.config import PackConfig, load_pack_config
 from agenvantage.env import load_dotenv
 from agenvantage.experiment import load_scenario, run_experiment
+from agenvantage.feature_provider_validation import (
+    feature_provider_fixture_readiness_report,
+    load_feature_provider_dataset,
+    run_feature_provider_validation,
+    summarize_saved_feature_provider_validation_report,
+)
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
     fixture_readiness_report,
@@ -32,6 +38,13 @@ from agenvantage.repo_context import (
     build_multi_repo_context_package,
     write_package_outputs,
 )
+from agenvantage.session import (
+    build_session_task,
+    create_feature_session,
+    default_session_path,
+    load_session_artifact,
+    save_session_artifact,
+)
 from agenvantage.telemetry import configure_console_tracing, flush_tracing
 from agenvantage.tokenizer import TokenCounter
 
@@ -39,6 +52,8 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
 _DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
 _DEFAULT_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "provider_validation_cases.json"
+_DEFAULT_FEATURE_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "feature_work_validation_cases.json"
+_DEFAULT_REPOS_ROOT = _PACKAGE_ROOT.parent
 _DEFAULT_BUDGET = 360
 _DEFAULT_DEMO_OUTPUT = _PACKAGE_ROOT / "artifacts" / "oncall-report.json"
 _DEFAULT_PACK_BUDGET = 6000
@@ -244,6 +259,117 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    validate_feature_provider = subparsers.add_parser(
+        "validate-feature-provider",
+        help="Run or summarize provider-backed validation for feature-work context packing.",
+        description=(
+            "Compare full-scan, AgenVantage-packed, and cache-aligned feature-work "
+            "prompts with provider usage, request cost, latency, and deterministic "
+            "answer-plan grading."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_FEATURE_PROVIDER_FIXTURE,
+        help=(
+            "Feature-work validation fixture JSON "
+            f"(default: {_DEFAULT_FEATURE_PROVIDER_FIXTURE.relative_to(_PACKAGE_ROOT)})."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--repos-root",
+        type=Path,
+        default=_DEFAULT_REPOS_ROOT,
+        help=f"Directory containing benchmark repositories (default: {_DEFAULT_REPOS_ROOT}).",
+    )
+    validate_feature_provider.add_argument(
+        "--pricing",
+        type=Path,
+        help="Versioned pricing snapshot JSON used to compute request cost.",
+    )
+    validate_feature_provider.add_argument(
+        "--records",
+        type=Path,
+        help="Optional JSON output path for raw request records and summary.",
+    )
+    validate_feature_provider.add_argument(
+        "--replay",
+        type=Path,
+        help="Summarize a previously saved feature-provider validation JSON report.",
+    )
+    validate_feature_provider.add_argument(
+        "--normalize",
+        type=Path,
+        help=(
+            "Normalize raw request records or OTLP-style span exports into a "
+            "provider-validation summary without calling a provider."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build prompt variants and token metrics locally without making provider calls.",
+    )
+    validate_feature_provider.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a human-readable summary instead of raw JSON.",
+    )
+    validate_feature_provider.add_argument(
+        "--trace-console",
+        action="store_true",
+        help="Print OpenTelemetry feature-provider spans to the console.",
+    )
+    validate_feature_provider.add_argument(
+        "--model",
+        default="gpt-4o-mini",
+        help="Provider model identifier for live validation.",
+    )
+    validate_feature_provider.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Number of times to run each case/policy combination.",
+    )
+    validate_feature_provider.add_argument(
+        "--max-cases",
+        type=int,
+        default=None,
+        help="Optional limit on the number of feature cases to run.",
+    )
+    validate_feature_provider.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable holding the OpenAI API key.",
+    )
+    validate_feature_provider.add_argument(
+        "--base-url",
+        default="https://api.openai.com/v1",
+        help="Responses API base URL.",
+    )
+    validate_feature_provider.add_argument(
+        "--environment-scope",
+        default=None,
+        help=(
+            "Optional evidence scope override such as local_feature_work or production. "
+            "Use only when the saved artifact came from that environment."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--reconcile-costs",
+        type=Path,
+        help=(
+            "Optional OpenAI Costs API export used to reconcile request-level "
+            "estimated costs against organization-level recorded costs."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--otel-export",
+        type=Path,
+        help="Optional OTLP-style JSON export path for the feature-provider records.",
+    )
+
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
     view.add_argument(
         "--report",
@@ -334,6 +460,79 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Copy the Markdown context package to the system clipboard.",
     )
+
+    session = subparsers.add_parser(
+        "session",
+        help="Create and reuse cache-aligned feature-work context sessions.",
+        description=(
+            "Split feature-work context into a stable reusable prefix and small "
+            "dynamic task packets for repeated agent prompts."
+        ),
+    )
+    session_subparsers = session.add_subparsers(dest="session_command", required=True)
+
+    session_init = session_subparsers.add_parser(
+        "init",
+        help="Create a cache-aligned feature session artifact from local repository context.",
+    )
+    session_init.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    session_init.add_argument("--task", required=True, help="Initial feature task.")
+    session_init.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe for the initial context package (default: feature).",
+    )
+    session_init.add_argument("--budget", type=int, default=None)
+    session_init.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    session_init.add_argument("--top-k", type=int, default=None)
+    session_init.add_argument("--include-diff", action="store_true")
+    session_init.add_argument("--include-log", action="store_true")
+    session_init.add_argument("--include-glob", action="append", default=[])
+    session_init.add_argument("--exclude-glob", action="append", default=[])
+    session_init.add_argument("--session-id", help="Optional stable session identifier.")
+    session_init.add_argument(
+        "--output",
+        type=Path,
+        help="Session JSON output path (default: <repo>/.agenvantage/sessions/<id>.json).",
+    )
+    session_init.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print the full session artifact as JSON.",
+    )
+
+    session_task = session_subparsers.add_parser(
+        "task",
+        help="Build a dynamic task packet from an existing feature session.",
+    )
+    session_task.add_argument("--session", type=Path, required=True, help="Session JSON path.")
+    session_task.add_argument("--task", required=True, help="Follow-up task for the session.")
+    session_task.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    session_task.add_argument("--output", type=Path, help="Optional Markdown prompt output.")
+    session_task.add_argument("--manifest", type=Path, help="Optional JSON task manifest output.")
+    session_task.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print only the cache-aligned prompt Markdown.",
+    )
+    session_task.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print the full task artifact as JSON.",
+    )
+    session_task.add_argument(
+        "--copy",
+        action="store_true",
+        help="Copy the cache-aligned prompt to the system clipboard.",
+    )
     return parser
 
 
@@ -379,6 +578,7 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
 
     provenance = report.get("provenance", {})
     prompt_accounting = report.get("prompt_token_accounting", {})
+    safety = report.get("safety", {})
     lines = [
         "AgenVantage context package",
         "",
@@ -418,6 +618,11 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
         lines.append(
             f"Provenance: {', '.join(bits)} "
             f"({provenance.get('selected_provenance_tokens', 0)} tokens)"
+        )
+    if safety.get("selected_secret_redaction_count"):
+        lines.append(
+            "Safety: "
+            f"redacted {safety['selected_secret_redaction_count']} secret-looking value(s)"
         )
     if report.get("uncovered_query_terms"):
         lines.append(f"Uncovered concepts: {', '.join(report['uncovered_query_terms'])}")
@@ -654,6 +859,116 @@ def _format_provider_fixture_summary(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_feature_provider_fixture_summary(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    policy_summary = summary.get("policies", {})
+    lines = [
+        "AgenVantage feature-provider fixture",
+        "",
+        f"Dataset: {report['dataset_id']}",
+        f"Cases: {report['case_count']}",
+        f"Environment scope: {report['environment_scope']}",
+        (
+            "Median prompt reduction: "
+            f"{summary.get('median_agenvantage_prompt_reduction_percent', 0.0)}% "
+            "for AgenVantage packed vs full scan"
+        ),
+        (
+            "Median prompts: "
+            f"full-scan={summary.get('median_full_scan_prompt_tokens', 0.0)} "
+            f"agenvantage={summary.get('median_agenvantage_packed_prompt_tokens', 0.0)}"
+        ),
+    ]
+    cost = summary.get("estimated_input_cost")
+    if isinstance(cost, dict):
+        lines.extend(
+            [
+                (
+                    "Estimated input cost: "
+                    f"full-scan cold=${cost.get('median_full_unaligned_cold_input_cost_usd', 0.0):.8f} "
+                    f"packed warm=${cost.get('median_budgeted_cache_aligned_warm_input_cost_usd', 0.0):.8f}"
+                ),
+                (
+                    "Estimated warm input savings: "
+                    f"{cost.get('median_budgeted_cache_aligned_warm_input_cost_reduction_percent', 0.0)}% "
+                    "median vs full-scan cold input"
+                ),
+            ]
+        )
+    lines.extend(
+        [
+        (
+            "Cache-ready packed cases: "
+            f"{summary.get('cache_aligned_eligible_cases', 0)}/{report['case_count']} "
+            f"(minimum stable prefix {report['minimum_cacheable_prefix_tokens']})"
+        ),
+        "",
+        "Policy readiness:",
+        ]
+    )
+    for policy_id in (
+        "full_unaligned",
+        "full_cache_aligned",
+        "budgeted_unaligned",
+        "budgeted_cache_aligned",
+    ):
+        policy = policy_summary.get(policy_id)
+        if not isinstance(policy, dict):
+            continue
+        lines.append(
+            "  "
+            f"{policy_id:<22} "
+            f"median_tokens={policy.get('median_local_prompt_tokens', 0.0):<9} "
+            f"stable={policy.get('median_stable_prefix_tokens', 0.0):<8} "
+            f"reduction={policy.get('median_prompt_reduction_percent_vs_full_scan', 0.0)}% "
+            f"cache_ready={policy.get('cache_eligible_case_count', 0)}/{report['case_count']}"
+        )
+    return "\n".join(lines)
+
+
+def _format_feature_provider_validation_summary(report: dict[str, Any]) -> str:
+    lines = [
+        "AgenVantage feature-provider validation",
+        "",
+        f"Dataset: {report.get('dataset_id') or 'replay'}",
+        f"Records: {report.get('record_count', 0)}",
+    ]
+    prompt = report.get("prompt_readiness")
+    if isinstance(prompt, dict):
+        lines.extend(
+            [
+                (
+                    "Prompt reduction: "
+                    f"{prompt.get('median_agenvantage_prompt_reduction_percent', 0.0)}% "
+                    "median AgenVantage packed vs full scan"
+                ),
+                (
+                    "Median prompts: "
+                    f"full-scan={prompt.get('median_full_scan_prompt_tokens', 0.0)} "
+                    f"agenvantage={prompt.get('median_agenvantage_packed_prompt_tokens', 0.0)}"
+                ),
+            ]
+        )
+        cost = prompt.get("estimated_input_cost")
+        if isinstance(cost, dict):
+            lines.extend(
+                [
+                    (
+                        "Estimated input cost: "
+                        f"full-scan cold=${cost.get('median_full_unaligned_cold_input_cost_usd', 0.0):.8f} "
+                        f"packed warm=${cost.get('median_budgeted_cache_aligned_warm_input_cost_usd', 0.0):.8f}"
+                    ),
+                    (
+                        "Estimated warm input savings: "
+                        f"{cost.get('median_budgeted_cache_aligned_warm_input_cost_reduction_percent', 0.0)}% "
+                        "median vs full-scan cold input"
+                    ),
+                ]
+            )
+    lines.extend(["", _format_provider_validation_summary(report)])
+    return "\n".join(lines)
+
+
 def _copy_to_clipboard(text: str) -> bool:
     if sys.platform == "darwin":
         commands = [["pbcopy"]]
@@ -728,7 +1043,11 @@ def _run_experiment(
     return report
 
 
-def _resolve_pack_settings(args: argparse.Namespace) -> dict[str, Any]:
+def _resolve_pack_settings(
+    args: argparse.Namespace,
+    *,
+    default_preset: str = DEFAULT_PRESET,
+) -> dict[str, Any]:
     repos = args.repo if args.repo else [Path(".")]
     config: PackConfig = load_pack_config(list(repos) + [Path(".")])
 
@@ -739,7 +1058,7 @@ def _resolve_pack_settings(args: argparse.Namespace) -> dict[str, Any]:
     top_k = args.top_k if args.top_k is not None else config.top_k
     if top_k is None:
         top_k = _DEFAULT_PACK_TOP_K
-    preset_name = args.preset or config.preset or DEFAULT_PRESET
+    preset_name = args.preset or config.preset or default_preset
     preset = get_preset(preset_name)
 
     include_globs = tuple(config.include_glob) + tuple(args.include_glob)
@@ -828,6 +1147,134 @@ def _run_pack(args: argparse.Namespace) -> None:
             print()
             for notice in notices:
                 print(notice)
+
+
+def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
+    cache = session.get("cache", {})
+    prompt_accounting = session.get("prompt_token_accounting", {})
+    lines = [
+        "AgenVantage feature session",
+        "",
+        f"Session: {session['session_id']}",
+        f"Output:  {output.resolve()}",
+        f"Repos:   {len(session.get('repo_paths', []))}",
+        f"Stable prefix: {cache.get('stable_prefix_tokens', 0)} tokens",
+        f"Initial dynamic packet: {cache.get('initial_dynamic_packet_tokens', 0)} tokens",
+        f"Initial prompt: {cache.get('initial_prompt_tokens', 0)} tokens",
+        (
+            "Cache eligible: "
+            f"{cache.get('cache_eligible')} "
+            f"(minimum {cache.get('minimum_cacheable_prefix_tokens', 0)} stable-prefix tokens)"
+        ),
+        f"Reusable prefix share: {cache.get('initial_reusable_prefix_percent', 0.0)}%",
+    ]
+    if prompt_accounting:
+        lines.append(
+            "Packed vs full scan: "
+            f"{prompt_accounting.get('packed_prompt_tokens', 0)} / "
+            f"{prompt_accounting.get('full_scan_prompt_tokens', 0)} tokens "
+            f"({prompt_accounting.get('prompt_reduction_percent_vs_full_scan', 0.0)}% saved)"
+        )
+    safety = session.get("safety", {})
+    if safety.get("selected_secret_redaction_count"):
+        lines.append(
+            "Safety: "
+            f"redacted {safety['selected_secret_redaction_count']} secret-looking value(s)"
+        )
+    return "\n".join(lines)
+
+
+def _format_session_task_summary(task_artifact: dict[str, Any]) -> str:
+    cache = task_artifact["cache"]
+    return "\n".join(
+        [
+            "AgenVantage feature session task",
+            "",
+            f"Session: {task_artifact.get('session_id')}",
+            f"Stable prefix: {cache['stable_prefix_tokens']} tokens",
+            f"Dynamic packet: {cache['dynamic_packet_tokens']} tokens",
+            f"Prompt: {cache['prompt_tokens']} tokens",
+            (
+                "Cache eligible: "
+                f"{cache['cache_eligible']} "
+                f"(minimum {cache['minimum_cacheable_prefix_tokens']} stable-prefix tokens)"
+            ),
+            f"Reusable prefix share: {cache['reusable_prefix_percent']}%",
+            (
+                "Estimated warm-call uncached input: "
+                f"{cache['estimated_uncached_tokens_after_cache_hit']} tokens "
+                "(provider cache hit still must be verified live)"
+            ),
+        ]
+    )
+
+
+def _run_session(args: argparse.Namespace) -> None:
+    if args.session_command == "init":
+        settings = _resolve_pack_settings(args, default_preset="feature")
+        preset = settings["preset"]
+        repos = settings["repos"]
+        counter = TokenCounter(settings["model"])
+        session = create_feature_session(
+            repos,
+            args.task,
+            settings["budget"],
+            counter,
+            top_k=settings["top_k"],
+            instructions=preset.instructions,
+            include_diff=settings["include_diff"],
+            include_log=settings["include_log"],
+            include_globs=settings["include_globs"],
+            exclude_globs=settings["exclude_globs"],
+            session_id=args.session_id,
+        )
+        output = args.output or default_session_path(repos[0], str(session["session_id"]))
+        save_session_artifact(session, output)
+        if args.as_json:
+            print(json.dumps(session, indent=2))
+            print(f"Session written to {output.resolve()}", file=sys.stderr)
+        else:
+            print(_format_session_init_summary(session, output))
+        return
+
+    if args.session_command == "task":
+        session = load_session_artifact(args.session)
+        model = args.model or (session.get("settings") or {}).get("model") or _DEFAULT_PACK_MODEL
+        task_artifact = build_session_task(session, args.task, TokenCounter(model))
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(task_artifact["prompt_markdown"], encoding="utf-8")
+        if args.manifest is not None:
+            _write_report(task_artifact, args.manifest)
+
+        if args.stdout:
+            print(task_artifact["prompt_markdown"])
+        elif args.as_json:
+            print(json.dumps(task_artifact, indent=2))
+        else:
+            print(_format_session_task_summary(task_artifact))
+
+        notices: list[str] = []
+        if args.copy:
+            if _copy_to_clipboard(task_artifact["prompt_markdown"]):
+                notices.append("Session prompt copied to clipboard.")
+            else:
+                notices.append("Could not access a clipboard tool; use --stdout or --output instead.")
+        if args.output is not None:
+            notices.append(f"Session prompt written to {args.output.resolve()}")
+        if args.manifest is not None:
+            notices.append(f"Session task manifest written to {args.manifest.resolve()}")
+        if notices:
+            if args.stdout or args.as_json:
+                for notice in notices:
+                    print(notice, file=sys.stderr)
+            else:
+                print()
+                for notice in notices:
+                    print(notice)
+        return
+
+    raise SystemExit(f"Unknown session command: {args.session_command}")
 
 
 def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
@@ -921,6 +1368,89 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _run_feature_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
+    if args.trace_console:
+        configure_console_tracing()
+
+    counter = TokenCounter(args.model)
+    pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
+
+    if args.replay is not None:
+        if not args.replay.is_file():
+            raise SystemExit(f"Replay report not found: {args.replay}")
+        replay_report = json.loads(args.replay.read_text(encoding="utf-8"))
+        report = summarize_saved_feature_provider_validation_report(
+            replay_report,
+            pricing=pricing,
+            environment_scope=args.environment_scope,
+        )
+    elif args.normalize is not None:
+        if not args.normalize.is_file():
+            raise SystemExit(f"Normalization input not found: {args.normalize}")
+        raw_payload = json.loads(args.normalize.read_text(encoding="utf-8"))
+        report = summarize_normalized_provider_validation_payload(
+            raw_payload,
+            pricing=pricing,
+            environment_scope=args.environment_scope,
+        )
+        report["workflow"] = "feature_provider_validation"
+    else:
+        if not args.fixture.is_file():
+            raise SystemExit(f"Feature-provider fixture not found: {args.fixture}")
+        dataset = load_feature_provider_dataset(args.fixture)
+        if args.dry_run:
+            report = feature_provider_fixture_readiness_report(
+                dataset,
+                args.repos_root,
+                counter,
+                max_cases=args.max_cases,
+                pricing=pricing,
+            )
+        else:
+            if pricing is None:
+                raise SystemExit("Live feature-provider validation requires --pricing.")
+            api_key = os.getenv(args.api_key_env)
+            if not api_key:
+                raise SystemExit(
+                    f"Live feature-provider validation requires {args.api_key_env} to be set."
+                )
+            report = run_feature_provider_validation(
+                dataset,
+                args.repos_root,
+                counter,
+                OpenAIResponsesTransport(api_key=api_key, base_url=args.base_url),
+                args.model,
+                pricing,
+                repeats=args.repeats,
+                max_cases=args.max_cases,
+                environment_scope=args.environment_scope,
+            )
+
+    if args.reconcile_costs is not None:
+        if not args.reconcile_costs.is_file():
+            raise SystemExit(f"Costs reconciliation input not found: {args.reconcile_costs}")
+        costs_payload = json.loads(args.reconcile_costs.read_text(encoding="utf-8"))
+        report["cost_reconciliation"] = reconcile_provider_costs(report, costs_payload)
+
+    if args.summary:
+        if args.dry_run and args.replay is None and args.normalize is None:
+            print(_format_feature_provider_fixture_summary(report))
+        else:
+            print(_format_feature_provider_validation_summary(report))
+    else:
+        print(json.dumps(report, indent=2))
+
+    if args.records is not None:
+        _write_report(report, args.records)
+        print(f"\nReport written to {args.records.resolve()}")
+    if args.otel_export is not None:
+        _write_report(provider_validation_report_to_otel_export(report), args.otel_export)
+        print(f"OTLP-style export written to {args.otel_export.resolve()}")
+
+    flush_tracing()
+    return report
+
+
 def main() -> None:
     load_dotenv()
     args = _parser().parse_args()
@@ -942,8 +1472,14 @@ def main() -> None:
     if args.command == "pack":
         _run_pack(args)
         return
+    if args.command == "session":
+        _run_session(args)
+        return
     if args.command == "validate-provider":
         _run_provider_validation(args)
+        return
+    if args.command == "validate-feature-provider":
+        _run_feature_provider_validation(args)
         return
 
     _run_experiment(

@@ -53,6 +53,32 @@ Feature-work benchmark:
 - Total prompt tokens saved across 12 cases: `1,067,887`
 - Acceptance result: `passed`
 
+Feature-provider dry-run with pricing snapshot:
+
+- Cases: `12`
+- Median full-scan prompt: `80,968.5` tokens
+- Median AgenVantage packed prompt: `5,952.5` tokens
+- Median prompt reduction: `90.85%`
+- Median estimated full-scan cold input cost: `$0.02024212`
+- Median estimated packed warm input cost: `$0.00015538`
+- Median estimated warm input savings: `99.23%`
+- Total estimated full-scan cold input cost: `$0.30612`
+- Total estimated packed warm input cost: `$0.00184323`
+- Cost scope: theoretical input-only estimate from a saved pricing snapshot,
+  not provider-billed usage
+
+Session cache-readiness benchmark:
+
+- Cases: `12`
+- Cache-eligible rate: `1.0`
+- Median stable prefix: `5,907.5` tokens
+- Median dynamic packet: `89.5` tokens
+- Median full-scan prompt: `80,946.5` tokens
+- Median reusable prefix: `98.47%`
+- Median estimated warm reduction versus full scan: `99.86%`
+- Total estimated warm tokens saved versus full scan: `1,236,065`
+- Acceptance result: `passed`
+
 Practical Mesh feature validation:
 
 - Feature: add memory-search diagnostics to `POST /api/memory/search`
@@ -92,8 +118,9 @@ Regression/use-case benchmark:
 
 Automated test validation:
 
-- `./.venv/bin/pytest`: `81 passed`
+- `./.venv/bin/pytest`: `91 passed`
 - Feature-work validation acceptance: `passed`
+- Session cache-readiness validation acceptance: `passed`
 - Mesh feature validation:
   - `node --check server.js`: passed
   - `node --check scripts/server-smoke-test.js`: passed
@@ -123,6 +150,12 @@ More conservative public-project bullet:
 
 ```text
 Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 90.9% across 12 annotated tasks while maintaining full edit-target recall and full required-observation coverage.
+```
+
+Cache-readiness bullet:
+
+```text
+Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 5.9K-token median stable prefixes, 89.5-token median dynamic packets, and 98.47% reusable-prefix share.
 ```
 
 ## Interview Explanation
@@ -162,10 +195,14 @@ implementation.
 
 - Feature benchmark JSON: `artifacts/feature-work-validation.json`
 - Feature benchmark Markdown: `artifacts/feature-work-validation.md`
+- Feature provider dry-run report:
+  `artifacts/feature-provider-validation-dry-run.json`
+- Session cache-readiness JSON: `artifacts/session-cache-validation.json`
+- Session cache-readiness Markdown: `artifacts/session-cache-validation.md`
 - Mesh context-vs-plain comparison:
   `artifacts/mesh-context-vs-plain-feature-validation.md`
 - Feature benchmark fixture: `examples/feature_work_validation_cases.json`
 - Feature benchmark runner: `benchmarks/feature_work_validation.py`
+- Session cache benchmark runner: `benchmarks/session_cache_validation.py`
 - Mesh PR: <https://github.com/nicholas-tayag/mesh/pull/1>
 - AgenVantage PR: <https://github.com/nicholas-tayag/token-optimization/pull/2>
-

@@ -261,6 +261,7 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
         "candidate_chunks": 9,
         "uncovered_query_terms": ["retry"],
         "provenance": {"enabled": True, "include_diff": True, "include_log": False, "selected_provenance_tokens": 40},
+        "safety": {"selected_secret_redaction_count": 2},
         "selected_chunks": [
             {"path": "src/rate_limiter.py", "tokens": 300},
             {"path": "src/rate_limiter.py", "tokens": 100},
@@ -275,6 +276,7 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
     assert "75.0%" in summary
     assert "Prompt tokens: user=5 full-scan=2048 packed=512" in summary
     assert "Prompt savings: 1536 tokens (75.0%)" in summary
+    assert "Safety: redacted 2 secret-looking value(s)" in summary
     assert "Uncovered concepts: retry" in summary
     assert "src/rate_limiter.py" in summary
 

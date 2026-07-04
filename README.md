@@ -24,6 +24,9 @@ The current local workflow provides:
   optional `.agenvantage.toml` project defaults;
 - git-aware source scanning that includes tracked files plus untracked,
   non-ignored worktree files while still avoiding dependency folders and `.env` files;
+- deterministic redaction of secret-looking values inside otherwise eligible
+  files before ranking or rendering, with redaction counts surfaced in
+  manifests and summaries;
 - a persistent local repository-metadata index that caches per-file symbols,
   line-addressed symbol occurrences, local imports, and reverse import edges
   outside the worktree for reuse across runs;
@@ -51,7 +54,12 @@ The current local workflow provides:
   latency, and deterministic grading data when credentials and a pricing
   snapshot are supplied, with readiness reporting for claim-sufficiency gaps
   and paired-bootstrap reporting for measured deltas, plus optional Costs API
-  reconciliation; and
+  reconciliation;
+- an experimental `agenvantage validate-feature-provider` workflow that compares
+  full-scan, AgenVantage-packed, and cache-aligned feature-work prompts against
+  provider usage and deterministic answer-plan grading; and
+- a cache-aware `agenvantage session` workflow that freezes stable feature
+  context once and emits smaller dynamic task packets for repeated prompts; and
 - a typed context-policy experiment harness for controlled synthetic cases.
 
 The experiment harness also provides:
@@ -118,6 +126,7 @@ If `python` is not available, install Python 3.10+ or use
 agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
 agenvantage validate-provider --dry-run --summary
+agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 agenvantage view --report artifacts/oncall-report.json
 make test
 ```
@@ -127,6 +136,11 @@ fixture is actually cache-eligible before any API spend. The current fixture
 contains `30` distinct cases across `6` failure types, produces a `1066`-token
 stable prefix for cache-aligned runs, and applies enough budget pressure to
 reduce selected context by about `12.82%` on average in the dry run.
+
+`validate-feature-provider --dry-run` compares full-scan and AgenVantage-packed
+feature-work prompts without making API calls. When a pricing snapshot is
+provided, it also reports estimated cold and warm input-only cost deltas; these
+are planning metrics, not billed-provider proof.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see
@@ -222,6 +236,32 @@ agenvantage pack \
 
 See [docs/prd-developer-workflow.md](docs/prd-developer-workflow.md) for the
 product requirements behind this workflow.
+
+### Cache-aware feature sessions
+
+For repeated work on the same feature, initialize a stable context prefix once:
+
+```bash
+agenvantage session init \
+  --repo . \
+  --task "Add memory search diagnostics and test coverage." \
+  --output .agenvantage/sessions/memory-search.json
+```
+
+Then create follow-up prompts that reuse the same stable prefix and append only
+the new task packet:
+
+```bash
+agenvantage session task \
+  --session .agenvantage/sessions/memory-search.json \
+  --task "Add an empty-result diagnostic counter." \
+  --stdout
+```
+
+The session report shows stable-prefix tokens, dynamic-packet tokens, whether
+the prefix is cache-eligible, and the estimated warm-call uncached token count.
+Actual cache hits and billed savings still require provider usage metadata from
+a live run.
 
 Write a report and display OpenTelemetry spans locally:
 

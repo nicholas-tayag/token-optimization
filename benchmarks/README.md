@@ -217,3 +217,43 @@ currently unsupported claims, see
 [docs/proof-resource-pack.md](../docs/proof-resource-pack.md) and the
 machine-readable manifest
 [examples/proof_resources.json](../examples/proof_resources.json).
+
+## Session Cache Validation
+
+`session_cache_validation.py` checks the repeated feature-work cache layout
+before any provider spend. It reuses the feature-work fixture, creates one
+cache-aware feature session per case, emits one follow-up task packet, and
+reports:
+
+- `cache_eligible_rate`: whether stable prefixes meet the configured cache
+  threshold.
+- `median_stable_prefix_tokens`: reusable prefix size.
+- `median_dynamic_packet_tokens`: per-turn task packet size after the prefix is
+  frozen.
+- `median_reusable_prefix_percent`: proportion of the follow-up prompt that can
+  remain stable.
+- `median_estimated_warm_reduction_percent_vs_full_scan`: theoretical warm-call
+  input-token reduction versus a full-scan prompt.
+
+Run it with:
+
+```bash
+.venv/bin/python benchmarks/session_cache_validation.py \
+  --output-json artifacts/session-cache-validation.json \
+  --output-md artifacts/session-cache-validation.md \
+  --summary
+```
+
+Current local result from the production-path implementation:
+
+- cases: `12`
+- cache-eligible rate: `1.0`
+- median stable prefix: `5,907.5` tokens
+- median dynamic packet: `89.5` tokens
+- median reusable prefix: `98.47%`
+- median estimated warm reduction versus full scan: `99.86%`
+- total estimated warm tokens saved versus full scan: `1,236,065`
+- acceptance pass: `true`
+
+These are cache-layout readiness metrics. Actual cache hits and billed savings
+still require live provider usage records.
