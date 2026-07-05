@@ -183,6 +183,9 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert "GIST_IMAGE_CONTEXT" in mixed
     image_path = Path(plan["image_attachments"][0]["path"])
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert hashlib.sha256(image_path.read_bytes()).hexdigest() == plan["image_attachments"][0][
+        "sha256"
+    ]
     factsheet_path = Path(plan["factsheets"][0]["text_path"])
     assert factsheet_path.is_file()
     assert hashlib.sha256(factsheet_path.read_bytes()).hexdigest() == plan["factsheets"][0][
@@ -362,3 +365,33 @@ def test_verify_mixed_modality_manifest_reports_factsheet_hash_mismatch(
     assert verification["factsheet_count"] == 1
     assert verification["error_count"] == 1
     assert "Factsheet hash mismatch" in verification["errors"][0]
+
+
+def test_verify_mixed_modality_manifest_reports_image_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "page.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nchanged")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [],
+                "factsheets": [],
+                "image_attachments": [
+                    {
+                        "path": str(image_path),
+                        "sha256": hashlib.sha256(b"\x89PNG\r\n\x1a\noriginal").hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    verification = verify_mixed_modality_manifest(manifest_path)
+
+    assert verification["ok"] is False
+    assert verification["image_attachment_count"] == 1
+    assert verification["error_count"] == 1
+    assert "Image attachment hash mismatch" in verification["errors"][0]

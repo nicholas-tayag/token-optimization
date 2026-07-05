@@ -212,7 +212,7 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "Retrieval reduction is shipped AgenVantage behavior.",
             "Artifact-mode modality reduction is a local text+PNG handoff estimate, not billed provider usage.",
             "Exact edit/test/config/support chunks stay text; imaged blocks are recoverable.",
-            "Generated artifact manifests are verified for recoverable-source hashes, factsheet hashes, and PNG signatures.",
+            "Generated artifact manifests are verified for recoverable-source hashes, factsheet hashes, image hashes, and PNG signatures.",
         ],
     }
 

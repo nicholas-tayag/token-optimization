@@ -964,6 +964,7 @@ def apply_multimodal_pack(
                 "estimated_image_tokens": page.estimated_image_tokens,
                 "char_start": page.char_start,
                 "char_end": page.char_end,
+                "sha256": _sha256_file(page.path),
             }
             for page in rendered_pages
         ]
@@ -1264,6 +1265,13 @@ def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
         header = image_path.read_bytes()[:8]
         if header != b"\x89PNG\r\n\x1a\n":
             errors.append(f"Image attachment is not a PNG: {image_path}")
+        expected_hash = str(image.get("sha256") or "").strip()
+        if expected_hash:
+            actual_hash = _sha256_file(image_path)
+            if actual_hash != expected_hash:
+                errors.append(
+                    f"Image attachment hash mismatch for {image_path}: expected {expected_hash}, got {actual_hash}"
+                )
 
     return {
         "ok": not errors,

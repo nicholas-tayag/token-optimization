@@ -83,9 +83,9 @@ Current local result from July 4, 2026:
 - answer-plan pass rate: `0.8333`
 - median token reduction: `90.93%`
 - median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `5,913.0` tokens
+- median packed prompt: `5,920.5` tokens
 - median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,263,061`
+- total prompt tokens saved across 12 cases: `1,264,321`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -207,7 +207,7 @@ context. It can write PNG context pages, factsheets, and recoverable source
 manifests. It still does not send images to a provider, so the token deltas are
 estimated rather than provider-billed savings. The benchmark verifies every
 generated artifact manifest for recoverable-source hashes, factsheet hashes,
-and PNG signatures.
+image hashes, and PNG signatures.
 
 The estimator is intentionally conservative:
 
@@ -250,14 +250,14 @@ Current local result from July 4, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.41%`
+- full-scan theoretical modality reduction before safety gate: `76.44%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `5,960.0` tokens
+- packed median text prompt: `5,967.5` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `20.12%`
+- packed theoretical modality reduction before safety gate: `20.22%`
 - packed image-candidate rate after safety gate: `0.0`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,263,061`
+- total retrieval tokens saved across 12 cases: `1,264,321`
 - total rough-estimator incremental modality tokens saved after packing: `0`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
@@ -327,7 +327,7 @@ Current local result from the production-path implementation:
 - median dynamic packet: `89.5` tokens
 - median reusable prefix: `98.47%`
 - median estimated warm reduction versus full scan: `99.86%`
-- total estimated warm tokens saved versus full scan: `1,332,635`
+- total estimated warm tokens saved versus full scan: `1,333,910`
 - acceptance pass: `true`
 
 These are cache-layout readiness metrics. Actual cache hits and billed savings
