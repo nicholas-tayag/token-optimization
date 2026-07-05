@@ -157,7 +157,9 @@ _FEATURE_RESERVED_COUNTS = {
     "config_targets": 1,
     "supporting_targets": 1,
 }
-_FEATURE_TARGET_CONTEXT_BUDGET = 2_500
+# Feature packs should stop after high-signal edit/test/config coverage instead
+# of spending the caller's whole budget on low-marginal repository context.
+_FEATURE_TARGET_CONTEXT_BUDGET = 2_000
 _PRIVATE_KEY_BLOCK_PATTERN = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
