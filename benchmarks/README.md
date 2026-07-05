@@ -83,9 +83,9 @@ Current local result from July 4, 2026:
 - answer-plan pass rate: `0.8333`
 - median token reduction: `90.93%`
 - median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `5,905.5` tokens
+- median packed prompt: `5,913.0` tokens
 - median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,259,318`
+- total prompt tokens saved across 12 cases: `1,263,061`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -206,7 +206,8 @@ pipeline after AgenVantage has already selected the relevant repository
 context. It can write PNG context pages, factsheets, and recoverable source
 manifests. It still does not send images to a provider, so the token deltas are
 estimated rather than provider-billed savings. The benchmark verifies every
-generated artifact manifest for recoverable-source hashes and PNG signatures.
+generated artifact manifest for recoverable-source hashes, factsheet hashes,
+and PNG signatures.
 
 The estimator is intentionally conservative:
 
@@ -214,8 +215,8 @@ The estimator is intentionally conservative:
   secret-like, hash, and UUID-bearing chunks stay text;
 - gist-level background chunks are rendered into deterministic dense PNG pages
   only when the provider-profile estimate beats text after factsheet overhead;
-- each imaged block gets deterministic factsheet text and a recoverable source
-  file keyed by a stable `rec_...` identifier.
+- each imaged group gets deterministic factsheet sidecar text and each imaged
+  block gets a recoverable source file keyed by a stable `rec_...` identifier.
 - CLI runs default to `--modality-profile auto`; unsupported forced
   model/profile pairs stay text-only.
 
@@ -249,18 +250,19 @@ Current local result from July 4, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.36%`
+- full-scan theoretical modality reduction before safety gate: `76.41%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `5,952.5` tokens
+- packed median text prompt: `5,960.0` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `20.02%`
+- packed theoretical modality reduction before safety gate: `20.12%`
 - packed image-candidate rate after safety gate: `0.0`
 - median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,259,318`
+- total retrieval tokens saved across 12 cases: `1,263,061`
 - total rough-estimator incremental modality tokens saved after packing: `0`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
 - total recoverable blocks: `36`
+- total factsheets: `3`
 - total artifact incremental tokens saved after packing: `3,099`
 - artifact manifests verified: `3/3`
 - artifact manifest verification errors: `0`
@@ -321,11 +323,11 @@ Current local result from the production-path implementation:
 
 - cases: `12`
 - cache-eligible rate: `1.0`
-- median stable prefix: `5,907.5` tokens
+- median stable prefix: `5,913.0` tokens
 - median dynamic packet: `89.5` tokens
 - median reusable prefix: `98.47%`
 - median estimated warm reduction versus full scan: `99.86%`
-- total estimated warm tokens saved versus full scan: `1,236,065`
+- total estimated warm tokens saved versus full scan: `1,332,635`
 - acceptance pass: `true`
 
 These are cache-layout readiness metrics. Actual cache hits and billed savings

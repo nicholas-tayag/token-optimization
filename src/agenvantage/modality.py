@@ -514,6 +514,31 @@ def factsheet_text(entries: Iterable[dict[str, Any]]) -> str:
     )
 
 
+def _factsheet_record(
+    *,
+    group_id: str,
+    fact_text: str,
+    fact_entries: list[dict[str, Any]],
+    artifact_root: Path,
+    write: bool,
+) -> dict[str, Any] | None:
+    if not fact_text:
+        return None
+    factsheet_path = artifact_root / "factsheets" / f"{group_id}.txt"
+    factsheet_bytes = fact_text.rstrip().encode("utf-8") + b"\n"
+    if write:
+        factsheet_path.parent.mkdir(parents=True, exist_ok=True)
+        factsheet_path.write_bytes(factsheet_bytes)
+    return {
+        "group_id": group_id,
+        "text": fact_text,
+        "entries": fact_entries,
+        "entry_count": len(fact_entries),
+        "text_sha256": hashlib.sha256(factsheet_bytes).hexdigest(),
+        "text_path": str(factsheet_path),
+    }
+
+
 def recoverable_block_id(kind: str, text: str, source_hint: str = "") -> str:
     digest = hashlib.sha256(f"{kind}\0{source_hint}\0{text}".encode("utf-8")).hexdigest()[:12]
     return f"rec_{digest}"
@@ -912,6 +937,17 @@ def apply_multimodal_pack(
     image_pages: list[dict[str, Any]] = []
     recoverable_blocks: list[dict[str, Any]] = []
     group_id = recoverable_block_id("gist_image_group", image_source, pack_id)
+    factsheet_record = (
+        _factsheet_record(
+            group_id=group_id,
+            fact_text=fact_text,
+            fact_entries=fact_entries,
+            artifact_root=artifact_root,
+            write=bool(should_image and mode == "artifact"),
+        )
+        if should_image
+        else None
+    )
     if should_image and mode == "artifact":
         image_output_dir = artifact_root / "images"
         rendered_pages = render_text_to_png_pages(
@@ -1080,15 +1116,7 @@ def apply_multimodal_pack(
         "render_reflowed_chars": len(image_render_source),
         "estimated_image_pages": image_pages if should_image else [],
         "image_attachments": image_pages if should_image and mode == "artifact" else [],
-        "factsheets": [
-            {
-                "group_id": group_id,
-                "text": fact_text,
-                "entries": fact_entries,
-            }
-        ]
-        if fact_text
-        else [],
+        "factsheets": [factsheet_record] if factsheet_record else [],
         "recoverable_blocks": recoverable_blocks if should_image and mode == "artifact" else [],
         "block_plan": [
             {
@@ -1189,20 +1217,45 @@ def verify_recoverable_block(manifest_path: Path, block: dict[str, Any]) -> list
     return errors
 
 
+def verify_factsheet(manifest_path: Path, factsheet: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    group_id = str(factsheet.get("group_id") or "<missing-group>")
+    raw_text_path = str(factsheet.get("text_path", "")).strip()
+    if not raw_text_path:
+        return [f"Factsheet {group_id} does not include a text_path."]
+    text_path = resolve_artifact_path(manifest_path, raw_text_path)
+    if not text_path.is_file():
+        return [f"Factsheet file not found for {group_id}: {text_path}"]
+    expected_hash = str(factsheet.get("text_sha256") or "").strip()
+    if expected_hash:
+        actual_hash = _sha256_file(text_path)
+        if actual_hash != expected_hash:
+            errors.append(
+                f"Factsheet hash mismatch for {group_id}: expected {expected_hash}, got {actual_hash}"
+            )
+    return errors
+
+
 def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
     manifest = load_mixed_modality_manifest(manifest_path)
     blocks_raw = manifest.get("recoverable_blocks", [])
     images_raw = manifest.get("image_attachments", [])
+    factsheets_raw = manifest.get("factsheets", [])
     if not isinstance(blocks_raw, list):
         raise ValueError("Mixed-modality manifest has an invalid recoverable_blocks field.")
     if not isinstance(images_raw, list):
         raise ValueError("Mixed-modality manifest has an invalid image_attachments field.")
+    if not isinstance(factsheets_raw, list):
+        raise ValueError("Mixed-modality manifest has an invalid factsheets field.")
 
     errors: list[str] = []
     recoverable_blocks = [block for block in blocks_raw if isinstance(block, dict)]
     image_attachments = [item for item in images_raw if isinstance(item, dict)]
+    factsheets = [item for item in factsheets_raw if isinstance(item, dict)]
     for block in recoverable_blocks:
         errors.extend(verify_recoverable_block(manifest_path, block))
+    for factsheet in factsheets:
+        errors.extend(verify_factsheet(manifest_path, factsheet))
     for image in image_attachments:
         image_path = resolve_artifact_path(manifest_path, image.get("path"))
         if not image_path.is_file():
@@ -1216,6 +1269,7 @@ def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
         "ok": not errors,
         "recoverable_block_count": len(recoverable_blocks),
         "image_attachment_count": len(image_attachments),
+        "factsheet_count": len(factsheets),
         "error_count": len(errors),
         "errors": errors,
     }

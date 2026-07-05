@@ -590,6 +590,7 @@ def test_rehydrate_verifies_artifact_manifest_integrity(tmp_path: Path) -> None:
     assert "Artifact verification passed" in completed.stdout
     assert "Recoverable blocks: 1" in completed.stdout
     assert "Image attachments: 1" in completed.stdout
+    assert "Factsheets: 0" in completed.stdout
 
 
 def test_rehydrate_verify_fails_on_hash_mismatch(tmp_path: Path) -> None:

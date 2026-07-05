@@ -27,6 +27,7 @@ def test_modality_tradeoff_validation_writes_report(tmp_path: Path) -> None:
     assert "full_scan_tradeoffs" in report["summary"]
     assert "packed_tradeoffs" in report["summary"]
     assert "total_artifact_image_count" in report["summary"]
+    assert "total_artifact_factsheets" in report["summary"]
     assert "artifact_manifest_verified_case_rate" in report["summary"]
     assert report["summary"]["artifact_manifest_verification_error_count"] == 0
     assert "artifact_mixed_estimated_tokens" in report["cases"][0]

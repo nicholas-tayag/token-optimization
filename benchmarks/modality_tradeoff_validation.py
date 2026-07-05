@@ -136,6 +136,7 @@ def _run_case(
         ),
         "artifact_image_count": len(artifact_plan.get("image_attachments", [])),
         "artifact_recoverable_block_count": len(artifact_plan.get("recoverable_blocks", [])),
+        "artifact_factsheet_count": len(artifact_plan.get("factsheets", [])),
         "artifact_factsheet_tokens": int(artifact_plan.get("factsheet_tokens", 0)),
         "artifact_decision_reason": artifact_plan.get("decision_reason"),
         "artifact_manifest_written": artifact_manifest_written,
@@ -194,6 +195,9 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "total_artifact_recoverable_blocks": sum(
             int(case["artifact_recoverable_block_count"]) for case in cases
         ),
+        "total_artifact_factsheets": sum(
+            int(case["artifact_factsheet_count"]) for case in cases
+        ),
         "artifact_manifest_written_case_count": len(artifact_manifest_cases),
         "artifact_manifest_verified_case_count": artifact_verified_cases,
         "artifact_manifest_verified_case_rate": (
@@ -208,7 +212,7 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "Retrieval reduction is shipped AgenVantage behavior.",
             "Artifact-mode modality reduction is a local text+PNG handoff estimate, not billed provider usage.",
             "Exact edit/test/config/support chunks stay text; imaged blocks are recoverable.",
-            "Generated artifact manifests are verified for recoverable-source hashes and PNG signatures.",
+            "Generated artifact manifests are verified for recoverable-source hashes, factsheet hashes, and PNG signatures.",
         ],
     }
 
@@ -243,6 +247,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Artifact image case rate: `{summary['artifact_image_case_rate']}`",
         f"- Total artifact images: `{summary['total_artifact_image_count']}`",
         f"- Total recoverable blocks: `{summary['total_artifact_recoverable_blocks']}`",
+        f"- Total factsheets: `{summary['total_artifact_factsheets']}`",
         f"- Artifact manifests written: `{summary['artifact_manifest_written_case_count']}`",
         f"- Artifact manifests verified: `{summary['artifact_manifest_verified_case_count']}`",
         f"- Artifact manifest verification rate: `{summary['artifact_manifest_verified_case_rate']}`",
@@ -269,6 +274,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Artifact decision: `{case['artifact_decision_reason']}`",
                 f"- Artifact images: `{case['artifact_image_count']}`",
                 f"- Recoverable blocks: `{case['artifact_recoverable_block_count']}`",
+                f"- Factsheets: `{case['artifact_factsheet_count']}`",
                 f"- Artifact manifest verification: `{case['artifact_manifest_verification_status']}`",
                 f"- Artifact verification errors: `{case['artifact_verification_error_count']}`",
                 f"- Risk labels: `{', '.join(packed_tradeoff['risk_labels']) or 'none'}`",

@@ -155,20 +155,20 @@ mixed-modality artifact path after retrieval has already selected context. The
 benchmark can write PNG context pages, factsheets, and recoverable source
 manifests, but still reports estimated token deltas rather than provider-billed
 savings. The benchmark also verifies every generated artifact manifest for PNG
-attachments and recoverable-source hash integrity.
+attachments, factsheet hashes, and recoverable-source hash integrity.
 
 `pack --multimodal` uses `--modality-profile auto` by default: GPT/o-series
 models use the conservative OpenAI estimate and Claude models use the standard
 Claude vision estimate. Forcing an incompatible profile keeps the package
 text-only instead of assuming an unsupported image-ingestion path.
 
-When artifact mode images background context, the manifest records recoverable
-`rec_...` blocks. Use `agenvantage rehydrate --manifest ... --id rec_...` to
-recover exact source text instead of transcribing from image pages. Use
-`--verify` to confirm image attachments exist and recoverable source hashes
-still match the manifest. Line-addressed references and identifier-dense
-blocks stay text-only so exact implementation evidence does not depend on image
-OCR.
+When artifact mode images background context, the manifest records factsheet
+sidecars and recoverable `rec_...` blocks. Use
+`agenvantage rehydrate --manifest ... --id rec_...` to recover exact source text
+instead of transcribing from image pages. Use `--verify` to confirm image
+attachments exist and factsheet/recoverable source hashes still match the
+manifest. Line-addressed references and identifier-dense blocks stay text-only
+so exact implementation evidence does not depend on image OCR.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

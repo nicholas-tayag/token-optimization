@@ -1392,6 +1392,7 @@ def _format_artifact_verification(summary: dict[str, Any]) -> str:
         f"Artifact verification {status}",
         f"Recoverable blocks: {summary['recoverable_block_count']}",
         f"Image attachments: {summary['image_attachment_count']}",
+        f"Factsheets: {summary.get('factsheet_count', 0)}",
         f"Errors: {summary['error_count']}",
     ]
     for error in summary["errors"]:

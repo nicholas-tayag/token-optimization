@@ -178,10 +178,16 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert plan["should_image"] is True
     assert plan["image_attachments"]
     assert plan["recoverable_blocks"]
+    assert plan["factsheets"]
     assert plan["estimated_tokens_saved_vs_packed_text"] > 0
     assert "GIST_IMAGE_CONTEXT" in mixed
     image_path = Path(plan["image_attachments"][0]["path"])
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    factsheet_path = Path(plan["factsheets"][0]["text_path"])
+    assert factsheet_path.is_file()
+    assert hashlib.sha256(factsheet_path.read_bytes()).hexdigest() == plan["factsheets"][0][
+        "text_sha256"
+    ]
     for block in plan["recoverable_blocks"]:
         persisted = Path(block["text_path"]).read_bytes()
         assert hashlib.sha256(persisted).hexdigest() == block["text_sha256"]
@@ -190,6 +196,7 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert verification["ok"] is True
     assert verification["image_attachment_count"] == len(plan["image_attachments"])
     assert verification["recoverable_block_count"] == len(plan["recoverable_blocks"])
+    assert verification["factsheet_count"] == len(plan["factsheets"])
 
 
 def test_apply_multimodal_pack_keeps_line_referenced_docs_as_text(tmp_path) -> None:
@@ -324,3 +331,34 @@ def test_verify_mixed_modality_manifest_reports_recoverable_hash_mismatch(
     assert verification["ok"] is False
     assert verification["error_count"] == 1
     assert "hash mismatch" in verification["errors"][0]
+
+
+def test_verify_mixed_modality_manifest_reports_factsheet_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    factsheet_path = tmp_path / "factsheet.txt"
+    factsheet_path.write_text("changed factsheet\n", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [],
+                "image_attachments": [],
+                "factsheets": [
+                    {
+                        "group_id": "rec_group",
+                        "text_path": str(factsheet_path),
+                        "text_sha256": hashlib.sha256(b"original factsheet\n").hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    verification = verify_mixed_modality_manifest(manifest_path)
+
+    assert verification["ok"] is False
+    assert verification["factsheet_count"] == 1
+    assert verification["error_count"] == 1
+    assert "Factsheet hash mismatch" in verification["errors"][0]
