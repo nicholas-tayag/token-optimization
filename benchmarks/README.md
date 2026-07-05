@@ -75,17 +75,17 @@ Run it with:
   --summary
 ```
 
-Current local result from July 4, 2026:
+Current local result from July 5, 2026:
 
 - edit-target recall: `1.0`
 - test-target recall: `0.8333`
-- required-observation recall: `1.0`
+- required-observation recall: `0.9167`
 - answer-plan pass rate: `0.8333`
-- median token reduction: `90.93%`
+- median token reduction: `96.03%`
 - median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `5,905.5` tokens
-- median prompt tokens saved: `74,985.0`
-- total prompt tokens saved across 12 cases: `1,268,951`
+- median packed prompt: `2,457.0` tokens
+- median prompt tokens saved: `78,482.5`
+- total prompt tokens saved across 12 cases: `1,311,957`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -247,29 +247,29 @@ Recover exact text for an imaged block with:
   --id rec_...
 ```
 
-Current local result from July 4, 2026:
+Current local result from July 5, 2026:
 
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.51%`
+- full-scan theoretical modality reduction before safety gate: `76.54%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `5,952.5` tokens
+- packed median text prompt: `2,504.0` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `20.02%`
+- packed theoretical modality reduction before safety gate: `-90.14%`
 - packed image-candidate rate after safety gate: `0.0`
-- median retrieval tokens saved before modality: `74,985.0`
-- total retrieval tokens saved across 12 cases: `1,268,951`
+- median retrieval tokens saved before modality: `78,482.5`
+- total retrieval tokens saved across 12 cases: `1,311,957`
 - total rough-estimator incremental modality tokens saved after packing: `0`
-- artifact image case rate: `0.25`
-- total artifact images written: `3`
-- total recoverable blocks: `36`
-- total factsheets: `3`
-- total artifact incremental tokens saved after packing: `3,099`
-- artifact manifests verified: `3/3`
-- artifact bundles verified: `3/3`
+- artifact image case rate: `0.3333`
+- total artifact images written: `4`
+- total recoverable blocks: `10`
+- total factsheets: `4`
+- total artifact incremental tokens saved after packing: `1,101`
+- artifact manifests verified: `4/4`
+- artifact bundles verified: `4/4`
 - artifact manifest verification errors: `0`
-- median end-to-end safe candidate reduction: `90.85%`
+- median end-to-end safe candidate reduction: `95.95%`
 
 Interpretation: retrieval still does nearly all of the work. The implemented
 artifact layer adds selective upside on background/gist chunks even when the
@@ -326,11 +326,11 @@ Current local result from the production-path implementation:
 
 - cases: `12`
 - cache-eligible rate: `1.0`
-- median stable prefix: `5,907.5` tokens
+- median stable prefix: `2,428.0` tokens
 - median dynamic packet: `89.5` tokens
-- median reusable prefix: `98.47%`
+- median reusable prefix: `96.38%`
 - median estimated warm reduction versus full scan: `99.86%`
-- total estimated warm tokens saved versus full scan: `1,338,479`
+- total estimated warm tokens saved versus full scan: `1,340,441`
 - acceptance pass: `true`
 
 These are cache-layout readiness metrics. Actual cache hits and billed savings

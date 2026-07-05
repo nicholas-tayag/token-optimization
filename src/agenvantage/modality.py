@@ -18,6 +18,10 @@ DEFAULT_MIN_TEXT_TOKEN_SAVINGS_PERCENT = 20.0
 DEFAULT_MIN_IMAGE_CANDIDATE_CHARS = 6_000
 DEFAULT_ARTIFACT_MIN_SAVINGS_PERCENT = 5.0
 HIGH_DENSITY_IDENTIFIER_THRESHOLD = 12
+MIN_ADAPTIVE_IMAGE_WIDTH = 336
+MIN_ADAPTIVE_IMAGE_HEIGHT = 224
+ADAPTIVE_IMAGE_WIDTH_STEP = 112
+ADAPTIVE_IMAGE_HEIGHT_STEP = 56
 
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(
@@ -124,7 +128,7 @@ _FACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("test_name", _TEST_NAME_RE),
 )
 _MAX_FACTSHEET_SCAN = 262_144
-_MAX_FACTSHEET_ENTRIES = 64
+_MAX_FACTSHEET_ENTRIES = 16
 
 
 def count_exact_identifier_signals(text: str) -> int:
@@ -506,12 +510,7 @@ def factsheet_text(entries: Iterable[dict[str, Any]]) -> str:
         parts.append(f"{token} x{count}" if count > 1 else token)
     if not parts:
         return ""
-    return (
-        "[Exact identifiers from imaged context - quote these from text, "
-        "not from the image: "
-        + " · ".join(parts)
-        + "]"
-    )
+    return "Facts: " + "; ".join(parts)
 
 
 def _factsheet_record(
@@ -835,6 +834,64 @@ def _estimate_pages(text: str, profile: ModalityProviderProfile) -> list[dict[st
     ]
 
 
+def _dimension_values(minimum: int, maximum: int, step: int) -> list[int]:
+    if maximum <= minimum:
+        return [maximum]
+    values = list(range(minimum, maximum + 1, step))
+    if values[-1] != maximum:
+        values.append(maximum)
+    return values
+
+
+def _profile_with_dimensions(
+    profile: ModalityProviderProfile,
+    *,
+    width: int,
+    height: int,
+) -> ModalityProviderProfile:
+    return ModalityProviderProfile(
+        profile_id=profile.profile_id,
+        label=f"{profile.label} adaptive",
+        page_width=width,
+        page_height=height,
+        token_formula=profile.token_formula,
+        supported_model_prefixes=profile.supported_model_prefixes,
+    )
+
+
+def _adaptive_profile_for_text(
+    text: str,
+    profile: ModalityProviderProfile,
+) -> ModalityProviderProfile:
+    if not text:
+        return profile
+    min_width = min(profile.page_width, MIN_ADAPTIVE_IMAGE_WIDTH)
+    min_height = min(profile.page_height, MIN_ADAPTIVE_IMAGE_HEIGHT)
+    best_profile = profile
+    best_pages = _estimate_pages(text, profile)
+    best_total_tokens = sum(int(page["estimated_image_tokens"]) for page in best_pages)
+    best_page_count = len(best_pages)
+    for width in _dimension_values(min_width, profile.page_width, ADAPTIVE_IMAGE_WIDTH_STEP):
+        for height in _dimension_values(
+            min_height,
+            profile.page_height,
+            ADAPTIVE_IMAGE_HEIGHT_STEP,
+        ):
+            candidate = _profile_with_dimensions(profile, width=width, height=height)
+            pages = _estimate_pages(text, candidate)
+            total_tokens = sum(int(page["estimated_image_tokens"]) for page in pages)
+            page_count = len(pages)
+            if (total_tokens, page_count, width * height) < (
+                best_total_tokens,
+                best_page_count,
+                best_profile.page_width * best_profile.page_height,
+            ):
+                best_profile = candidate
+                best_total_tokens = total_tokens
+                best_page_count = page_count
+    return best_profile
+
+
 def _pack_id(report: dict[str, Any]) -> str:
     selected_ids = "\0".join(str(chunk.get("id", "")) for chunk in report.get("selected_chunks", []))
     digest = hashlib.sha256(
@@ -845,21 +902,18 @@ def _pack_id(report: dict[str, Any]) -> str:
 
 def _artifact_note(
     *,
-    group_id: str,
     pages: list[dict[str, Any]],
     factsheet: str,
     recoverable_ids: list[str],
 ) -> str:
-    image_lines = "\n".join(f"- `{page['path']}`" for page in pages)
-    recoverable = ", ".join(f"`{item}`" for item in recoverable_ids)
+    image_refs = ", ".join(
+        f"`{page.get('relative_path') or page.get('path')}`" for page in pages
+    )
     return (
-        f"[GIST_IMAGE_CONTEXT:{group_id}]\n"
-        "Use the image pages for background/gist only. Exact implementation evidence "
-        "remains in text. If an exact value is needed, use the factsheet below or "
-        "rehydrate the listed recoverable block IDs.\n\n"
-        f"Image pages:\n{image_lines}\n\n"
-        f"{factsheet}\n\n"
-        f"Recoverable source IDs: {recoverable}\n"
+        "[GIST_IMAGE_CONTEXT]\n"
+        f"Images(gist): {image_refs}\n"
+        f"{factsheet}\n"
+        f"Recover exact source: manifest recoverable_blocks={len(recoverable_ids)}\n"
     )
 
 
@@ -879,10 +933,10 @@ def apply_multimodal_pack(
         report["multimodal"] = {"mode": "off", "enabled": False}
         return markdown, report
 
-    profile = resolve_provider_profile(profile_id, model=model)
+    base_profile = resolve_provider_profile(profile_id, model=model)
     pack_id = _pack_id(report)
     artifact_root = output_dir or (Path("artifacts") / "context-images" / pack_id)
-    if model and not model_supported_by_profile(model, profile):
+    if model and not model_supported_by_profile(model, base_profile):
         original_packed_tokens = int(
             report.get("prompt_token_accounting", {}).get(
                 "packed_prompt_tokens",
@@ -893,7 +947,7 @@ def apply_multimodal_pack(
             "mode": mode,
             "enabled": True,
             "pack_id": pack_id,
-            "profile": profile.to_dict(),
+            "profile": base_profile.to_dict(),
             "requested_profile_id": profile_id,
             "model": model,
             "artifact_root": str(artifact_root),
@@ -950,15 +1004,35 @@ def apply_multimodal_pack(
     image_source = "\n\n".join(block.rendered for block in imageable)
     image_render_source = _reflow_for_image(image_source)
     text_counterfactual_tokens = counter.count(image_source) if image_source else 0
+    profile = _adaptive_profile_for_text(image_render_source, base_profile)
+    group_id = recoverable_block_id("gist_image_group", image_source, pack_id)
     pages_estimate = _estimate_pages(image_render_source, profile) if image_render_source else []
     estimated_image_tokens = sum(int(page["estimated_image_tokens"]) for page in pages_estimate)
     fact_entries = extract_factsheet_entries(image_source) if image_source else []
     fact_text = factsheet_text(fact_entries)
     factsheet_tokens = counter.count(fact_text) if fact_text else 0
-    overhead_tokens = counter.count(
-        "Use the image pages for background/gist only. Recover exact source if needed."
+    estimated_recoverable_ids = [
+        recoverable_block_id("source_chunk", block.rendered, block.block_id)
+        for block in imageable
+    ]
+    estimated_note_pages = [
+        {
+            **page,
+            "path": str(artifact_root / "images" / f"{group_id}-p{page['page_index']:02d}.png"),
+            "relative_path": str(Path("images") / f"{group_id}-p{page['page_index']:02d}.png"),
+        }
+        for page in pages_estimate
+    ]
+    note_tokens = counter.count(
+        _artifact_note(
+            pages=estimated_note_pages,
+            factsheet=fact_text,
+            recoverable_ids=estimated_recoverable_ids,
+        )
+        if imageable
+        else ""
     )
-    candidate_mixed_tokens = estimated_image_tokens + factsheet_tokens + overhead_tokens
+    candidate_mixed_tokens = estimated_image_tokens + note_tokens
     token_delta = text_counterfactual_tokens - candidate_mixed_tokens
     reduction_percent = (
         round((token_delta / text_counterfactual_tokens) * 100, 2)
@@ -967,14 +1041,11 @@ def apply_multimodal_pack(
     )
     should_image = (
         bool(imageable)
-        and len(image_source) >= DEFAULT_MIN_IMAGE_CANDIDATE_CHARS
         and token_delta > 0
         and reduction_percent >= DEFAULT_ARTIFACT_MIN_SAVINGS_PERCENT
     )
     if not imageable:
         decision_reason = "no_gist_candidate_blocks"
-    elif len(image_source) < DEFAULT_MIN_IMAGE_CANDIDATE_CHARS:
-        decision_reason = "below_minimum_bulk_threshold"
     elif token_delta <= 0:
         decision_reason = "image_artifact_not_cheaper_after_factsheet"
     elif reduction_percent < DEFAULT_ARTIFACT_MIN_SAVINGS_PERCENT:
@@ -984,7 +1055,6 @@ def apply_multimodal_pack(
 
     image_pages: list[dict[str, Any]] = []
     recoverable_blocks: list[dict[str, Any]] = []
-    group_id = recoverable_block_id("gist_image_group", image_source, pack_id)
     factsheet_record = (
         _factsheet_record(
             group_id=group_id,
@@ -1007,6 +1077,7 @@ def apply_multimodal_pack(
         image_pages = [
             {
                 "path": str(page.path),
+                "relative_path": str(page.path.relative_to(artifact_root)),
                 "width": page.width,
                 "height": page.height,
                 "estimated_image_tokens": page.estimated_image_tokens,
@@ -1040,6 +1111,7 @@ def apply_multimodal_pack(
             {
                 **page,
                 "path": str(artifact_root / "images" / f"{group_id}-p{page['page_index']:02d}.png"),
+                "relative_path": str(Path("images") / f"{group_id}-p{page['page_index']:02d}.png"),
             }
             for page in pages_estimate
         ]
@@ -1065,7 +1137,6 @@ def apply_multimodal_pack(
 
     if should_image and mode == "artifact":
         page_note = _artifact_note(
-            group_id=group_id,
             pages=image_pages,
             factsheet=fact_text,
             recoverable_ids=[item["id"] for item in recoverable_blocks],
@@ -1095,9 +1166,7 @@ def apply_multimodal_pack(
         mixed_markdown = (
             prefix.rstrip()
             + "\n\n## Mixed-Modality Guidance\n\n"
-            + "Exact code, tests, config, paths, and identifiers are kept in text. "
-            + "Attached image pages are lossy background context. Rehydrate recoverable "
-            + "IDs instead of guessing exact values from images.\n\n"
+            + "Exact values: text/Facts. Images: gist only.\n\n"
             + "## Selected Repository Context\n\n"
             + "\n\n".join(part.rstrip() for part in context_parts if part.strip()).rstrip()
             + "\n"
@@ -1146,6 +1215,7 @@ def apply_multimodal_pack(
         "enabled": mode != "off",
         "pack_id": pack_id,
         "profile": profile.to_dict(),
+        "base_profile": base_profile.to_dict(),
         "artifact_root": str(artifact_root),
         "manifest_path": str(manifest_path),
         "decision_reason": decision_reason,
@@ -1155,6 +1225,7 @@ def apply_multimodal_pack(
         "exact_text_block_count": len(exact),
         "text_counterfactual_tokens": text_counterfactual_tokens,
         "factsheet_tokens": factsheet_tokens,
+        "artifact_note_tokens": note_tokens,
         "estimated_image_tokens": estimated_image_tokens,
         "estimated_mixed_prompt_tokens": estimated_mixed_prompt_tokens,
         "mixed_prompt_text_tokens": mixed_text_tokens,

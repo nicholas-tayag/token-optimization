@@ -156,6 +156,7 @@ _FEATURE_RESERVED_COUNTS = {
     "config_targets": 1,
     "supporting_targets": 1,
 }
+_FEATURE_TARGET_CONTEXT_BUDGET = 2_500
 _PRIVATE_KEY_BLOCK_PATTERN = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
@@ -921,6 +922,9 @@ def build_multi_repo_context_package(
         raise ValueError(
             f"Instructions and task use {required_tokens} tokens, exceeding budget {budget}."
         )
+    effective_budget = budget
+    if workflow == "feature" and budget > _FEATURE_TARGET_CONTEXT_BUDGET:
+        effective_budget = min(budget, max(_FEATURE_TARGET_CONTEXT_BUDGET, required_tokens))
 
     selected: list[CodeChunk] = []
     excluded: list[dict[str, Any]] = []
@@ -1000,7 +1004,7 @@ def build_multi_repo_context_package(
             excluded.append({"id": chunk.chunk_id, "reason": "below relevance threshold"})
             continue
         addition = chunk.render() + "\n\n"
-        if counter.count(rendered + addition) <= budget:
+        if counter.count(rendered + addition) <= effective_budget:
             selected.append(chunk)
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
@@ -1009,7 +1013,7 @@ def build_multi_repo_context_package(
                 selected_dependency_targets[(chunk.repo_label, local_import_path)] += 1
             rendered += addition
         else:
-            excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
+            excluded.append({"id": chunk.chunk_id, "reason": "exceeds effective token budget"})
 
     selected_tokens = counter.count(rendered)
     full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
@@ -1040,6 +1044,7 @@ def build_multi_repo_context_package(
         "task": task,
         "tokenizer": {"model": counter.model, "encoding": counter.encoding_name},
         "budget": budget,
+        "effective_budget": effective_budget,
         "path_filters": {
             "include_globs": list(include_globs),
             "exclude_globs": list(exclude_globs),

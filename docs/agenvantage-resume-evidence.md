@@ -52,29 +52,29 @@ Feature-work benchmark:
 - Edit-target recall: `1.0`
 - Test-target recall: `0.8333`
 - Selected edit-target recall: `1.0`
-- Selected test-target recall: `1.0`
-- Required-observation recall: `1.0`
+- Selected test-target recall: `0.9167`
+- Required-observation recall: `0.9167`
 - Answer-plan pass rate: `0.8333`
-- Mean selected chunk count: `14.25`
+- Mean selected chunk count: `5.58`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `5,905.5` tokens
-- Median prompt tokens saved: `74,985.0`
-- Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,268,951`
+- Median packed prompt: `2,457.0` tokens
+- Median prompt tokens saved: `78,482.5`
+- Median prompt reduction: `96.03%`
+- Total prompt tokens saved across 12 cases: `1,311,957`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,952.5` tokens
-- Median prompt reduction: `90.85%`
+- Median AgenVantage packed prompt: `2,504.0` tokens
+- Median prompt reduction: `95.95%`
 - Median estimated full-scan cold input cost: `$0.02024212`
-- Median estimated packed warm input cost: `$0.00015538`
-- Median estimated warm input savings: `99.23%`
-- Total estimated full-scan cold input cost: `$0.334959`
-- Total estimated packed warm input cost: `$0.00184506`
+- Median estimated packed warm input cost: `$0.00006804`
+- Median estimated warm input savings: `99.66%`
+- Total estimated full-scan cold input cost: `$0.3354495`
+- Total estimated packed warm input cost: `$0.00081895`
 - Cost scope: theoretical input-only estimate from a saved pricing snapshot,
   not provider-billed usage
 
@@ -82,12 +82,12 @@ Session cache-readiness benchmark:
 
 - Cases: `12`
 - Cache-eligible rate: `1.0`
-- Median stable prefix: `5,907.5` tokens
+- Median stable prefix: `2,428.0` tokens
 - Median dynamic packet: `89.5` tokens
 - Median full-scan prompt: `80,946.5` tokens
-- Median reusable prefix: `98.47%`
+- Median reusable prefix: `96.38%`
 - Median estimated warm reduction versus full scan: `99.86%`
-- Total estimated warm tokens saved versus full scan: `1,338,479`
+- Total estimated warm tokens saved versus full scan: `1,340,441`
 - Acceptance result: `passed`
 
 Pxpipe-inspired mixed-modality artifact benchmark:
@@ -97,27 +97,27 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.51%`
+- Full-scan theoretical modality reduction before safety gate: `76.54%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,952.5` tokens
+- Packed median text prompt: `2,504.0` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `20.02%`
+- Packed theoretical modality reduction before safety gate: `-90.14%`
 - Packed image-candidate rate after safety gate: `0.0`
-- Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,268,951`
+- Median retrieval tokens saved before modality: `78,482.5`
+- Total retrieval tokens saved across 12 cases: `1,311,957`
 - Total rough-estimator incremental modality tokens saved after packing: `0`
-- Artifact image case rate: `0.25`
-- Total artifact images written: `3`
-- Total factsheets written: `3`
-- Total recoverable source blocks: `36`
-- Total artifact incremental tokens saved after packing: `3,099`
-- Artifact manifests verified: `3/3`
-- Artifact bundles verified: `3/3`
+- Artifact image case rate: `0.3333`
+- Total artifact images written: `4`
+- Total factsheets written: `4`
+- Total recoverable source blocks: `10`
+- Total artifact incremental tokens saved after packing: `1,101`
+- Artifact manifests verified: `4/4`
+- Artifact bundles verified: `4/4`
 - Artifact manifest verification errors: `0`
 - Recoverability: `agenvantage rehydrate` verifies image hashes, PNG signatures,
   factsheets, and `rec_...` source blocks, then retrieves exact source text with
   hash checks
-- Median end-to-end safe candidate reduction: `90.85%`
+- Median end-to-end safe candidate reduction: `95.95%`
 
 Interpretation: image-token packing is not a replacement for retrieval on this
 workload. The whole-prompt estimator now refuses packed prompts with exact
@@ -195,19 +195,19 @@ Validated AgenVantage on a real Mesh feature by reducing a full-scan coding-agen
 More conservative public-project bullet:
 
 ```text
-Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 90.9% across 12 annotated tasks while maintaining full edit-target recall and full required-observation coverage.
+Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 96.0% across 12 annotated tasks while maintaining full edit-target recall and passing the answer-plan acceptance suite.
 ```
 
 Cache-readiness bullet:
 
 ```text
-Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 5.9K-token median stable prefixes, 89.5-token median dynamic packets, and 98.47% reusable-prefix share.
+Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 2.4K-token median stable prefixes, 89.5-token median dynamic packets, and 96.38% reusable-prefix share.
 ```
 
 Forward-looking compression bullet:
 
 ```text
-Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; benchmarked 12 feature tasks with 3 local image artifacts, 3 factsheets, 36 recoverable blocks, and 3.1K additional estimated tokens saved after retrieval.
+Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 4 local image artifacts, 4 factsheets, 10 recoverable blocks, and 1.1K additional estimated tokens saved after retrieval.
 ```
 
 ## Interview Explanation

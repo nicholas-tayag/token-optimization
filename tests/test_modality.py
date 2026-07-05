@@ -177,6 +177,8 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     plan = updated["multimodal"]
 
     assert plan["should_image"] is True
+    assert plan["profile"]["page_height"] < plan["base_profile"]["page_height"]
+    assert plan["profile"]["estimated_page_tokens"] < plan["base_profile"]["estimated_page_tokens"]
     assert plan["image_attachments"]
     assert plan["recoverable_blocks"]
     assert plan["factsheets"]
