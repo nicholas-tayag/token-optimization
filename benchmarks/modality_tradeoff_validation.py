@@ -144,6 +144,10 @@ def _run_case(
             artifact_manifest_written and artifact_verification["ok"]
         ),
         "artifact_manifest_verification_status": artifact_verification_status,
+        "artifact_bundle_sha256": artifact_verification.get("artifact_bundle_sha256"),
+        "artifact_bundle_verified": bool(
+            artifact_manifest_written and artifact_verification.get("artifact_bundle_verified")
+        ),
         "artifact_verification_error_count": int(artifact_verification["error_count"]),
         "artifact_verification_errors": artifact_verification["errors"],
         "artifact_manifest_path": artifact_plan.get("manifest_path"),
@@ -172,6 +176,9 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
     artifact_manifest_cases = [case for case in cases if case["artifact_manifest_written"]]
     artifact_verified_cases = sum(
         1 for case in artifact_manifest_cases if case["artifact_manifest_verified"]
+    )
+    artifact_bundle_verified_cases = sum(
+        1 for case in artifact_manifest_cases if case["artifact_bundle_verified"]
     )
     return {
         "case_count": len(cases),
@@ -202,6 +209,12 @@ def _summarize(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "artifact_manifest_verified_case_count": artifact_verified_cases,
         "artifact_manifest_verified_case_rate": (
             round(artifact_verified_cases / len(artifact_manifest_cases), 4)
+            if artifact_manifest_cases
+            else 0.0
+        ),
+        "artifact_bundle_verified_case_count": artifact_bundle_verified_cases,
+        "artifact_bundle_verified_case_rate": (
+            round(artifact_bundle_verified_cases / len(artifact_manifest_cases), 4)
             if artifact_manifest_cases
             else 0.0
         ),
@@ -251,6 +264,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Artifact manifests written: `{summary['artifact_manifest_written_case_count']}`",
         f"- Artifact manifests verified: `{summary['artifact_manifest_verified_case_count']}`",
         f"- Artifact manifest verification rate: `{summary['artifact_manifest_verified_case_rate']}`",
+        f"- Artifact bundles verified: `{summary['artifact_bundle_verified_case_count']}`",
+        f"- Artifact bundle verification rate: `{summary['artifact_bundle_verified_case_rate']}`",
         f"- Artifact manifest verification errors: `{summary['artifact_manifest_verification_error_count']}`",
         f"- Median end-to-end safe candidate reduction: `{summary['median_end_to_end_safe_candidate_reduction_percent']}%`",
         "",
@@ -276,6 +291,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Recoverable blocks: `{case['artifact_recoverable_block_count']}`",
                 f"- Factsheets: `{case['artifact_factsheet_count']}`",
                 f"- Artifact manifest verification: `{case['artifact_manifest_verification_status']}`",
+                f"- Artifact bundle verified: `{case['artifact_bundle_verified']}`",
                 f"- Artifact verification errors: `{case['artifact_verification_error_count']}`",
                 f"- Risk labels: `{', '.join(packed_tradeoff['risk_labels']) or 'none'}`",
                 "",

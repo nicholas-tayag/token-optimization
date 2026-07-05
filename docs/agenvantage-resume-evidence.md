@@ -31,6 +31,8 @@ Current implemented scope:
 - Artifact integrity verification: `agenvantage rehydrate --manifest ... --verify`
   checks image hashes, PNG signatures, factsheet hashes, and recoverable source
   hashes
+- Reproducibility support: manifests include a path-independent bundle
+  fingerprint for comparing generated artifact content across output directories
 
 Out of scope for verified resume claims right now:
 
@@ -56,23 +58,23 @@ Feature-work benchmark:
 - Mean selected chunk count: `14.25`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `5,920.5` tokens
+- Median packed prompt: `5,905.5` tokens
 - Median prompt tokens saved: `74,985.0`
 - Median prompt reduction: `90.93%`
-- Total prompt tokens saved across 12 cases: `1,264,321`
+- Total prompt tokens saved across 12 cases: `1,268,951`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `5,967.5` tokens
+- Median AgenVantage packed prompt: `5,952.5` tokens
 - Median prompt reduction: `90.85%`
 - Median estimated full-scan cold input cost: `$0.02024212`
 - Median estimated packed warm input cost: `$0.00015538`
 - Median estimated warm input savings: `99.23%`
-- Total estimated full-scan cold input cost: `$0.33381675`
-- Total estimated packed warm input cost: `$0.00184658`
+- Total estimated full-scan cold input cost: `$0.334959`
+- Total estimated packed warm input cost: `$0.00184506`
 - Cost scope: theoretical input-only estimate from a saved pricing snapshot,
   not provider-billed usage
 
@@ -80,12 +82,12 @@ Session cache-readiness benchmark:
 
 - Cases: `12`
 - Cache-eligible rate: `1.0`
-- Median stable prefix: `5,913.0` tokens
+- Median stable prefix: `5,907.5` tokens
 - Median dynamic packet: `89.5` tokens
 - Median full-scan prompt: `80,946.5` tokens
 - Median reusable prefix: `98.47%`
 - Median estimated warm reduction versus full scan: `99.86%`
-- Total estimated warm tokens saved versus full scan: `1,333,910`
+- Total estimated warm tokens saved versus full scan: `1,338,479`
 - Acceptance result: `passed`
 
 Pxpipe-inspired mixed-modality artifact benchmark:
@@ -95,14 +97,14 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.44%`
+- Full-scan theoretical modality reduction before safety gate: `76.51%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `5,967.5` tokens
+- Packed median text prompt: `5,952.5` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `20.22%`
+- Packed theoretical modality reduction before safety gate: `20.02%`
 - Packed image-candidate rate after safety gate: `0.0`
 - Median retrieval tokens saved before modality: `74,985.0`
-- Total retrieval tokens saved across 12 cases: `1,264,321`
+- Total retrieval tokens saved across 12 cases: `1,268,951`
 - Total rough-estimator incremental modality tokens saved after packing: `0`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
@@ -110,6 +112,7 @@ Pxpipe-inspired mixed-modality artifact benchmark:
 - Total recoverable source blocks: `36`
 - Total artifact incremental tokens saved after packing: `3,099`
 - Artifact manifests verified: `3/3`
+- Artifact bundles verified: `3/3`
 - Artifact manifest verification errors: `0`
 - Recoverability: `agenvantage rehydrate` verifies image hashes, PNG signatures,
   factsheets, and `rec_...` source blocks, then retrieves exact source text with

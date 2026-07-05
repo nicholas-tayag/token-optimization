@@ -168,7 +168,9 @@ sidecars and recoverable `rec_...` blocks. Use
 instead of transcribing from image pages. Use `--verify` to confirm image
 attachments exist and image/factsheet/recoverable source hashes still match the
 manifest. Line-addressed references and identifier-dense blocks stay text-only
-so exact implementation evidence does not depend on image OCR.
+so exact implementation evidence does not depend on image OCR. New artifact
+manifests also include a path-independent bundle fingerprint so repeated runs
+can compare generated artifact content across output directories.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

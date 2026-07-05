@@ -539,6 +539,54 @@ def _factsheet_record(
     }
 
 
+def artifact_bundle_integrity(
+    image_attachments: Iterable[dict[str, Any]],
+    factsheets: Iterable[dict[str, Any]],
+    recoverable_blocks: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a path-independent fingerprint for a mixed-modality artifact set."""
+    items: list[dict[str, Any]] = []
+    for image in image_attachments:
+        items.append(
+            {
+                "kind": "image",
+                "char_start": image.get("char_start"),
+                "char_end": image.get("char_end"),
+                "estimated_image_tokens": image.get("estimated_image_tokens"),
+                "height": image.get("height"),
+                "sha256": image.get("sha256"),
+                "width": image.get("width"),
+            }
+        )
+    for factsheet in factsheets:
+        items.append(
+            {
+                "kind": "factsheet",
+                "entry_count": factsheet.get("entry_count"),
+                "group_id": factsheet.get("group_id"),
+                "text_sha256": factsheet.get("text_sha256"),
+            }
+        )
+    for block in recoverable_blocks:
+        items.append(
+            {
+                "kind": "recoverable",
+                "end_line": block.get("end_line"),
+                "id": block.get("id"),
+                "path": block.get("path"),
+                "source_chunk_id": block.get("source_chunk_id"),
+                "start_line": block.get("start_line"),
+                "text_sha256": block.get("text_sha256"),
+            }
+        )
+    payload = json.dumps(items, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "algorithm": "sha256",
+        "item_count": len(items),
+        "bundle_sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
 def recoverable_block_id(kind: str, text: str, source_hint: str = "") -> str:
     digest = hashlib.sha256(f"{kind}\0{source_hint}\0{text}".encode("utf-8")).hexdigest()[:12]
     return f"rec_{digest}"
@@ -1083,6 +1131,16 @@ def apply_multimodal_pack(
         estimated_mixed_prompt_tokens = mixed_text_tokens
     estimated_tokens_saved_vs_packed = original_packed_tokens - estimated_mixed_prompt_tokens
     estimated_tokens_saved_vs_full = full_scan_tokens - estimated_mixed_prompt_tokens
+    manifest_image_attachments = image_pages if should_image and mode == "artifact" else []
+    manifest_factsheets = [factsheet_record] if factsheet_record else []
+    manifest_recoverable_blocks = (
+        recoverable_blocks if should_image and mode == "artifact" else []
+    )
+    artifact_integrity = artifact_bundle_integrity(
+        manifest_image_attachments,
+        manifest_factsheets if should_image and mode == "artifact" else [],
+        manifest_recoverable_blocks,
+    )
     modality_plan = {
         "mode": mode,
         "enabled": mode != "off",
@@ -1116,9 +1174,10 @@ def apply_multimodal_pack(
         "render_reflow_enabled": True,
         "render_reflowed_chars": len(image_render_source),
         "estimated_image_pages": image_pages if should_image else [],
-        "image_attachments": image_pages if should_image and mode == "artifact" else [],
-        "factsheets": [factsheet_record] if factsheet_record else [],
-        "recoverable_blocks": recoverable_blocks if should_image and mode == "artifact" else [],
+        "image_attachments": manifest_image_attachments,
+        "factsheets": manifest_factsheets if should_image and mode == "artifact" else [],
+        "recoverable_blocks": manifest_recoverable_blocks,
+        "artifact_integrity": artifact_integrity,
         "block_plan": [
             {
                 "id": block.block_id,
@@ -1242,17 +1301,31 @@ def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
     blocks_raw = manifest.get("recoverable_blocks", [])
     images_raw = manifest.get("image_attachments", [])
     factsheets_raw = manifest.get("factsheets", [])
+    integrity_raw = manifest.get("artifact_integrity", {})
     if not isinstance(blocks_raw, list):
         raise ValueError("Mixed-modality manifest has an invalid recoverable_blocks field.")
     if not isinstance(images_raw, list):
         raise ValueError("Mixed-modality manifest has an invalid image_attachments field.")
     if not isinstance(factsheets_raw, list):
         raise ValueError("Mixed-modality manifest has an invalid factsheets field.")
+    if not isinstance(integrity_raw, dict):
+        raise ValueError("Mixed-modality manifest has an invalid artifact_integrity field.")
 
     errors: list[str] = []
     recoverable_blocks = [block for block in blocks_raw if isinstance(block, dict)]
     image_attachments = [item for item in images_raw if isinstance(item, dict)]
     factsheets = [item for item in factsheets_raw if isinstance(item, dict)]
+    actual_integrity = artifact_bundle_integrity(
+        image_attachments,
+        factsheets,
+        recoverable_blocks,
+    )
+    expected_bundle_hash = str(integrity_raw.get("bundle_sha256") or "").strip()
+    if expected_bundle_hash and actual_integrity["bundle_sha256"] != expected_bundle_hash:
+        errors.append(
+            "Artifact bundle hash mismatch: "
+            f"expected {expected_bundle_hash}, got {actual_integrity['bundle_sha256']}"
+        )
     for block in recoverable_blocks:
         errors.extend(verify_recoverable_block(manifest_path, block))
     for factsheet in factsheets:
@@ -1278,6 +1351,12 @@ def verify_mixed_modality_manifest(manifest_path: Path) -> dict[str, Any]:
         "recoverable_block_count": len(recoverable_blocks),
         "image_attachment_count": len(image_attachments),
         "factsheet_count": len(factsheets),
+        "artifact_bundle_sha256": actual_integrity["bundle_sha256"],
+        "artifact_bundle_expected_sha256": expected_bundle_hash,
+        "artifact_bundle_verified": bool(
+            expected_bundle_hash
+            and actual_integrity["bundle_sha256"] == expected_bundle_hash
+        ),
         "error_count": len(errors),
         "errors": errors,
     }

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agenvantage.modality import (
     apply_multimodal_pack,
+    artifact_bundle_integrity,
     classify_verbatim_risk,
     count_exact_identifier_signals,
     extract_factsheet_entries,
@@ -179,6 +180,12 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert plan["image_attachments"]
     assert plan["recoverable_blocks"]
     assert plan["factsheets"]
+    assert plan["artifact_integrity"]["item_count"] == (
+        len(plan["image_attachments"])
+        + len(plan["factsheets"])
+        + len(plan["recoverable_blocks"])
+    )
+    assert plan["artifact_integrity"]["bundle_sha256"]
     assert plan["estimated_tokens_saved_vs_packed_text"] > 0
     assert "GIST_IMAGE_CONTEXT" in mixed
     image_path = Path(plan["image_attachments"][0]["path"])
@@ -200,6 +207,11 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert verification["image_attachment_count"] == len(plan["image_attachments"])
     assert verification["recoverable_block_count"] == len(plan["recoverable_blocks"])
     assert verification["factsheet_count"] == len(plan["factsheets"])
+    assert verification["artifact_bundle_verified"] is True
+    assert (
+        verification["artifact_bundle_sha256"]
+        == plan["artifact_integrity"]["bundle_sha256"]
+    )
 
 
 def test_apply_multimodal_pack_keeps_line_referenced_docs_as_text(tmp_path) -> None:
@@ -395,3 +407,42 @@ def test_verify_mixed_modality_manifest_reports_image_hash_mismatch(
     assert verification["image_attachment_count"] == 1
     assert verification["error_count"] == 1
     assert "Image attachment hash mismatch" in verification["errors"][0]
+
+
+def test_verify_mixed_modality_manifest_reports_bundle_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "page.png"
+    image_bytes = b"\x89PNG\r\n\x1a\nstable"
+    image_path.write_bytes(image_bytes)
+    image_sha = hashlib.sha256(image_bytes).hexdigest()
+    image_record = {
+        "path": str(image_path),
+        "width": 100,
+        "height": 100,
+        "estimated_image_tokens": 16,
+        "char_start": 0,
+        "char_end": 10,
+        "sha256": image_sha,
+    }
+    integrity = artifact_bundle_integrity([image_record], [], [])
+    tampered_record = {**image_record, "width": 101}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [],
+                "factsheets": [],
+                "image_attachments": [tampered_record],
+                "artifact_integrity": integrity,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    verification = verify_mixed_modality_manifest(manifest_path)
+
+    assert verification["ok"] is False
+    assert verification["artifact_bundle_verified"] is False
+    assert verification["error_count"] == 1
+    assert "Artifact bundle hash mismatch" in verification["errors"][0]

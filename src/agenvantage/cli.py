@@ -1395,6 +1395,9 @@ def _format_artifact_verification(summary: dict[str, Any]) -> str:
         f"Factsheets: {summary.get('factsheet_count', 0)}",
         f"Errors: {summary['error_count']}",
     ]
+    if summary.get("artifact_bundle_expected_sha256"):
+        bundle_status = "verified" if summary.get("artifact_bundle_verified") else "failed"
+        lines.append(f"Artifact bundle: {bundle_status}")
     for error in summary["errors"]:
         lines.append(f"- {error}")
     return "\n".join(lines)
