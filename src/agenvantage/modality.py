@@ -129,6 +129,7 @@ _FACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _MAX_FACTSHEET_SCAN = 262_144
 _MAX_FACTSHEET_ENTRIES = 16
+_MAX_PROMPT_FACTSHEET_ENTRIES = 4
 
 
 def count_exact_identifier_signals(text: str) -> int:
@@ -913,7 +914,7 @@ def _artifact_note(
         "[GIST_IMAGE_CONTEXT]\n"
         f"Images(gist): {image_refs}\n"
         f"{factsheet}\n"
-        f"Recover exact source: manifest recoverable_blocks={len(recoverable_ids)}\n"
+        f"Recover: manifest recoverable_blocks={len(recoverable_ids)}\n"
     )
 
 
@@ -1010,7 +1011,9 @@ def apply_multimodal_pack(
     estimated_image_tokens = sum(int(page["estimated_image_tokens"]) for page in pages_estimate)
     fact_entries = extract_factsheet_entries(image_source) if image_source else []
     fact_text = factsheet_text(fact_entries)
-    factsheet_tokens = counter.count(fact_text) if fact_text else 0
+    prompt_fact_entries = fact_entries[:_MAX_PROMPT_FACTSHEET_ENTRIES]
+    prompt_fact_text = factsheet_text(prompt_fact_entries)
+    factsheet_tokens = counter.count(prompt_fact_text) if prompt_fact_text else 0
     estimated_recoverable_ids = [
         recoverable_block_id("source_chunk", block.rendered, block.block_id)
         for block in imageable
@@ -1026,7 +1029,7 @@ def apply_multimodal_pack(
     note_tokens = counter.count(
         _artifact_note(
             pages=estimated_note_pages,
-            factsheet=fact_text,
+            factsheet=prompt_fact_text,
             recoverable_ids=estimated_recoverable_ids,
         )
         if imageable
@@ -1138,7 +1141,7 @@ def apply_multimodal_pack(
     if should_image and mode == "artifact":
         page_note = _artifact_note(
             pages=image_pages,
-            factsheet=fact_text,
+            factsheet=prompt_fact_text,
             recoverable_ids=[item["id"] for item in recoverable_blocks],
         )
         prefix, context_body = markdown.split("## Selected Repository Context\n\n", 1)
@@ -1225,6 +1228,8 @@ def apply_multimodal_pack(
         "exact_text_block_count": len(exact),
         "text_counterfactual_tokens": text_counterfactual_tokens,
         "factsheet_tokens": factsheet_tokens,
+        "factsheet_sidecar_tokens": counter.count(fact_text) if fact_text else 0,
+        "factsheet_prompt_entry_count": len(prompt_fact_entries),
         "artifact_note_tokens": note_tokens,
         "estimated_image_tokens": estimated_image_tokens,
         "estimated_mixed_prompt_tokens": estimated_mixed_prompt_tokens,

@@ -83,9 +83,9 @@ Current local result from July 5, 2026:
 - answer-plan pass rate: `0.8333`
 - median token reduction: `96.03%`
 - median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `2,457.0` tokens
+- median packed prompt: `2,436.0` tokens
 - median prompt tokens saved: `78,482.5`
-- total prompt tokens saved across 12 cases: `1,311,957`
+- total prompt tokens saved across 12 cases: `1,313,307`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -252,22 +252,22 @@ Current local result from July 5, 2026:
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.54%`
+- full-scan theoretical modality reduction before safety gate: `76.56%`
 - full-scan image-candidate rate after safety gate: `0.0`
-- packed median text prompt: `2,504.0` tokens
+- packed median text prompt: `2,483.0` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
-- packed theoretical modality reduction before safety gate: `-90.14%`
+- packed theoretical modality reduction before safety gate: `-91.75%`
 - packed image-candidate rate after safety gate: `0.0`
 - median retrieval tokens saved before modality: `78,482.5`
-- total retrieval tokens saved across 12 cases: `1,311,957`
+- total retrieval tokens saved across 12 cases: `1,313,307`
 - total rough-estimator incremental modality tokens saved after packing: `0`
-- artifact image case rate: `0.3333`
-- total artifact images written: `4`
-- total recoverable blocks: `10`
-- total factsheets: `4`
-- total artifact incremental tokens saved after packing: `1,101`
-- artifact manifests verified: `4/4`
-- artifact bundles verified: `4/4`
+- artifact image case rate: `0.4167`
+- total artifact images written: `5`
+- total recoverable blocks: `11`
+- total factsheets: `5`
+- total artifact incremental tokens saved after packing: `1,247`
+- artifact manifests verified: `5/5`
+- artifact bundles verified: `5/5`
 - artifact manifest verification errors: `0`
 - median end-to-end safe candidate reduction: `95.95%`
 
@@ -326,11 +326,11 @@ Current local result from the production-path implementation:
 
 - cases: `12`
 - cache-eligible rate: `1.0`
-- median stable prefix: `2,428.0` tokens
+- median stable prefix: `2,430.0` tokens
 - median dynamic packet: `89.5` tokens
-- median reusable prefix: `96.38%`
+- median reusable prefix: `96.39%`
 - median estimated warm reduction versus full scan: `99.86%`
-- total estimated warm tokens saved versus full scan: `1,340,441`
+- total estimated warm tokens saved versus full scan: `1,341,749`
 - acceptance pass: `true`
 
 These are cache-layout readiness metrics. Actual cache hits and billed savings

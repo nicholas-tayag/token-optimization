@@ -31,6 +31,11 @@ def create_sample_repo(root: Path) -> None:
     (root / "node_modules" / "library.ts").write_text(
         "rateLimiter secret dependency noise\n", encoding="utf-8"
     )
+    (root / "artifacts").mkdir()
+    (root / "artifacts" / "feature-work-validation.json").write_text(
+        '{"generated": "benchmark output should not become context"}\n',
+        encoding="utf-8",
+    )
 
 
 def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> None:
@@ -39,6 +44,7 @@ def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> 
     assert "src/rateLimiter.ts" in files
     assert ".env" not in files
     assert "node_modules/library.ts" not in files
+    assert "artifacts/feature-work-validation.json" not in files
 
 
 def test_source_files_include_shell_scripts(tmp_path: Path) -> None:

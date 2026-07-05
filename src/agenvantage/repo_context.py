@@ -52,6 +52,7 @@ _IGNORED_PARTS = {
     ".git",
     ".venv",
     "__pycache__",
+    "artifacts",
     "build",
     "coverage",
     "dist",

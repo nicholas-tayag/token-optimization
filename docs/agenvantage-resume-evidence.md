@@ -58,23 +58,23 @@ Feature-work benchmark:
 - Mean selected chunk count: `5.58`
 - Missing-signal warning rate: `0.5833`
 - Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `2,457.0` tokens
+- Median packed prompt: `2,436.0` tokens
 - Median prompt tokens saved: `78,482.5`
 - Median prompt reduction: `96.03%`
-- Total prompt tokens saved across 12 cases: `1,311,957`
+- Total prompt tokens saved across 12 cases: `1,313,307`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
 
 - Cases: `12`
 - Median full-scan prompt: `80,968.5` tokens
-- Median AgenVantage packed prompt: `2,504.0` tokens
+- Median AgenVantage packed prompt: `2,483.0` tokens
 - Median prompt reduction: `95.95%`
 - Median estimated full-scan cold input cost: `$0.02024212`
-- Median estimated packed warm input cost: `$0.00006804`
+- Median estimated packed warm input cost: `$0.00006785`
 - Median estimated warm input savings: `99.66%`
-- Total estimated full-scan cold input cost: `$0.3354495`
-- Total estimated packed warm input cost: `$0.00081895`
+- Total estimated full-scan cold input cost: `$0.3357765`
+- Total estimated packed warm input cost: `$0.0008179`
 - Cost scope: theoretical input-only estimate from a saved pricing snapshot,
   not provider-billed usage
 
@@ -82,12 +82,12 @@ Session cache-readiness benchmark:
 
 - Cases: `12`
 - Cache-eligible rate: `1.0`
-- Median stable prefix: `2,428.0` tokens
+- Median stable prefix: `2,430.0` tokens
 - Median dynamic packet: `89.5` tokens
 - Median full-scan prompt: `80,946.5` tokens
-- Median reusable prefix: `96.38%`
+- Median reusable prefix: `96.39%`
 - Median estimated warm reduction versus full scan: `99.86%`
-- Total estimated warm tokens saved versus full scan: `1,340,441`
+- Total estimated warm tokens saved versus full scan: `1,341,749`
 - Acceptance result: `passed`
 
 Pxpipe-inspired mixed-modality artifact benchmark:
@@ -97,22 +97,22 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.54%`
+- Full-scan theoretical modality reduction before safety gate: `76.56%`
 - Full-scan image-candidate rate after safety gate: `0.0`
-- Packed median text prompt: `2,504.0` tokens
+- Packed median text prompt: `2,483.0` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
-- Packed theoretical modality reduction before safety gate: `-90.14%`
+- Packed theoretical modality reduction before safety gate: `-91.75%`
 - Packed image-candidate rate after safety gate: `0.0`
 - Median retrieval tokens saved before modality: `78,482.5`
-- Total retrieval tokens saved across 12 cases: `1,311,957`
+- Total retrieval tokens saved across 12 cases: `1,313,307`
 - Total rough-estimator incremental modality tokens saved after packing: `0`
-- Artifact image case rate: `0.3333`
-- Total artifact images written: `4`
-- Total factsheets written: `4`
-- Total recoverable source blocks: `10`
-- Total artifact incremental tokens saved after packing: `1,101`
-- Artifact manifests verified: `4/4`
-- Artifact bundles verified: `4/4`
+- Artifact image case rate: `0.4167`
+- Total artifact images written: `5`
+- Total factsheets written: `5`
+- Total recoverable source blocks: `11`
+- Total artifact incremental tokens saved after packing: `1,247`
+- Artifact manifests verified: `5/5`
+- Artifact bundles verified: `5/5`
 - Artifact manifest verification errors: `0`
 - Recoverability: `agenvantage rehydrate` verifies image hashes, PNG signatures,
   factsheets, and `rec_...` source blocks, then retrieves exact source text with
@@ -201,13 +201,13 @@ Built and benchmarked a local repository-context optimizer for coding agents, cu
 Cache-readiness bullet:
 
 ```text
-Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 2.4K-token median stable prefixes, 89.5-token median dynamic packets, and 96.38% reusable-prefix share.
+Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 2.4K-token median stable prefixes, 89.5-token median dynamic packets, and 96.39% reusable-prefix share.
 ```
 
 Forward-looking compression bullet:
 
 ```text
-Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 4 local image artifacts, 4 factsheets, 10 recoverable blocks, and 1.1K additional estimated tokens saved after retrieval.
+Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 5 local image artifacts, 5 factsheets, 11 recoverable blocks, and 1.2K additional estimated tokens saved after retrieval.
 ```
 
 ## Interview Explanation
