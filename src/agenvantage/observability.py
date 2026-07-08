@@ -389,16 +389,44 @@ def seed_demo_trace(db_path: Path, *, repo_path: Path | None = None) -> TraceRec
     return trace
 
 
-def list_traces(db_path: Path, *, limit: int = 20) -> list[TraceRecord]:
+def list_traces(
+    db_path: Path,
+    *,
+    limit: int = 20,
+    quality_status: str | None = None,
+    workflow: str | None = None,
+    min_tokens_saved: int | None = None,
+    attention_only: bool = False,
+) -> list[TraceRecord]:
     init_observability_store(db_path)
+    predicates = []
+    params: list[Any] = []
+    if quality_status:
+        predicates.append("quality_status = ?")
+        params.append(quality_status)
+    if workflow:
+        predicates.append("workflow = ?")
+        params.append(workflow)
+    if min_tokens_saved is not None:
+        predicates.append("tokens_saved >= ?")
+        params.append(min_tokens_saved)
+    if attention_only:
+        predicates.append(
+            """
+            quality_status IN ('failed', 'warning', 'unknown', 'unverified')
+            """
+        )
+    where_clause = f"WHERE {' AND '.join(predicates)}" if predicates else ""
+    params.append(limit)
     with _connect(db_path) as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT * FROM traces
+            {where_clause}
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (limit,),
+            params,
         ).fetchall()
     return [
         TraceRecord(

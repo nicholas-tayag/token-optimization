@@ -589,6 +589,22 @@ def _parser() -> argparse.ArgumentParser:
     traces_list.add_argument("--repo", type=Path, default=Path("."))
     traces_list.add_argument("--db", type=Path, help="Explicit observability database path.")
     traces_list.add_argument("--limit", type=int, default=20)
+    traces_list.add_argument(
+        "--quality-status",
+        choices=("unknown", "unverified", "warning", "annotated", "passed", "failed"),
+        help="Only list traces with this quality status.",
+    )
+    traces_list.add_argument("--workflow", help="Only list traces for one workflow.")
+    traces_list.add_argument(
+        "--min-saved",
+        type=int,
+        help="Only list traces that saved at least this many prompt tokens.",
+    )
+    traces_list.add_argument(
+        "--attention",
+        action="store_true",
+        help="Only list traces that need review: failed, warning, unknown, unverified, or missing signals.",
+    )
     traces_show = traces_subparsers.add_parser("show", help="Show one local trace.")
     traces_show.add_argument("trace_id")
     traces_show.add_argument("--repo", type=Path, default=Path("."))
@@ -1621,17 +1637,41 @@ def _format_trace_created(trace: Any, db_path: Path, report: dict[str, Any]) -> 
     return "\n".join(lines).rstrip()
 
 
-def _format_trace_list(traces: list[Any], db_path: Path) -> str:
+def _format_trace_list(
+    traces: list[Any],
+    db_path: Path,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> str:
     if not traces:
+        filter_lines = []
+        for key, value in (filters or {}).items():
+            if value not in (None, False, ""):
+                filter_lines.append(f"  {key}: {value}")
+        filter_section = (
+            "\n\nActive filters:\n" + "\n".join(filter_lines)
+            if filter_lines
+            else ""
+        )
         return (
             "No AgenVantage traces found.\n\n"
             f"DB: {db_path.resolve()}\n"
+            f"{filter_section}\n"
             'Try: agenvantage observe pack --task "Add tests for upload limits"'
         )
-    lines = ["AgenVantage traces", "", f"DB: {db_path.resolve()}", ""]
+    lines = ["AgenVantage traces", "", f"DB: {db_path.resolve()}"]
+    active_filters = [
+        f"{key}={value}"
+        for key, value in (filters or {}).items()
+        if value not in (None, False, "")
+    ]
+    if active_filters:
+        lines.extend(["", f"Filters: {', '.join(active_filters)}"])
+    lines.append("")
     for trace in traces:
         lines.append(
             f"{trace.trace_id}  {trace.created_at}  "
+            f"quality={trace.quality_status}  workflow={trace.workflow}  "
             f"saved={trace.tokens_saved:,} ({trace.reduction_percent}%)  "
             f"files={trace.selected_file_count}  {trace.task}"
         )
@@ -1833,7 +1873,26 @@ def _run_observe(args: argparse.Namespace) -> None:
 def _run_traces(args: argparse.Namespace) -> None:
     db_path = _observability_db_from_args(args, args.repo)
     if args.traces_command == "list":
-        print(_format_trace_list(list_traces(db_path, limit=args.limit), db_path))
+        filters = {
+            "quality_status": args.quality_status,
+            "workflow": args.workflow,
+            "min_saved": args.min_saved,
+            "attention": args.attention,
+        }
+        print(
+            _format_trace_list(
+                list_traces(
+                    db_path,
+                    limit=args.limit,
+                    quality_status=args.quality_status,
+                    workflow=args.workflow,
+                    min_tokens_saved=args.min_saved,
+                    attention_only=args.attention,
+                ),
+                db_path,
+                filters=filters,
+            )
+        )
         return
     if args.traces_command == "show":
         try:

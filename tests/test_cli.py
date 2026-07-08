@@ -503,6 +503,8 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
 
     assert trace_id in listed.stdout
     assert "saved=" in listed.stdout
+    assert "quality=" in listed.stdout
+    assert "workflow=feature" in listed.stdout
 
     shown = subprocess.run(
         [
@@ -547,6 +549,42 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
 
     assert "AgenVantage trace annotated" in annotated.stdout
     assert "Status: failed" in annotated.stdout
+
+    failed_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--quality-status",
+            "failed",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Filters: quality_status=failed" in failed_list.stdout
+    assert trace_id in failed_list.stdout
+    assert "quality=failed" in failed_list.stdout
+
+    attention_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--attention",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Filters: attention=True" in attention_list.stdout
+    assert trace_id in attention_list.stdout
 
     shown_after_annotation = subprocess.run(
         [

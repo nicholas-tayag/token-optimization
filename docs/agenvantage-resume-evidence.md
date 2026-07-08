@@ -43,6 +43,9 @@ Current implemented scope:
   platform-style health summary, next-action queue, token accounting, selected
   files, missing-signal warnings, spans, artifacts, quality labels, and
   provider usage reconciliation totals
+- Trace triage CLI: `agenvantage traces list` supports quality-status,
+  workflow, minimum-token-savings, and attention-needed filters while showing
+  quality status and workflow on each trace row
 
 Out of scope for verified resume claims right now:
 
@@ -191,6 +194,9 @@ Local observability dashboard validation:
 - `agenvantage traces show <trace-id>` was manually validated on a temporary
   repository and showed `Health`, `Next actions`, selected files, warnings,
   spans, and artifacts for the recorded trace.
+- `agenvantage traces list --quality-status failed --attention` was manually
+  validated on a temporary repository and showed active filters, trace quality,
+  workflow, saved tokens, selected-file count, and task.
 
 Regression/use-case benchmark:
 
