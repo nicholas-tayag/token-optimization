@@ -520,6 +520,9 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     )
 
     assert "AgenVantage trace" in shown.stdout
+    assert "Health:" in shown.stdout
+    assert "Next actions:" in shown.stdout
+    assert "Quality:" in shown.stdout
     assert "Token accounting:" in shown.stdout
     assert "src/rate_limiter.py" in shown.stdout
 
@@ -845,6 +848,8 @@ def test_provider_import_attaches_usage_to_trace(tmp_path: Path) -> None:
         text=True,
     )
     assert "Provider-reported usage:" in shown.stdout
+    assert "Cache hit rate: 40.00%" in shown.stdout
+    assert "Reported latency: 910.00 ms" in shown.stdout
     assert "resp_cli_123" in shown.stdout
     assert "cached=256" in shown.stdout
     assert "reconciliation=provider_reported" in shown.stdout

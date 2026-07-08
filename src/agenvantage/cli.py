@@ -1638,10 +1638,52 @@ def _format_trace_list(traces: list[Any], db_path: Path) -> str:
     return "\n".join(lines)
 
 
+def _trace_provider_totals(trace: dict[str, Any]) -> dict[str, Any]:
+    provider_usage = trace.get("provider_usage") or []
+    input_tokens = sum(int(usage.get("input_tokens") or 0) for usage in provider_usage)
+    cached_tokens = sum(int(usage.get("cached_input_tokens") or 0) for usage in provider_usage)
+    output_tokens = sum(int(usage.get("output_tokens") or 0) for usage in provider_usage)
+    cost = sum(float(usage.get("request_cost_usd") or 0.0) for usage in provider_usage)
+    latency_ms = sum(float(usage.get("latency_ms") or 0.0) for usage in provider_usage)
+    return {
+        "record_count": len(provider_usage),
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_tokens,
+        "output_tokens": output_tokens,
+        "cache_hit_rate_percent": (cached_tokens / input_tokens * 100) if input_tokens else 0.0,
+        "request_cost_usd": cost,
+        "latency_ms": latency_ms,
+    }
+
+
+def _trace_next_actions(trace: dict[str, Any]) -> list[str]:
+    metadata = trace.get("metadata") or {}
+    missing = metadata.get("missing_signals") or []
+    annotations = trace.get("annotations") or []
+    provider_usage = trace.get("provider_usage") or []
+    quality_status = str(trace.get("quality_status") or "unknown")
+    actions: list[str] = []
+    if quality_status == "failed":
+        actions.append("Investigate failed quality label before reusing this context pattern.")
+    if missing:
+        actions.append("Review missing-signal warnings and rerun with narrower task terms or more provenance.")
+    if quality_status in {"unknown", "unverified"} and not annotations:
+        actions.append("Annotate the trace after the agent run: agent_succeeded, context_missing, or tests_failed.")
+    if not provider_usage:
+        actions.append("Import provider usage if available to compare local token estimates with billed usage.")
+    if not actions:
+        actions.append("No immediate action required; keep monitoring future runs for regressions.")
+    return actions
+
+
 def _format_trace_detail(trace: dict[str, Any]) -> str:
     metadata = trace.get("metadata") or {}
     selected_files = metadata.get("selected_files") or []
     missing = metadata.get("missing_signals") or []
+    spans = trace.get("spans") or []
+    provider_totals = _trace_provider_totals(trace)
+    span_total_ms = sum(float(span.get("duration_ms") or 0.0) for span in spans)
+    trace_status = str(trace.get("quality_status") or "unknown")
     lines = [
         "AgenVantage trace",
         "",
@@ -1649,6 +1691,22 @@ def _format_trace_detail(trace: dict[str, Any]) -> str:
         f"Task:  {trace['task']}",
         f"Repo:  {trace['repo_path']}",
         f"Status: {trace['status']}",
+        f"Quality: {trace_status}",
+        "",
+        "Health:",
+        f"  Token reduction: {float(trace['reduction_percent']):.2f}%",
+        f"  Selected files:  {len(selected_files)}",
+        f"  Warnings:        {len(missing)}",
+        f"  Spans:           {len(spans)} ({span_total_ms:.2f} ms total)",
+        (
+            "  Provider usage:  "
+            f"{provider_totals['record_count']} records, "
+            f"${provider_totals['request_cost_usd']:.8f}, "
+            f"{provider_totals['cache_hit_rate_percent']:.2f}% cache hit"
+        ),
+        "",
+        "Next actions:",
+        *[f"  - {item}" for item in _trace_next_actions(trace)],
         "",
         "Token accounting:",
         f"  Full scan: {int(trace['full_scan_prompt_tokens']):,}",
@@ -1667,7 +1725,6 @@ def _format_trace_detail(trace: dict[str, Any]) -> str:
         lines.extend(f"  - {item}" for item in missing)
     lines.append("")
     lines.append("Spans:")
-    spans = trace.get("spans") or []
     if spans:
         for span in spans:
             lines.append(
@@ -1694,11 +1751,15 @@ def _format_trace_detail(trace: dict[str, Any]) -> str:
             )
     provider_usage = trace.get("provider_usage") or []
     if provider_usage:
-        total_cost = sum(float(usage.get("request_cost_usd") or 0.0) for usage in provider_usage)
         lines.append("")
         lines.append("Provider-reported usage:")
-        lines.append(f"  Records: {len(provider_usage)}")
-        lines.append(f"  Reported cost: ${total_cost:.8f}")
+        lines.append(f"  Records: {provider_totals['record_count']}")
+        lines.append(f"  Input tokens: {provider_totals['input_tokens']:,}")
+        lines.append(f"  Cached input tokens: {provider_totals['cached_input_tokens']:,}")
+        lines.append(f"  Output tokens: {provider_totals['output_tokens']:,}")
+        lines.append(f"  Cache hit rate: {provider_totals['cache_hit_rate_percent']:.2f}%")
+        lines.append(f"  Reported latency: {provider_totals['latency_ms']:.2f} ms")
+        lines.append(f"  Reported cost: ${provider_totals['request_cost_usd']:.8f}")
         for usage in provider_usage:
             request_id = usage.get("request_id") or "no request id"
             lines.append(

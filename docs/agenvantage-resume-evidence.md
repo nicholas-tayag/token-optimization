@@ -39,6 +39,10 @@ Current implemented scope:
   Relic-style trace cockpit with KPI tiles, operations metrics, cache hit rate,
   p95 span latency, an action queue, workflow breakdowns, trace cards, selected
   files, quality labels, and provider-usage imports
+- Trace detail console: `agenvantage traces show <trace-id>` now presents a
+  platform-style health summary, next-action queue, token accounting, selected
+  files, missing-signal warnings, spans, artifacts, quality labels, and
+  provider usage reconciliation totals
 
 Out of scope for verified resume claims right now:
 
@@ -184,6 +188,9 @@ Local observability dashboard validation:
   `Workflow breakdown`.
 - Demo dashboard surfaces provider cache hit rate and p95 span latency from the
   local SQLite trace store.
+- `agenvantage traces show <trace-id>` was manually validated on a temporary
+  repository and showed `Health`, `Next actions`, selected files, warnings,
+  spans, and artifacts for the recorded trace.
 
 Regression/use-case benchmark:
 
