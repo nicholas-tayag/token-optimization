@@ -651,6 +651,47 @@ def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
     assert "src/rate_limiter.py" in dashboard_html
 
 
+def test_observe_demo_and_dashboard_demo_seed_teaching_trace(tmp_path: Path) -> None:
+    demo = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "demo",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage demo trace created" in demo.stdout
+    assert "without calling an API" in demo.stdout
+
+    dashboard = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "dashboard",
+            "--demo",
+            "--no-browser",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    dashboard_path = tmp_path / ".agenvantage" / "observability-dashboard.html"
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert "AgenVantage observability dashboard written to" in dashboard.stdout
+    assert "Demo: add upload limit smoke-test coverage" in dashboard_html
+    assert "provider usage records" in dashboard_html
+    assert "agent succeeded" in dashboard_html
+
+
 def test_experiments_compare_records_variants_and_trace_artifacts(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / "tests").mkdir()

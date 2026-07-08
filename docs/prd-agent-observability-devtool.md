@@ -376,6 +376,7 @@ Acceptance:
 Current implementation slice:
 
 - `agenvantage observe init` creates `.agenvantage/observability.db`.
+- `agenvantage observe demo` seeds a deterministic no-API teaching trace.
 - `agenvantage observe pack --task "..."` runs the feature context packer and
   records a local trace.
 - `agenvantage traces list` and `agenvantage traces show <trace-id>` inspect
@@ -384,6 +385,8 @@ Current implementation slice:
   agent-run artifacts from SQLite.
 - `agenvantage dashboard` writes `.agenvantage/observability-dashboard.html`
   and can open a local static dashboard from the SQLite trace store.
+- `agenvantage dashboard --demo` seeds the teaching trace and renders the
+  dashboard in one command.
 - The initial trace schema stores traces, spans, and context/manifest artifacts.
 
 ### Build 2: Beginner-Friendly Observe Wrapper
@@ -433,6 +436,8 @@ Acceptance:
 - Trace artifacts can be recovered from the CLI with `traces export`, covering
   the MVP copyable handoff requirement while the static dashboard remains
   read-only.
+- `dashboard --demo` satisfies the built-in demo trace path for first-run
+  users without credentials or provider spend.
 - A later server-backed version should add token trends, richer trace detail,
   filters, and a span waterfall.
 

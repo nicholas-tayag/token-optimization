@@ -286,6 +286,109 @@ def record_pack_trace(
     )
 
 
+def seed_demo_trace(db_path: Path, *, repo_path: Path | None = None) -> TraceRecord:
+    repo = Path(repo_path or ".").resolve()
+    report = {
+        "task": "Demo: add upload limit smoke-test coverage",
+        "preset": "feature",
+        "repo_count": 1,
+        "prompt_token_accounting": {
+            "original_user_prompt_tokens": 8,
+            "full_scan_prompt_tokens": 40797,
+            "packed_prompt_tokens": 5630,
+            "prompt_tokens_saved_vs_full_scan": 35167,
+            "prompt_reduction_percent_vs_full_scan": 86.2,
+        },
+        "selected_chunks": [
+            {"id": "src/server.py#L20-L80", "path": "src/server.py"},
+            {"id": "tests/test_upload_limits.py#L1-L90", "path": "tests/test_upload_limits.py"},
+            {"id": "pyproject.toml#L1-L40", "path": "pyproject.toml"},
+        ],
+        "change_surface": {
+            "edit_targets": [{"path": "src/server.py"}],
+            "test_targets": [{"path": "tests/test_upload_limits.py"}],
+            "config_targets": [{"path": "pyproject.toml"}],
+            "supporting_targets": [{"path": "src/upload_config.py"}],
+            "missing_signals": [],
+        },
+        "covered_query_terms": ["upload", "limit", "smoke", "test"],
+        "uncovered_query_terms": [],
+    }
+    markdown = (
+        "# AgenVantage Context Package\n\n"
+        "## Task\n\n"
+        "Demo: add upload limit smoke-test coverage\n\n"
+        "## Selected Repository Context\n\n"
+        "[SOURCE:src/server.py#L20-L80]\n"
+        "```python\n"
+        "def upload_file(request):\n"
+        "    return enforce_upload_limit(request)\n"
+        "```\n\n"
+        "[SOURCE:tests/test_upload_limits.py#L1-L90]\n"
+        "```python\n"
+        "def test_upload_limit_rejects_large_file():\n"
+        "    assert True\n"
+        "```\n"
+    )
+    trace = record_pack_trace(
+        db_path,
+        markdown=markdown,
+        report=report,
+        repo_path=repo,
+        workflow="demo",
+    )
+    record_trace_span(
+        db_path,
+        trace.trace_id,
+        name="Demo external agent",
+        kind="agent.external",
+        duration_ms=842.0,
+        input_tokens=trace.packed_prompt_tokens,
+        metadata={
+            "command": ["demo-agent", "implement-upload-limit-test"],
+            "exit_code": 0,
+            "stdin_handoff": True,
+        },
+    )
+    record_trace_artifact(
+        db_path,
+        trace.trace_id,
+        kind="agent_stdout",
+        content=(
+            "Demo agent plan:\n"
+            "- Edit src/server.py to enforce upload size.\n"
+            "- Add tests/test_upload_limits.py coverage.\n"
+            "- Run targeted upload smoke tests.\n"
+        ),
+        metadata={"demo": True},
+    )
+    annotate_trace(
+        db_path,
+        trace.trace_id,
+        label="agent_succeeded",
+        note="Demo trace: context was sufficient for a plausible upload-limit test task.",
+    )
+    import_provider_usage_records(
+        db_path,
+        [
+            {
+                "trace_id": trace.trace_id,
+                "request_id": "demo_provider_usage",
+                "provider": "openai",
+                "model": "gpt-demo",
+                "input_tokens": 5630,
+                "cached_input_tokens": 0,
+                "output_tokens": 420,
+                "request_cost_usd": 0.0,
+                "latency_ms": 842.0,
+            }
+        ],
+        provider="openai",
+        reconciliation_status="estimated",
+    )
+    return trace
+
+
 def list_traces(db_path: Path, *, limit: int = 20) -> list[TraceRecord]:
     init_observability_store(db_path)
     with _connect(db_path) as connection:

@@ -12,6 +12,7 @@ from agenvantage.observability import (
     record_pack_trace,
     record_trace_artifact,
     record_trace_span,
+    seed_demo_trace,
     write_observability_dashboard,
 )
 
@@ -240,3 +241,21 @@ def test_import_provider_usage_records_stays_separate_from_local_estimates(tmp_p
     dashboard = dashboard_path.read_text(encoding="utf-8")
     assert "provider usage records" in dashboard
     assert "provider reported cost" in dashboard
+
+
+def test_seed_demo_trace_creates_teaching_dashboard_data(tmp_path: Path) -> None:
+    db_path = tmp_path / ".agenvantage" / "observability.db"
+
+    trace = seed_demo_trace(db_path, repo_path=tmp_path)
+
+    loaded = load_trace(db_path, trace.trace_id)
+    assert loaded["task"] == "Demo: add upload limit smoke-test coverage"
+    assert loaded["tokens_saved"] == 35167
+    assert any(span["kind"] == "agent.external" for span in loaded["spans"])
+    assert loaded["annotations"][0]["label"] == "agent_succeeded"
+    assert loaded["provider_usage"][0]["reconciliation_status"] == "estimated"
+    dashboard = write_observability_dashboard(db_path, tmp_path / "dashboard.html").read_text(
+        encoding="utf-8"
+    )
+    assert "Demo: add upload limit smoke-test coverage" in dashboard
+    assert "35,167" in dashboard

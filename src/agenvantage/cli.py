@@ -41,6 +41,7 @@ from agenvantage.observability import (
     record_pack_trace,
     record_trace_artifact,
     record_trace_span,
+    seed_demo_trace,
     write_observability_dashboard,
 )
 from agenvantage.provider_validation import (
@@ -527,6 +528,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     observe_init.add_argument("--db", type=Path, help="Explicit observability database path.")
 
+    observe_demo = observe_subparsers.add_parser(
+        "demo",
+        help="Seed a local demo trace for the observability dashboard.",
+    )
+    observe_demo.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    observe_demo.add_argument("--db", type=Path, help="Explicit observability database path.")
+
     observe_pack = observe_subparsers.add_parser(
         "pack",
         help="Pack context and record a local observability trace.",
@@ -628,6 +641,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Repository root for .agenvantage/observability.db (default: current directory).",
     )
     dashboard.add_argument("--db", type=Path, help="Explicit observability database path.")
+    dashboard.add_argument(
+        "--demo",
+        action="store_true",
+        help="Seed a deterministic demo trace before rendering the dashboard.",
+    )
     dashboard.add_argument(
         "--output",
         type=Path,
@@ -1714,6 +1732,25 @@ def _run_observe(args: argparse.Namespace) -> None:
             )
         )
         return
+    if args.observe_command == "demo":
+        db_path = _observability_db_from_args(args, args.repo)
+        trace = seed_demo_trace(db_path, repo_path=args.repo)
+        print(
+            "\n".join(
+                [
+                    "AgenVantage demo trace created.",
+                    "",
+                    f"Trace: {trace.trace_id}",
+                    f"DB:    {db_path.resolve()}",
+                    "",
+                    "This demo shows token savings, selected files, an agent span,",
+                    "a quality label, and provider-usage fields without calling an API.",
+                    "",
+                    "Next: agenvantage dashboard",
+                ]
+            )
+        )
+        return
     if args.observe_command == "pack":
         markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
         write_package_outputs(markdown, report, args.output, args.manifest)
@@ -1805,6 +1842,8 @@ def _run_traces(args: argparse.Namespace) -> None:
 def _run_observability_dashboard(args: argparse.Namespace) -> None:
     repo = Path(args.repo).resolve()
     db_path = _observability_db_from_args(args, repo)
+    if getattr(args, "demo", False):
+        seed_demo_trace(db_path, repo_path=repo)
     output = Path(args.output) if args.output is not None else repo / ".agenvantage" / "observability-dashboard.html"
     dashboard_path = write_observability_dashboard(db_path, output, limit=args.limit)
     dashboard_uri = dashboard_path.resolve().as_uri()

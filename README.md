@@ -129,11 +129,13 @@ If `python` is not available, install Python 3.10+ or use
 agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
 agenvantage observe init                      # create local trace storage
+agenvantage observe demo                      # seed a no-API demo trace
 agenvantage observe pack --task "..."         # pack context and record a trace
 agenvantage traces list                       # inspect recent AI-agent task traces
 agenvantage traces export <trace-id>          # recover stored context Markdown
 agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
+agenvantage dashboard --demo                  # one-command seeded dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
 agenvantage provider import --records provider-usage.json --trace-id <trace-id>
 agenvantage agent run --task "..." -- <command>
@@ -188,6 +190,7 @@ Start with:
 
 ```bash
 agenvantage observe init
+agenvantage observe demo
 agenvantage observe pack --task "Add tests for upload limits"
 agenvantage traces list
 agenvantage traces annotate <trace-id> --label agent_succeeded --note "Patch applied cleanly"
@@ -217,6 +220,11 @@ can spot prompts that saved tokens but still failed quality.
 artifact by default. Use `--kind agent_stdout`, `--kind agent_stderr`, or
 `--artifact-id ...` to recover other stored artifacts, and `--output ...` to
 write them to disk.
+
+For a no-key first look, run `agenvantage dashboard --demo`. It seeds a
+deterministic local trace showing token savings, selected files, an external
+agent span, a quality label, and provider-usage fields without making an API
+call.
 
 `agenvantage provider import --records ... --trace-id ...` attaches saved
 provider-reported usage to a local trace. It can normalize saved validation
