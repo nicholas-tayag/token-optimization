@@ -75,7 +75,7 @@ Run it with:
   --summary
 ```
 
-Current local result from July 5, 2026:
+Current local result from July 7, 2026:
 
 - edit-target recall: `1.0`
 - test-target recall: `0.8333`
@@ -85,7 +85,7 @@ Current local result from July 5, 2026:
 - median full-scan prompt: `80,921.5` tokens
 - median packed prompt: `1,993.0` tokens
 - median prompt tokens saved: `78,813.0`
-- total prompt tokens saved across 12 cases: `1,318,929`
+- total prompt tokens saved across 12 cases: `1,318,563`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -247,25 +247,25 @@ Recover exact text for an imaged block with:
   --id rec_...
 ```
 
-Current local result from July 5, 2026:
+Current local result from July 7, 2026:
 
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens
 - full-scan median theoretical image prompt: `19,044.0` tokens
-- full-scan theoretical modality reduction before safety gate: `76.58%`
+- full-scan theoretical modality reduction before safety gate: `76.57%`
 - full-scan image-candidate rate after safety gate: `0.0`
 - packed median text prompt: `2,040.0` tokens
 - packed median theoretical image prompt: `4,761.0` tokens
 - packed theoretical modality reduction before safety gate: `-133.38%`
 - packed image-candidate rate after safety gate: `0.0`
 - median retrieval tokens saved before modality: `78,813.0`
-- total retrieval tokens saved across 12 cases: `1,318,929`
+- total retrieval tokens saved across 12 cases: `1,318,563`
 - total rough-estimator incremental modality tokens saved after packing: `0`
 - artifact image case rate: `0.25`
 - total artifact images written: `3`
 - total recoverable blocks: `5`
 - total factsheets: `3`
-- total artifact incremental tokens saved after packing: `397`
+- total artifact incremental tokens saved after packing: `527`
 - artifact manifests verified: `3/3`
 - artifact bundles verified: `3/3`
 - artifact manifest verification errors: `0`
@@ -330,7 +330,7 @@ Current local result from the production-path implementation:
 - median dynamic packet: `89.5` tokens
 - median reusable prefix: `95.59%`
 - median estimated warm reduction versus full scan: `99.86%`
-- total estimated warm tokens saved versus full scan: `1,342,610`
+- total estimated warm tokens saved versus full scan: `1,342,244`
 - acceptance pass: `true`
 
 These are cache-layout readiness metrics. Actual cache hits and billed savings

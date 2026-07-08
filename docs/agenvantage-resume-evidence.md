@@ -1,6 +1,6 @@
 # AgenVantage Resume Evidence
 
-Last updated: 2026-07-05
+Last updated: 2026-07-07
 
 ## Project Scope
 
@@ -61,7 +61,7 @@ Feature-work benchmark:
 - Median packed prompt: `1,993.0` tokens
 - Median prompt tokens saved: `78,813.0`
 - Median prompt reduction: `96.73%`
-- Total prompt tokens saved across 12 cases: `1,318,929`
+- Total prompt tokens saved across 12 cases: `1,318,563`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
@@ -88,7 +88,7 @@ Session cache-readiness benchmark:
 - Median full-scan prompt: `80,946.5` tokens
 - Median reusable prefix: `95.59%`
 - Median estimated warm reduction versus full scan: `99.86%`
-- Total estimated warm tokens saved versus full scan: `1,342,610`
+- Total estimated warm tokens saved versus full scan: `1,342,244`
 - Acceptance result: `passed`
 
 Pxpipe-inspired mixed-modality artifact benchmark:
@@ -98,20 +98,20 @@ Pxpipe-inspired mixed-modality artifact benchmark:
   provider-billed savings
 - Full-scan median text prompt: `80,968.5` tokens
 - Full-scan median estimated image prompt: `19,044.0` tokens
-- Full-scan theoretical modality reduction before safety gate: `76.58%`
+- Full-scan theoretical modality reduction before safety gate: `76.57%`
 - Full-scan image-candidate rate after safety gate: `0.0`
 - Packed median text prompt: `2,040.0` tokens
 - Packed median estimated image prompt: `4,761.0` tokens
 - Packed theoretical modality reduction before safety gate: `-133.38%`
 - Packed image-candidate rate after safety gate: `0.0`
 - Median retrieval tokens saved before modality: `78,813.0`
-- Total retrieval tokens saved across 12 cases: `1,318,929`
+- Total retrieval tokens saved across 12 cases: `1,318,563`
 - Total rough-estimator incremental modality tokens saved after packing: `0`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
 - Total factsheets written: `3`
 - Total recoverable source blocks: `5`
-- Total artifact incremental tokens saved after packing: `397`
+- Total artifact incremental tokens saved after packing: `527`
 - Artifact manifests verified: `3/3`
 - Artifact bundles verified: `3/3`
 - Artifact manifest verification errors: `0`
@@ -208,7 +208,7 @@ Added cache-aware feature sessions that split stable repository context from per
 Forward-looking compression bullet:
 
 ```text
-Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 3 local image artifacts, 3 factsheets, 5 recoverable blocks, and 397 additional estimated tokens saved after retrieval.
+Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 3 local image artifacts, 3 factsheets, 5 recoverable blocks, and 527 additional estimated tokens saved after retrieval.
 ```
 
 ## Interview Explanation

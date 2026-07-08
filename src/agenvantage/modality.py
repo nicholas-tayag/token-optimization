@@ -22,6 +22,9 @@ MIN_ADAPTIVE_IMAGE_WIDTH = 336
 MIN_ADAPTIVE_IMAGE_HEIGHT = 224
 ADAPTIVE_IMAGE_WIDTH_STEP = 112
 ADAPTIVE_IMAGE_HEIGHT_STEP = 56
+_ARTIFACT_IMAGE_DIR = Path("i")
+_ARTIFACT_FACTSHEET_DIR = Path("f")
+_ARTIFACT_RECOVERABLE_DIR = Path("r")
 
 _HEX_RE = re.compile(r"\b[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(
@@ -129,7 +132,7 @@ _FACT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _MAX_FACTSHEET_SCAN = 262_144
 _MAX_FACTSHEET_ENTRIES = 16
-_MAX_PROMPT_FACTSHEET_ENTRIES = 4
+_MAX_PROMPT_FACTSHEET_ENTRIES = 2
 
 
 def count_exact_identifier_signals(text: str) -> int:
@@ -524,7 +527,7 @@ def _factsheet_record(
 ) -> dict[str, Any] | None:
     if not fact_text:
         return None
-    factsheet_path = artifact_root / "factsheets" / f"{group_id}.txt"
+    factsheet_path = artifact_root / _ARTIFACT_FACTSHEET_DIR / f"{group_id}.txt"
     factsheet_bytes = fact_text.rstrip().encode("utf-8") + b"\n"
     if write:
         factsheet_path.parent.mkdir(parents=True, exist_ok=True)
@@ -802,11 +805,14 @@ def render_text_to_png_pages(
     output_dir: Path,
     base_name: str,
     profile: ModalityProviderProfile,
+    *,
+    compact_names: bool = False,
 ) -> list[RenderPage]:
     pages = []
     output_dir.mkdir(parents=True, exist_ok=True)
     for index, (lines, char_start, char_end) in enumerate(_paginate_text(text, profile), start=1):
-        path = output_dir / f"{base_name}-p{index:02d}.png"
+        file_name = f"p{index:02d}.png" if compact_names else f"{base_name}-p{index:02d}.png"
+        path = output_dir / file_name
         _render_text_page(lines, path, profile)
         pages.append(
             RenderPage(
@@ -910,12 +916,11 @@ def _artifact_note(
     image_refs = ", ".join(
         f"`{page.get('relative_path') or page.get('path')}`" for page in pages
     )
-    return (
-        "[GIST_IMAGE_CONTEXT]\n"
-        f"Images(gist): {image_refs}\n"
-        f"{factsheet}\n"
-        f"Recover: manifest recoverable_blocks={len(recoverable_ids)}\n"
-    )
+    parts = [f"IMG gist={image_refs}"]
+    if factsheet:
+        parts.append(factsheet)
+    parts.append(f"source=manifest blocks={len(recoverable_ids)}")
+    return "; ".join(parts) + "\n"
 
 
 def apply_multimodal_pack(
@@ -938,12 +943,7 @@ def apply_multimodal_pack(
     pack_id = _pack_id(report)
     artifact_root = output_dir or (Path("artifacts") / "context-images" / pack_id)
     if model and not model_supported_by_profile(model, base_profile):
-        original_packed_tokens = int(
-            report.get("prompt_token_accounting", {}).get(
-                "packed_prompt_tokens",
-                report.get("selected_context_tokens", counter.count(markdown)),
-            )
-        )
+        original_packed_tokens = counter.count(markdown)
         report["multimodal"] = {
             "mode": mode,
             "enabled": True,
@@ -1021,8 +1021,8 @@ def apply_multimodal_pack(
     estimated_note_pages = [
         {
             **page,
-            "path": str(artifact_root / "images" / f"{group_id}-p{page['page_index']:02d}.png"),
-            "relative_path": str(Path("images") / f"{group_id}-p{page['page_index']:02d}.png"),
+            "path": str(artifact_root / _ARTIFACT_IMAGE_DIR / f"p{page['page_index']:02d}.png"),
+            "relative_path": str(_ARTIFACT_IMAGE_DIR / f"p{page['page_index']:02d}.png"),
         }
         for page in pages_estimate
     ]
@@ -1070,12 +1070,13 @@ def apply_multimodal_pack(
         else None
     )
     if should_image and mode == "artifact":
-        image_output_dir = artifact_root / "images"
+        image_output_dir = artifact_root / _ARTIFACT_IMAGE_DIR
         rendered_pages = render_text_to_png_pages(
             image_render_source,
             image_output_dir,
             group_id,
             profile,
+            compact_names=True,
         )
         image_pages = [
             {
@@ -1090,7 +1091,7 @@ def apply_multimodal_pack(
             }
             for page in rendered_pages
         ]
-        recoverable_dir = artifact_root / "recoverable"
+        recoverable_dir = artifact_root / _ARTIFACT_RECOVERABLE_DIR
         recoverable_dir.mkdir(parents=True, exist_ok=True)
         for block in imageable:
             rec_id = recoverable_block_id("source_chunk", block.rendered, block.block_id)
@@ -1113,8 +1114,8 @@ def apply_multimodal_pack(
         image_pages = [
             {
                 **page,
-                "path": str(artifact_root / "images" / f"{group_id}-p{page['page_index']:02d}.png"),
-                "relative_path": str(Path("images") / f"{group_id}-p{page['page_index']:02d}.png"),
+                "path": str(artifact_root / _ARTIFACT_IMAGE_DIR / f"p{page['page_index']:02d}.png"),
+                "relative_path": str(_ARTIFACT_IMAGE_DIR / f"p{page['page_index']:02d}.png"),
             }
             for page in pages_estimate
         ]
@@ -1130,7 +1131,7 @@ def apply_multimodal_pack(
                 ).hexdigest(),
                 "text_path": str(
                     artifact_root
-                    / "recoverable"
+                    / _ARTIFACT_RECOVERABLE_DIR
                     / f"{recoverable_block_id('source_chunk', block.rendered, block.block_id)}.txt"
                 ),
             }
@@ -1168,8 +1169,6 @@ def apply_multimodal_pack(
             context_parts.append(tail.strip())
         mixed_markdown = (
             prefix.rstrip()
-            + "\n\n## Mixed-Modality Guidance\n\n"
-            + "Exact values: text/Facts. Images: gist only.\n\n"
             + "## Selected Repository Context\n\n"
             + "\n\n".join(part.rstrip() for part in context_parts if part.strip()).rstrip()
             + "\n"
@@ -1177,12 +1176,7 @@ def apply_multimodal_pack(
     else:
         mixed_markdown = markdown
 
-    original_packed_tokens = int(
-        report.get("prompt_token_accounting", {}).get(
-            "packed_prompt_tokens",
-            report.get("selected_context_tokens", counter.count(markdown)),
-        )
-    )
+    original_packed_tokens = counter.count(markdown)
     full_scan_tokens = int(
         report.get("prompt_token_accounting", {}).get(
             "full_scan_prompt_tokens",

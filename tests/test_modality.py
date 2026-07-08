@@ -182,6 +182,8 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     assert plan["image_attachments"]
     assert plan["recoverable_blocks"]
     assert plan["factsheets"]
+    assert plan["factsheet_prompt_entry_count"] <= 2
+    assert plan["factsheets"][0]["entry_count"] >= plan["factsheet_prompt_entry_count"]
     assert plan["artifact_integrity"]["item_count"] == (
         len(plan["image_attachments"])
         + len(plan["factsheets"])
@@ -189,7 +191,9 @@ def test_apply_multimodal_pack_writes_png_and_recoverable_artifacts(tmp_path) ->
     )
     assert plan["artifact_integrity"]["bundle_sha256"]
     assert plan["estimated_tokens_saved_vs_packed_text"] > 0
-    assert "GIST_IMAGE_CONTEXT" in mixed
+    assert "IMG gist=`i/p01.png`" in mixed
+    assert "source=manifest blocks=" in mixed
+    assert "rec_" not in plan["image_attachments"][0]["relative_path"]
     image_path = Path(plan["image_attachments"][0]["path"])
     assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert hashlib.sha256(image_path.read_bytes()).hexdigest() == plan["image_attachments"][0][
