@@ -380,6 +380,8 @@ Current implementation slice:
   records a local trace.
 - `agenvantage traces list` and `agenvantage traces show <trace-id>` inspect
   the stored trace.
+- `agenvantage dashboard` writes `.agenvantage/observability-dashboard.html`
+  and can open a local static dashboard from the SQLite trace store.
 - The initial trace schema stores traces, spans, and context/manifest artifacts.
 
 ### Build 2: Beginner-Friendly Observe Wrapper
@@ -404,6 +406,8 @@ Acceptance:
 
 ### Build 3: Local Dashboard
 
+Status: partially implemented as a generated static HTML dashboard.
+
 Goal: visual Datadog-style UI for individual developers.
 
 Tasks:
@@ -422,8 +426,10 @@ Acceptance:
 
 - Dashboard opens locally.
 - It reads from SQLite.
-- It shows at least token trends, trace list, selected files, and a span
-  waterfall for one trace.
+- The current static version shows summary metrics, trace cards, selected
+  files, missing-signal warnings, and spans for recent traces.
+- A later server-backed version should add token trends, richer trace detail,
+  filters, and a span waterfall.
 
 ### Build 4: Experiment Comparison
 

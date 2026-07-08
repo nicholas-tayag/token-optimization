@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import html
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -297,3 +298,292 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
     for artifact in payload["artifacts"]:
         artifact["metadata"] = json.loads(artifact.pop("metadata_json") or "{}")
     return payload
+
+
+def _load_dashboard_traces(db_path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+    traces = list_traces(db_path, limit=limit)
+    return [load_trace(db_path, trace.trace_id) for trace in traces]
+
+
+def _fmt_int(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _fmt_float(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
+    if not traces:
+        return {
+            "trace_count": 0,
+            "total_tokens_saved": 0,
+            "median_reduction_percent": 0.0,
+            "median_packed_tokens": 0,
+            "warning_count": 0,
+        }
+    reductions = sorted(float(trace.get("reduction_percent") or 0.0) for trace in traces)
+    packed = sorted(int(trace.get("packed_prompt_tokens") or 0) for trace in traces)
+    midpoint = len(traces) // 2
+    if len(traces) % 2:
+        median_reduction = reductions[midpoint]
+        median_packed = packed[midpoint]
+    else:
+        median_reduction = (reductions[midpoint - 1] + reductions[midpoint]) / 2
+        median_packed = int((packed[midpoint - 1] + packed[midpoint]) / 2)
+    return {
+        "trace_count": len(traces),
+        "total_tokens_saved": sum(int(trace.get("tokens_saved") or 0) for trace in traces),
+        "median_reduction_percent": round(median_reduction, 2),
+        "median_packed_tokens": median_packed,
+        "warning_count": sum(
+            1 for trace in traces if (trace.get("metadata") or {}).get("missing_signals")
+        ),
+    }
+
+
+def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
+    traces = _load_dashboard_traces(db_path, limit=limit)
+    summary = _dashboard_summary(traces)
+    trace_cards = []
+    for trace in traces:
+        metadata = trace.get("metadata") or {}
+        selected_files = metadata.get("selected_files") or []
+        missing = metadata.get("missing_signals") or []
+        spans = trace.get("spans") or []
+        selected_html = (
+            "".join(f"<li>{html.escape(str(path))}</li>" for path in selected_files)
+            if selected_files
+            else "<li class=\"muted\">No selected files recorded.</li>"
+        )
+        warnings_html = (
+            "".join(f"<li>{html.escape(str(item))}</li>" for item in missing)
+            if missing
+            else "<li class=\"muted\">No missing-signal warnings.</li>"
+        )
+        spans_html = (
+            "".join(
+                "<li>"
+                f"<span>{html.escape(str(span.get('kind', 'span')))}</span>"
+                f"<strong>{_fmt_float(span.get('duration_ms'))} ms</strong>"
+                f"<em>{_fmt_int(span.get('input_tokens'))} input tokens</em>"
+                "</li>"
+                for span in spans
+            )
+            if spans
+            else "<li class=\"muted\">No spans recorded.</li>"
+        )
+        trace_cards.append(
+            f"""
+            <article class="trace-card">
+              <div class="trace-topline">
+                <div>
+                  <h3>{html.escape(str(trace.get('task', 'Untitled task')))}</h3>
+                  <p>{html.escape(str(trace.get('trace_id', '')))}</p>
+                </div>
+                <span class="status">{html.escape(str(trace.get('quality_status', 'unknown')))}</span>
+              </div>
+              <div class="trace-metrics">
+                <div><strong>{_fmt_int(trace.get('full_scan_prompt_tokens'))}</strong><span>full scan</span></div>
+                <div><strong>{_fmt_int(trace.get('packed_prompt_tokens'))}</strong><span>packed</span></div>
+                <div><strong>{_fmt_int(trace.get('tokens_saved'))}</strong><span>tokens saved</span></div>
+                <div><strong>{_fmt_float(trace.get('reduction_percent'))}%</strong><span>reduction</span></div>
+              </div>
+              <details open>
+                <summary>Selected files</summary>
+                <ul>{selected_html}</ul>
+              </details>
+              <details>
+                <summary>Warnings</summary>
+                <ul>{warnings_html}</ul>
+              </details>
+              <details>
+                <summary>Spans</summary>
+                <ul class="spans">{spans_html}</ul>
+              </details>
+            </article>
+            """
+        )
+    cards_html = "\n".join(trace_cards) if trace_cards else (
+        "<section class=\"empty\"><h2>No traces yet</h2>"
+        "<p>Run <code>agenvantage observe pack --task \"Add tests for upload limits\"</code> "
+        "from a repository to create your first trace.</p></section>"
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgenVantage Observability</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --ink: #14213d;
+        --muted: #64748b;
+        --bg: #f5f1e8;
+        --panel: #fffaf0;
+        --line: #dfd4bd;
+        --accent: #0f766e;
+        --accent-2: #b45309;
+        --danger: #b91c1c;
+        font-family: ui-sans-serif, "Avenir Next", "Helvetica Neue", sans-serif;
+      }}
+      body {{
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28rem),
+          linear-gradient(135deg, #f5f1e8 0%, #ede4d1 100%);
+      }}
+      header {{
+        padding: 2.25rem clamp(1rem, 4vw, 4rem) 1.5rem;
+      }}
+      header h1 {{
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 4.5rem);
+        letter-spacing: -0.06em;
+        line-height: 0.95;
+      }}
+      header p {{
+        max-width: 48rem;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }}
+      main {{
+        padding: 0 clamp(1rem, 4vw, 4rem) 4rem;
+      }}
+      .stats {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        margin: 1.25rem 0 1.75rem;
+      }}
+      .stat, .trace-card, .empty {{
+        background: rgba(255, 250, 240, 0.88);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        box-shadow: 0 18px 50px rgba(80, 61, 31, 0.08);
+      }}
+      .stat {{
+        padding: 1.15rem;
+      }}
+      .stat strong {{
+        display: block;
+        font-size: 2rem;
+        letter-spacing: -0.04em;
+      }}
+      .stat span, .trace-topline p, .trace-metrics span, .muted {{
+        color: var(--muted);
+      }}
+      .trace-grid {{
+        display: grid;
+        gap: 1rem;
+      }}
+      .trace-card {{
+        padding: 1.15rem;
+      }}
+      .trace-topline {{
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: flex-start;
+      }}
+      h3 {{
+        margin: 0;
+        font-size: 1.15rem;
+      }}
+      .trace-topline p {{
+        margin: 0.2rem 0 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+      }}
+      .status {{
+        border: 1px solid rgba(15, 118, 110, 0.25);
+        color: var(--accent);
+        border-radius: 999px;
+        padding: 0.18rem 0.55rem;
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }}
+      .trace-metrics {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 0.75rem;
+        margin: 1rem 0;
+      }}
+      .trace-metrics div {{
+        border-left: 3px solid var(--accent);
+        padding-left: 0.65rem;
+      }}
+      .trace-metrics strong {{
+        display: block;
+        font-size: 1.3rem;
+      }}
+      details {{
+        border-top: 1px solid var(--line);
+        padding: 0.65rem 0;
+      }}
+      summary {{
+        cursor: pointer;
+        font-weight: 700;
+      }}
+      ul {{
+        margin: 0.55rem 0 0;
+        padding-left: 1.2rem;
+      }}
+      .spans li {{
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.8rem;
+        padding: 0.25rem 0;
+      }}
+      code {{
+        background: #eee2c8;
+        border-radius: 6px;
+        padding: 0.12rem 0.32rem;
+      }}
+      .empty {{
+        padding: 1.5rem;
+      }}
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Agent Observability</h1>
+      <p>Local Datadog-style visibility for AI coding-agent tasks: traces, spans,
+      context selection, token savings, and missing-signal warnings.</p>
+      <p><strong>Database:</strong> {html.escape(str(db_path.resolve()))}</p>
+    </header>
+    <main>
+      <section class="stats">
+        <div class="stat"><strong>{_fmt_int(summary['trace_count'])}</strong><span>traces</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['total_tokens_saved'])}</strong><span>tokens saved</span></div>
+        <div class="stat"><strong>{_fmt_float(summary['median_reduction_percent'])}%</strong><span>median reduction</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['median_packed_tokens'])}</strong><span>median packed tokens</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['warning_count'])}</strong><span>traces with warnings</span></div>
+      </section>
+      <section class="trace-grid">
+        {cards_html}
+      </section>
+    </main>
+  </body>
+</html>
+"""
+
+
+def write_observability_dashboard(
+    db_path: Path,
+    output_path: Path,
+    *,
+    limit: int = 100,
+) -> Path:
+    init_observability_store(db_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_observability_dashboard(db_path, limit=limit), encoding="utf-8")
+    return output_path

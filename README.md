@@ -131,6 +131,7 @@ agenvantage run --summary                     # default scenario, readable outpu
 agenvantage observe init                      # create local trace storage
 agenvantage observe pack --task "..."         # pack context and record a trace
 agenvantage traces list                       # inspect recent AI-agent task traces
+agenvantage dashboard                         # open the local observability dashboard
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
@@ -184,11 +185,14 @@ Start with:
 agenvantage observe init
 agenvantage observe pack --task "Add tests for upload limits"
 agenvantage traces list
+agenvantage dashboard
 ```
 
 A trace is one developer task; a span is one step inside that task, such as the
-context-pack operation. This is the local-first foundation for the Datadog-style
-agent observability workflow described in
+context-pack operation. `agenvantage dashboard` writes
+`.agenvantage/observability-dashboard.html` and opens a local Datadog-style
+overview of token savings, selected files, warnings, and spans. This is the
+local-first foundation for the Datadog-style agent observability workflow described in
 [docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md).
 
 For the end-to-end billed-cost proof workflow, including live request spans,

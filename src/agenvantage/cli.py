@@ -34,6 +34,7 @@ from agenvantage.observability import (
     list_traces,
     load_trace,
     record_pack_trace,
+    write_observability_dashboard,
 )
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
@@ -572,6 +573,33 @@ def _parser() -> argparse.ArgumentParser:
     traces_show.add_argument("--repo", type=Path, default=Path("."))
     traces_show.add_argument("--db", type=Path, help="Explicit observability database path.")
     traces_show.add_argument("--json", dest="as_json", action="store_true")
+
+    dashboard = subparsers.add_parser(
+        "dashboard",
+        help="Generate and open the local AgenVantage observability dashboard.",
+        description=(
+            "Render local trace metrics as a Datadog-style HTML dashboard with token "
+            "savings, selected files, warnings, and spans."
+        ),
+    )
+    dashboard.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    dashboard.add_argument("--db", type=Path, help="Explicit observability database path.")
+    dashboard.add_argument(
+        "--output",
+        type=Path,
+        help="HTML output path (default: .agenvantage/observability-dashboard.html).",
+    )
+    dashboard.add_argument("--limit", type=int, default=100, help="Maximum traces to render.")
+    dashboard.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the dashboard URI instead of opening a browser tab.",
+    )
 
     session = subparsers.add_parser(
         "session",
@@ -1506,6 +1534,19 @@ def _run_traces(args: argparse.Namespace) -> None:
     raise SystemExit(f"Unknown traces command: {args.traces_command}")
 
 
+def _run_observability_dashboard(args: argparse.Namespace) -> None:
+    repo = Path(args.repo).resolve()
+    db_path = _observability_db_from_args(args, repo)
+    output = Path(args.output) if args.output is not None else repo / ".agenvantage" / "observability-dashboard.html"
+    dashboard_path = write_observability_dashboard(db_path, output, limit=args.limit)
+    dashboard_uri = dashboard_path.resolve().as_uri()
+    print(f"AgenVantage observability dashboard written to {dashboard_path.resolve()}")
+    if args.no_browser:
+        print(dashboard_uri)
+    else:
+        webbrowser.open(dashboard_uri)
+
+
 def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
     cache = session.get("cache", {})
     prompt_accounting = session.get("prompt_token_accounting", {})
@@ -1911,6 +1952,9 @@ def main() -> None:
         return
     if args.command == "traces":
         _run_traces(args)
+        return
+    if args.command == "dashboard":
+        _run_observability_dashboard(args)
         return
     if args.command == "session":
         _run_session(args)

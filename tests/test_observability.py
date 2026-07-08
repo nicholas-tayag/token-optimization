@@ -7,6 +7,7 @@ from agenvantage.observability import (
     list_traces,
     load_trace,
     record_pack_trace,
+    write_observability_dashboard,
 )
 
 
@@ -58,3 +59,40 @@ def test_record_pack_trace_persists_metrics_and_artifacts(tmp_path: Path) -> Non
         "context_markdown",
         "decision_manifest",
     }
+
+
+def test_write_observability_dashboard_renders_trace_metrics(tmp_path: Path) -> None:
+    db_path = tmp_path / ".agenvantage" / "observability.db"
+    report = {
+        "task": "Add diagnostics.",
+        "preset": "feature",
+        "repo_count": 1,
+        "prompt_token_accounting": {
+            "full_scan_prompt_tokens": 1000,
+            "packed_prompt_tokens": 125,
+            "prompt_tokens_saved_vs_full_scan": 875,
+            "prompt_reduction_percent_vs_full_scan": 87.5,
+        },
+        "selected_chunks": [{"path": "src/server.py"}],
+        "change_surface": {
+            "edit_targets": [{"path": "src/server.py"}],
+            "test_targets": [],
+            "missing_signals": [],
+        },
+    }
+    record_pack_trace(
+        db_path,
+        markdown="# AgenVantage Context Package\n",
+        report=report,
+        repo_path=tmp_path,
+        workflow="feature",
+    )
+
+    dashboard_path = write_observability_dashboard(db_path, tmp_path / "dashboard.html")
+
+    html = dashboard_path.read_text(encoding="utf-8")
+    assert "Agent Observability" in html
+    assert "Add diagnostics." in html
+    assert "875" in html
+    assert "87.50%" in html
+    assert "src/server.py" in html

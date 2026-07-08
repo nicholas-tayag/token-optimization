@@ -524,6 +524,53 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     assert "src/rate_limiter.py" in shown.stdout
 
 
+def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "dashboard",
+            "--no-browser",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    dashboard_path = tmp_path / ".agenvantage" / "observability-dashboard.html"
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert "AgenVantage observability dashboard written to" in completed.stdout
+    assert dashboard_path.as_uri() in completed.stdout
+    assert "Agent Observability" in dashboard_html
+    assert "Add tests for rate limiter Redis fail open behavior" in dashboard_html
+    assert "src/rate_limiter.py" in dashboard_html
+
+
 def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifact"
     recoverable_dir = artifact_root / "recoverable"
