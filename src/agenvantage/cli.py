@@ -34,6 +34,8 @@ from agenvantage.observability import (
     list_traces,
     load_trace,
     record_pack_trace,
+    record_trace_artifact,
+    record_trace_span,
     write_observability_dashboard,
 )
 from agenvantage.provider_validation import (
@@ -599,6 +601,62 @@ def _parser() -> argparse.ArgumentParser:
         "--no-browser",
         action="store_true",
         help="Print the dashboard URI instead of opening a browser tab.",
+    )
+
+    experiments = subparsers.add_parser(
+        "experiments",
+        help="Compare local context optimization strategies for agent tasks.",
+    )
+    experiments_subparsers = experiments.add_subparsers(
+        dest="experiments_command",
+        required=True,
+    )
+    experiments_compare = experiments_subparsers.add_parser(
+        "compare",
+        help="Compare full-scan, packed, cache-aligned, and mixed-artifact prompt variants.",
+    )
+    experiments_compare.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    experiments_compare.add_argument("--task", required=True, help="Feature task to compare.")
+    experiments_compare.add_argument("--trace-id", help="Attach results to an existing trace.")
+    experiments_compare.add_argument("--budget", type=int, default=None)
+    experiments_compare.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    experiments_compare.add_argument("--top-k", type=int, default=None)
+    experiments_compare.add_argument("--include-diff", action="store_true")
+    experiments_compare.add_argument("--include-log", action="store_true")
+    experiments_compare.add_argument("--include-glob", action="append", default=[])
+    experiments_compare.add_argument("--exclude-glob", action="append", default=[])
+    experiments_compare.add_argument("--db", type=Path, help="Explicit observability database path.")
+    experiments_compare.add_argument(
+        "--input-price-per-million",
+        type=float,
+        default=None,
+        help="Optional input-token price used for local estimated cost comparisons.",
+    )
+    experiments_compare.add_argument(
+        "--cached-input-price-ratio",
+        type=float,
+        default=0.1,
+        help="Warm-cache input price ratio used for cache-aligned estimates (default: 0.1).",
+    )
+    experiments_compare.add_argument(
+        "--output",
+        type=Path,
+        help="Optional JSON report output path.",
+    )
+    experiments_compare.add_argument(
+        "--markdown-output",
+        type=Path,
+        help="Optional Markdown proof output path.",
+    )
+    experiments_compare.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a readable Markdown summary instead of JSON.",
     )
 
     session = subparsers.add_parser(
@@ -1547,6 +1605,245 @@ def _run_observability_dashboard(args: argparse.Namespace) -> None:
         webbrowser.open(dashboard_uri)
 
 
+def _estimated_input_cost(tokens: float, price_per_million: float | None) -> float | None:
+    if price_per_million is None:
+        return None
+    return round((tokens / 1_000_000) * price_per_million, 8)
+
+
+def _experiment_variant(
+    *,
+    variant_id: str,
+    label: str,
+    prompt_tokens: int,
+    baseline_tokens: int,
+    input_price_per_million: float | None,
+    cache_eligible_tokens: int = 0,
+    cached_input_price_ratio: float = 0.1,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    tokens_saved = baseline_tokens - prompt_tokens
+    reduction = round((tokens_saved / baseline_tokens * 100) if baseline_tokens else 0.0, 2)
+    cache_eligible_tokens = max(min(cache_eligible_tokens, prompt_tokens), 0)
+    non_cached_tokens = prompt_tokens - cache_eligible_tokens
+    warm_cache_weighted_tokens = non_cached_tokens + (cache_eligible_tokens * cached_input_price_ratio)
+    warm_tokens_saved = baseline_tokens - warm_cache_weighted_tokens
+    return {
+        "variant_id": variant_id,
+        "label": label,
+        "prompt_tokens": prompt_tokens,
+        "tokens_saved_vs_full_scan": tokens_saved,
+        "reduction_percent_vs_full_scan": reduction,
+        "cache_eligible_input_tokens": cache_eligible_tokens,
+        "warm_cache_weighted_input_tokens": round(warm_cache_weighted_tokens, 2),
+        "warm_cache_weighted_tokens_saved_vs_full_scan": round(warm_tokens_saved, 2),
+        "estimated_input_cost_usd": _estimated_input_cost(prompt_tokens, input_price_per_million),
+        "estimated_warm_cache_input_cost_usd": _estimated_input_cost(
+            warm_cache_weighted_tokens,
+            input_price_per_million,
+        ),
+        "notes": notes or [],
+    }
+
+
+def _format_experiment_comparison_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# AgenVantage Context Experiment",
+        "",
+        f"Task: {report['task']}",
+        f"Trace: {report['trace_id']}",
+        f"Model: {report['model']}",
+        "",
+        "| Variant | Prompt tokens | Saved vs full scan | Reduction | Cache-eligible tokens | Warm-cache weighted tokens |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for variant in report["variants"]:
+        lines.append(
+            "| "
+            f"{variant['label']} | "
+            f"{int(variant['prompt_tokens']):,} | "
+            f"{int(variant['tokens_saved_vs_full_scan']):,} | "
+            f"{variant['reduction_percent_vs_full_scan']}% | "
+            f"{int(variant['cache_eligible_input_tokens']):,} | "
+            f"{variant['warm_cache_weighted_input_tokens']:,.2f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Interpretation",
+            "",
+            "- Full scan estimates the prompt size if every eligible repository chunk were included.",
+            "- Packed text is the first-request AgenVantage context package.",
+            "- Cache-aligned uses the same packed prompt size on the first request, then estimates warm-cache weighting for stable context.",
+            "- Mixed artifact uses the local mixed-modality estimator; it is not provider-billed proof.",
+            "",
+            "## Claim Boundary",
+            "",
+            "These are local planning metrics. They prove prompt-token reduction and cache layout readiness, not live provider billing, latency, or broad answer-quality retention.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _build_experiment_comparison(args: argparse.Namespace) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    pack_args = argparse.Namespace(**vars(args))
+    pack_args.preset = "feature"
+    pack_args.multimodal = "off"
+    pack_args.modality_profile = "auto"
+    pack_args.modality_output_dir = None
+    markdown, packed_report, settings = _build_pack_artifacts(pack_args, default_preset="feature")
+
+    mixed_args = argparse.Namespace(**vars(args))
+    mixed_args.preset = "feature"
+    mixed_args.multimodal = "estimate"
+    mixed_args.modality_profile = "auto"
+    mixed_args.modality_output_dir = None
+    _, mixed_report, _ = _build_pack_artifacts(mixed_args, default_preset="feature")
+
+    accounting = packed_report.get("prompt_token_accounting") or {}
+    baseline_tokens = int(accounting.get("full_scan_prompt_tokens") or packed_report.get("candidate_context_tokens") or 0)
+    packed_tokens = int(accounting.get("packed_prompt_tokens") or packed_report.get("selected_context_tokens") or 0)
+    original_user_prompt_tokens = int(accounting.get("original_user_prompt_tokens") or 0)
+    stable_cache_tokens = max(packed_tokens - original_user_prompt_tokens, 0)
+    mixed = mixed_report.get("multimodal") or {}
+    mixed_tokens = int(mixed.get("estimated_mixed_prompt_tokens") or packed_tokens)
+    input_price = args.input_price_per_million
+    cached_ratio = args.cached_input_price_ratio
+    variants = [
+        _experiment_variant(
+            variant_id="full_scan",
+            label="Full scan text",
+            prompt_tokens=baseline_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=["Local full-corpus counterfactual from eligible repository context."],
+        ),
+        _experiment_variant(
+            variant_id="packed_text",
+            label="Packed text",
+            prompt_tokens=packed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=["First-request AgenVantage selected context."],
+        ),
+        _experiment_variant(
+            variant_id="packed_cache_aligned",
+            label="Packed cache-aligned",
+            prompt_tokens=packed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            cache_eligible_tokens=stable_cache_tokens,
+            cached_input_price_ratio=cached_ratio,
+            notes=["First request has the same input tokens as packed text; warm-cache weighting is estimated."],
+        ),
+        _experiment_variant(
+            variant_id="packed_mixed_artifact",
+            label="Packed mixed artifact",
+            prompt_tokens=mixed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=[str(item) for item in mixed.get("measurement_notes", [])]
+            or ["Local mixed-modality estimate; no provider call was made."],
+        ),
+    ]
+    report = {
+        "project": "AgenVantage",
+        "workflow": "experiments.compare",
+        "task": args.task,
+        "model": settings["model"],
+        "repos": [str(Path(repo).resolve()) for repo in settings["repos"]],
+        "budget": settings["budget"],
+        "trace_id": args.trace_id or "",
+        "input_price_per_million": input_price,
+        "cached_input_price_ratio": cached_ratio,
+        "baseline_variant": "full_scan",
+        "variants": variants,
+        "selected_files": sorted(
+            {
+                str(chunk.get("path"))
+                for chunk in packed_report.get("selected_chunks", [])
+                if isinstance(chunk, dict) and chunk.get("path")
+            }
+        ),
+        "change_surface": packed_report.get("change_surface", {}),
+        "claim_boundary": [
+            "Local token counts are measured with the configured tokenizer.",
+            "Estimated costs use caller-provided input price when available.",
+            "Warm-cache numbers model cache pricing and do not prove provider-billed savings.",
+            "Mixed artifact numbers use local provider-profile estimates and do not prove live image-token billing.",
+        ],
+        "packed_report": packed_report,
+        "mixed_modality": mixed,
+    }
+    return report, markdown, settings
+
+
+def _run_experiments(args: argparse.Namespace) -> None:
+    if args.experiments_command != "compare":
+        raise SystemExit(f"Unknown experiments command: {args.experiments_command}")
+
+    report, markdown, settings = _build_experiment_comparison(args)
+    repo = Path(settings["repos"][0])
+    db_path = _observability_db_from_args(args, repo)
+    if args.trace_id:
+        load_trace(db_path, args.trace_id)
+        trace_id = args.trace_id
+    else:
+        trace = record_pack_trace(
+            db_path,
+            markdown=markdown,
+            report=report["packed_report"],
+            repo_path=repo,
+            workflow="experiments.compare",
+        )
+        trace_id = trace.trace_id
+    report["trace_id"] = trace_id
+
+    markdown_report = _format_experiment_comparison_markdown(report)
+    if args.output is not None:
+        _write_report(report, args.output)
+    if args.markdown_output is not None:
+        args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown_output.write_text(markdown_report, encoding="utf-8")
+
+    record_trace_artifact(
+        db_path,
+        trace_id,
+        kind="experiment_comparison",
+        content=json.dumps(report, indent=2),
+        path=args.output,
+        metadata={"workflow": "experiments.compare", "format": "json"},
+    )
+    record_trace_artifact(
+        db_path,
+        trace_id,
+        kind="experiment_comparison_markdown",
+        content=markdown_report,
+        path=args.markdown_output,
+        metadata={"workflow": "experiments.compare", "format": "markdown"},
+    )
+    packed_variant = next(item for item in report["variants"] if item["variant_id"] == "packed_text")
+    record_trace_span(
+        db_path,
+        trace_id,
+        name="Experiment comparison",
+        kind="experiment.compare",
+        input_tokens=int(packed_variant["prompt_tokens"]),
+        metadata={
+            "variant_count": len(report["variants"]),
+            "best_reduction_percent": max(
+                float(item["reduction_percent_vs_full_scan"]) for item in report["variants"]
+            ),
+        },
+    )
+
+    if args.summary:
+        print(markdown_report)
+    else:
+        print(json.dumps(report, indent=2))
+    print(f"Experiment comparison attached to trace {trace_id}", file=sys.stderr)
+
+
 def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
     cache = session.get("cache", {})
     prompt_accounting = session.get("prompt_token_accounting", {})
@@ -1955,6 +2252,9 @@ def main() -> None:
         return
     if args.command == "dashboard":
         _run_observability_dashboard(args)
+        return
+    if args.command == "experiments":
+        _run_experiments(args)
         return
     if args.command == "session":
         _run_session(args)

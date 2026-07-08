@@ -571,6 +571,79 @@ def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
     assert "src/rate_limiter.py" in dashboard_html
 
 
+def test_experiments_compare_records_variants_and_trace_artifacts(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "background.md").write_text(
+        "\n".join(f"Historical deployment note {index}: unrelated checkout prose." for index in range(400)),
+        encoding="utf-8",
+    )
+    output = tmp_path / "comparison.json"
+    markdown_output = tmp_path / "comparison.md"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "experiments",
+            "compare",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+            "--input-price-per-million",
+            "1.25",
+            "--output",
+            str(output),
+            "--markdown-output",
+            str(markdown_output),
+            "--summary",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    markdown = markdown_output.read_text(encoding="utf-8")
+    assert "AgenVantage Context Experiment" in completed.stdout
+    assert "Experiment comparison attached to trace" in completed.stderr
+    assert report["workflow"] == "experiments.compare"
+    assert {variant["variant_id"] for variant in report["variants"]} == {
+        "full_scan",
+        "packed_text",
+        "packed_cache_aligned",
+        "packed_mixed_artifact",
+    }
+    packed = next(variant for variant in report["variants"] if variant["variant_id"] == "packed_text")
+    assert packed["tokens_saved_vs_full_scan"] > 0
+    assert packed["estimated_input_cost_usd"] is not None
+    assert "Packed cache-aligned" in markdown
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            report["trace_id"],
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "experiment.compare" in shown.stdout
+    assert "experiment_comparison" in shown.stdout
+
+
 def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifact"
     recoverable_dir = artifact_root / "recoverable"

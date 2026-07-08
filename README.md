@@ -132,6 +132,7 @@ agenvantage observe init                      # create local trace storage
 agenvantage observe pack --task "..."         # pack context and record a trace
 agenvantage traces list                       # inspect recent AI-agent task traces
 agenvantage dashboard                         # open the local observability dashboard
+agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
@@ -186,6 +187,7 @@ agenvantage observe init
 agenvantage observe pack --task "Add tests for upload limits"
 agenvantage traces list
 agenvantage dashboard
+agenvantage experiments compare --task "Add tests for upload limits" --summary
 ```
 
 A trace is one developer task; a span is one step inside that task, such as the
@@ -194,6 +196,11 @@ context-pack operation. `agenvantage dashboard` writes
 overview of token savings, selected files, warnings, and spans. This is the
 local-first foundation for the Datadog-style agent observability workflow described in
 [docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md).
+
+`agenvantage experiments compare --task "..." --summary` records a trace and
+prints a Markdown comparison of full-scan, packed, cache-aligned, and
+mixed-artifact prompt variants. Use `--input-price-per-million` to add local
+estimated cost columns. These are planning metrics, not provider-billed proof.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

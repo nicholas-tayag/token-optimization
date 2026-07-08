@@ -433,6 +433,8 @@ Acceptance:
 
 ### Build 4: Experiment Comparison
 
+Status: partially implemented for local token/cost planning comparisons.
+
 Goal: make optimization decisions visible.
 
 Tasks:
@@ -452,6 +454,15 @@ Acceptance:
 - User can see why packed context is cheaper than full scan.
 - User can see when artifact mode helps or hurts.
 - User can export comparison as Markdown for README/resume proof.
+
+Current implementation slice:
+
+- `agenvantage experiments compare --task "..."` compares full-scan text,
+  packed text, packed cache-aligned, and packed mixed-artifact variants.
+- The comparison records JSON and Markdown artifacts on the local trace.
+- Optional `--input-price-per-million` estimates local input-cost differences.
+- Warm-cache and mixed-artifact outputs are explicitly labeled as local
+  planning estimates rather than provider-billed proof.
 
 ### Build 5: User Feedback And Quality Labels
 

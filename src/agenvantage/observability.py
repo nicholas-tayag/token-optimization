@@ -587,3 +587,84 @@ def write_observability_dashboard(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_observability_dashboard(db_path, limit=limit), encoding="utf-8")
     return output_path
+
+
+def record_trace_artifact(
+    db_path: Path,
+    trace_id: str,
+    *,
+    kind: str,
+    content: str,
+    path: Path | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    init_observability_store(db_path)
+    artifact_id = f"{trace_id}:{kind}:{hashlib.sha1(content.encode('utf-8')).hexdigest()[:10]}"
+    with _connect(db_path) as connection:
+        trace = connection.execute(
+            "SELECT trace_id FROM traces WHERE trace_id = ?",
+            (trace_id,),
+        ).fetchone()
+        if trace is None:
+            raise KeyError(trace_id)
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO artifacts(artifact_id, trace_id, kind, path, content, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                artifact_id,
+                trace_id,
+                kind,
+                str(path or ""),
+                content,
+                json.dumps(metadata or {}, sort_keys=True),
+            ),
+        )
+    return artifact_id
+
+
+def record_trace_span(
+    db_path: Path,
+    trace_id: str,
+    *,
+    name: str,
+    kind: str,
+    duration_ms: float = 0.0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    estimated_cost: float = 0.0,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    init_observability_store(db_path)
+    created = time.time()
+    span_id = f"{trace_id}:{kind}:{time.time_ns()}"
+    with _connect(db_path) as connection:
+        trace = connection.execute(
+            "SELECT trace_id FROM traces WHERE trace_id = ?",
+            (trace_id,),
+        ).fetchone()
+        if trace is None:
+            raise KeyError(trace_id)
+        connection.execute(
+            """
+            INSERT INTO spans(
+                span_id, trace_id, parent_span_id, name, kind, started_at, ended_at,
+                duration_ms, input_tokens, output_tokens, estimated_cost, metadata_json
+            ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                span_id,
+                trace_id,
+                name,
+                kind,
+                created,
+                created + (max(duration_ms, 0.0) / 1000),
+                max(duration_ms, 0.0),
+                input_tokens,
+                output_tokens,
+                estimated_cost,
+                json.dumps(metadata or {}, sort_keys=True),
+            ),
+        )
+    return span_id
