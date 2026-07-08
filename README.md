@@ -323,6 +323,8 @@ represent real GenAI usage once provider calls exist.
 
 AgenVantage begins before a provider call: it makes context composition
 inspectable in real coding workflows. See
+[docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md)
+for the next product direction as a local-first agent observability dev tool,
 [docs/context-planning-layer.md](docs/context-planning-layer.md) for the
 pre-inference design, [docs/real-token-tradeoff-experiment.md](docs/real-token-tradeoff-experiment.md)
 for the eventual API validation plan, and [docs/roadmap.md](docs/roadmap.md)
