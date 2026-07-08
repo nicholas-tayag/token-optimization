@@ -1,7 +1,7 @@
 # PRD: AgenVantage Agent Observability Dev Tool
 
 Prepared: July 8, 2026
-Status: proposed next product direction
+Status: implementation started
 
 ## 1. Product Thesis
 
@@ -353,6 +353,8 @@ Beginner-friendly explanations:
 
 ### Build 1: Local Trace Store
 
+Status: partially implemented.
+
 Goal: every `pack` run creates a durable trace.
 
 Tasks:
@@ -370,6 +372,15 @@ Acceptance:
   least scan/index/rank/pack spans.
 - `traces show` prints selected files, token accounting, and warnings.
 - Existing `pack` behavior remains unchanged unless observe mode is used.
+
+Current implementation slice:
+
+- `agenvantage observe init` creates `.agenvantage/observability.db`.
+- `agenvantage observe pack --task "..."` runs the feature context packer and
+  records a local trace.
+- `agenvantage traces list` and `agenvantage traces show <trace-id>` inspect
+  the stored trace.
+- The initial trace schema stores traces, spans, and context/manifest artifacts.
 
 ### Build 2: Beginner-Friendly Observe Wrapper
 

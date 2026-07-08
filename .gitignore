@@ -10,3 +10,4 @@ artifacts/*.md
 artifacts/context-images/
 artifacts/modality-context-images/
 external/
+.agenvantage/observability.db*

@@ -128,6 +128,9 @@ If `python` is not available, install Python 3.10+ or use
 ```bash
 agenvantage demo                              # built-in on-call walkthrough
 agenvantage run --summary                     # default scenario, readable output
+agenvantage observe init                      # create local trace storage
+agenvantage observe pack --task "..."         # pack context and record a trace
+agenvantage traces list                       # inspect recent AI-agent task traces
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
@@ -171,6 +174,22 @@ manifest. Line-addressed references and identifier-dense blocks stay text-only
 so exact implementation evidence does not depend on image OCR. New artifact
 manifests also include a path-independent bundle fingerprint so repeated runs
 can compare generated artifact content across output directories.
+
+`observe` is the first local agent-observability workflow. It stores traces in
+`.agenvantage/observability.db` so a developer can see which task ran, what
+context was packed, which files were selected, and how many tokens were saved.
+Start with:
+
+```bash
+agenvantage observe init
+agenvantage observe pack --task "Add tests for upload limits"
+agenvantage traces list
+```
+
+A trace is one developer task; a span is one step inside that task, such as the
+context-pack operation. This is the local-first foundation for the Datadog-style
+agent observability workflow described in
+[docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md).
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

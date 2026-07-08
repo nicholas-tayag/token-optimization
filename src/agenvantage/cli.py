@@ -28,6 +28,13 @@ from agenvantage.modality import (
     verify_mixed_modality_manifest,
     verify_recoverable_block,
 )
+from agenvantage.observability import (
+    default_observability_db,
+    init_observability_store,
+    list_traces,
+    load_trace,
+    record_pack_trace,
+)
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
     fixture_readiness_report,
@@ -488,6 +495,83 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Copy the Markdown context package to the system clipboard.",
     )
+
+    observe = subparsers.add_parser(
+        "observe",
+        help="Record local AI-agent task traces and context metrics.",
+        description=(
+            "Beginner-friendly observability commands for local AI coding-agent work. "
+            "A trace is one task; spans are the steps inside it."
+        ),
+    )
+    observe_subparsers = observe.add_subparsers(dest="observe_command", required=True)
+
+    observe_init = observe_subparsers.add_parser(
+        "init",
+        help="Create the local AgenVantage observability database.",
+    )
+    observe_init.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    observe_init.add_argument("--db", type=Path, help="Explicit observability database path.")
+
+    observe_pack = observe_subparsers.add_parser(
+        "pack",
+        help="Pack context and record a local observability trace.",
+    )
+    observe_pack.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    observe_pack.add_argument("--task", required=True, help="Feature task to prepare context for.")
+    observe_pack.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe controlling instructions and provenance (default: feature).",
+    )
+    observe_pack.add_argument("--budget", type=int, default=None)
+    observe_pack.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    observe_pack.add_argument("--top-k", type=int, default=None)
+    observe_pack.add_argument("--include-diff", action="store_true")
+    observe_pack.add_argument("--include-log", action="store_true")
+    observe_pack.add_argument("--include-glob", action="append", default=[])
+    observe_pack.add_argument("--exclude-glob", action="append", default=[])
+    observe_pack.add_argument("--output", type=Path, help="Optional Markdown context output.")
+    observe_pack.add_argument("--manifest", type=Path, help="Optional JSON manifest output.")
+    observe_pack.add_argument("--db", type=Path, help="Explicit observability database path.")
+    observe_pack.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help="Optional mixed-modality context mode.",
+    )
+    observe_pack.add_argument(
+        "--modality-profile",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+    )
+    observe_pack.add_argument("--modality-output-dir", type=Path)
+
+    traces = subparsers.add_parser(
+        "traces",
+        help="Inspect local AgenVantage observability traces.",
+    )
+    traces_subparsers = traces.add_subparsers(dest="traces_command", required=True)
+    traces_list = traces_subparsers.add_parser("list", help="List recent local traces.")
+    traces_list.add_argument("--repo", type=Path, default=Path("."))
+    traces_list.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_list.add_argument("--limit", type=int, default=20)
+    traces_show = traces_subparsers.add_parser("show", help="Show one local trace.")
+    traces_show.add_argument("trace_id")
+    traces_show.add_argument("--repo", type=Path, default=Path("."))
+    traces_show.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_show.add_argument("--json", dest="as_json", action="store_true")
 
     session = subparsers.add_parser(
         "session",
@@ -1158,8 +1242,12 @@ def _resolve_pack_settings(
     }
 
 
-def _run_pack(args: argparse.Namespace) -> None:
-    settings = _resolve_pack_settings(args)
+def _build_pack_artifacts(
+    args: argparse.Namespace,
+    *,
+    default_preset: str = DEFAULT_PRESET,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    settings = _resolve_pack_settings(args, default_preset=default_preset)
     preset = settings["preset"]
     repos = settings["repos"]
     counter = TokenCounter(settings["model"])
@@ -1198,11 +1286,16 @@ def _run_pack(args: argparse.Namespace) -> None:
         markdown,
         report,
         counter,
-        mode=args.multimodal,
-        output_dir=args.modality_output_dir,
-        profile_id=args.modality_profile,
+        mode=getattr(args, "multimodal", "off"),
+        output_dir=getattr(args, "modality_output_dir", None),
+        profile_id=getattr(args, "modality_profile", "auto"),
         model=settings["model"],
     )
+    return markdown, report, settings
+
+
+def _run_pack(args: argparse.Namespace) -> None:
+    markdown, report, settings = _build_pack_artifacts(args)
     write_package_outputs(markdown, report, args.output, args.manifest)
 
     if args.stdout:
@@ -1239,6 +1332,178 @@ def _run_pack(args: argparse.Namespace) -> None:
             print()
             for notice in notices:
                 print(notice)
+
+
+def _observability_db_from_args(args: argparse.Namespace, repo: Path | None = None) -> Path:
+    if getattr(args, "db", None) is not None:
+        return Path(args.db)
+    return default_observability_db(repo or getattr(args, "repo", None) or Path("."))
+
+
+def _format_trace_created(trace: Any, db_path: Path, report: dict[str, Any]) -> str:
+    change_surface = report.get("change_surface") or {}
+    edit_targets = [
+        str(item.get("path"))
+        for item in change_surface.get("edit_targets", [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    test_targets = [
+        str(item.get("path"))
+        for item in change_surface.get("test_targets", [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    missing = [str(item) for item in change_surface.get("missing_signals", [])]
+    lines = [
+        "AgenVantage observed context pack",
+        "",
+        f"Trace: {trace.trace_id}",
+        f"Task:  {trace.task}",
+        f"DB:    {db_path.resolve()}",
+        "",
+        "Context:",
+        f"  Full scan: {trace.full_scan_prompt_tokens:,} tokens",
+        f"  Packed:    {trace.packed_prompt_tokens:,} tokens",
+        f"  Saved:     {trace.tokens_saved:,} tokens ({trace.reduction_percent}%)",
+        "",
+    ]
+    if edit_targets:
+        lines.append(f"Likely edit files: {', '.join(edit_targets)}")
+    if test_targets:
+        lines.append(f"Tests to inspect: {', '.join(test_targets)}")
+    if missing:
+        lines.append("Warnings:")
+        lines.extend(f"  - {item}" for item in missing)
+    lines.extend(
+        [
+            "",
+            "Why this matters:",
+            "  The agent performs better when it sees the right files, but whole-repo prompts burn tokens.",
+            "  AgenVantage recorded this local trace so you can inspect context and cost over time.",
+            "",
+            f"Next: agenvantage traces show {trace.trace_id}",
+        ]
+    )
+    return "\n".join(lines).rstrip()
+
+
+def _format_trace_list(traces: list[Any], db_path: Path) -> str:
+    if not traces:
+        return (
+            "No AgenVantage traces found.\n\n"
+            f"DB: {db_path.resolve()}\n"
+            'Try: agenvantage observe pack --task "Add tests for upload limits"'
+        )
+    lines = ["AgenVantage traces", "", f"DB: {db_path.resolve()}", ""]
+    for trace in traces:
+        lines.append(
+            f"{trace.trace_id}  {trace.created_at}  "
+            f"saved={trace.tokens_saved:,} ({trace.reduction_percent}%)  "
+            f"files={trace.selected_file_count}  {trace.task}"
+        )
+    return "\n".join(lines)
+
+
+def _format_trace_detail(trace: dict[str, Any]) -> str:
+    metadata = trace.get("metadata") or {}
+    selected_files = metadata.get("selected_files") or []
+    missing = metadata.get("missing_signals") or []
+    lines = [
+        "AgenVantage trace",
+        "",
+        f"Trace: {trace['trace_id']}",
+        f"Task:  {trace['task']}",
+        f"Repo:  {trace['repo_path']}",
+        f"Status: {trace['status']}",
+        "",
+        "Token accounting:",
+        f"  Full scan: {int(trace['full_scan_prompt_tokens']):,}",
+        f"  Packed:    {int(trace['packed_prompt_tokens']):,}",
+        f"  Saved:     {int(trace['tokens_saved']):,} ({trace['reduction_percent']}%)",
+        "",
+        "Selected files:",
+    ]
+    if selected_files:
+        lines.extend(f"  - {path}" for path in selected_files)
+    else:
+        lines.append("  none")
+    if missing:
+        lines.append("")
+        lines.append("Warnings:")
+        lines.extend(f"  - {item}" for item in missing)
+    lines.append("")
+    lines.append("Spans:")
+    spans = trace.get("spans") or []
+    if spans:
+        for span in spans:
+            lines.append(
+                f"  - {span['kind']}: {float(span['duration_ms']):.2f} ms, "
+                f"input_tokens={span['input_tokens']}"
+            )
+    else:
+        lines.append("  none")
+    artifacts = trace.get("artifacts") or []
+    if artifacts:
+        lines.append("")
+        lines.append("Artifacts:")
+        for artifact in artifacts:
+            path = artifact.get("path") or "stored in SQLite"
+            lines.append(f"  - {artifact['kind']}: {path}")
+    return "\n".join(lines)
+
+
+def _run_observe(args: argparse.Namespace) -> None:
+    if args.observe_command == "init":
+        db_path = _observability_db_from_args(args, args.repo)
+        init_observability_store(db_path)
+        print(
+            "\n".join(
+                [
+                    "AgenVantage observability initialized.",
+                    "",
+                    "A trace = one developer task.",
+                    "A span = one step inside that task, like scanning files or packing context.",
+                    "A metric = a number, like tokens saved or estimated cost.",
+                    "",
+                    f"Local database: {db_path.resolve()}",
+                    'Try: agenvantage observe pack --task "Add tests for upload limits"',
+                ]
+            )
+        )
+        return
+    if args.observe_command == "pack":
+        markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
+        write_package_outputs(markdown, report, args.output, args.manifest)
+        repo = Path(settings["repos"][0])
+        db_path = _observability_db_from_args(args, repo)
+        trace = record_pack_trace(
+            db_path,
+            markdown=markdown,
+            report=report,
+            repo_path=repo,
+            workflow=str(settings["preset_name"]),
+            artifact_paths={"markdown": args.output, "manifest": args.manifest},
+        )
+        print(_format_trace_created(trace, db_path, report))
+        return
+    raise SystemExit(f"Unknown observe command: {args.observe_command}")
+
+
+def _run_traces(args: argparse.Namespace) -> None:
+    db_path = _observability_db_from_args(args, args.repo)
+    if args.traces_command == "list":
+        print(_format_trace_list(list_traces(db_path, limit=args.limit), db_path))
+        return
+    if args.traces_command == "show":
+        try:
+            trace = load_trace(db_path, args.trace_id)
+        except KeyError as exc:
+            raise SystemExit(f"Trace not found: {args.trace_id}") from exc
+        if args.as_json:
+            print(json.dumps(trace, indent=2))
+        else:
+            print(_format_trace_detail(trace))
+        return
+    raise SystemExit(f"Unknown traces command: {args.traces_command}")
 
 
 def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
@@ -1640,6 +1905,12 @@ def main() -> None:
         return
     if args.command == "pack":
         _run_pack(args)
+        return
+    if args.command == "observe":
+        _run_observe(args)
+        return
+    if args.command == "traces":
+        _run_traces(args)
         return
     if args.command == "session":
         _run_session(args)

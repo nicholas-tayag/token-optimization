@@ -439,6 +439,91 @@ def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> 
     assert "recoverable_blocks" in payload
 
 
+def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    init_completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "init",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage observability initialized" in init_completed.stdout
+    assert (tmp_path / ".agenvantage" / "observability.db").is_file()
+
+    observed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage observed context pack" in observed.stdout
+    assert "Full scan:" in observed.stdout
+    assert "Packed:" in observed.stdout
+    trace_line = next(line for line in observed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+
+    listed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert trace_id in listed.stdout
+    assert "saved=" in listed.stdout
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage trace" in shown.stdout
+    assert "Token accounting:" in shown.stdout
+    assert "src/rate_limiter.py" in shown.stdout
+
+
 def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifact"
     recoverable_dir = artifact_root / "recoverable"
