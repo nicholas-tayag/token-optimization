@@ -103,6 +103,13 @@ def test_write_observability_dashboard_renders_trace_metrics(tmp_path: Path) -> 
     assert "Operations" in html
     assert "Action queue" in html
     assert "Workflow breakdown" in html
+    assert "Trace filters" in html
+    assert "traceSearch" in html
+    assert "qualityFilter" in html
+    assert "workflowFilter" in html
+    assert "attentionFilter" in html
+    assert 'data-workflow="feature"' in html
+    assert 'data-attention="true"' in html
     assert "Add diagnostics." in html
     assert "875" in html
     assert "87.50%" in html

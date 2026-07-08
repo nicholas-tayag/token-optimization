@@ -38,7 +38,8 @@ Current implemented scope:
 - Local observability platform: `agenvantage dashboard` renders a Datadog/New
   Relic-style trace cockpit with KPI tiles, operations metrics, cache hit rate,
   p95 span latency, an action queue, workflow breakdowns, trace cards, selected
-  files, quality labels, and provider-usage imports
+  files, quality labels, provider-usage imports, and client-side trace search
+  and filters for quality, workflow, and attention-needed traces
 - Trace detail console: `agenvantage traces show <trace-id>` now presents a
   platform-style health summary, next-action queue, token accounting, selected
   files, missing-signal warnings, spans, artifacts, quality labels, and
@@ -192,6 +193,8 @@ Local observability dashboard validation:
   `Workflow breakdown`.
 - Demo dashboard surfaces provider cache hit rate and p95 span latency from the
   local SQLite trace store.
+- Demo dashboard was rendered with dependency-free client-side filters for
+  search, quality, workflow, and attention-needed traces.
 - `agenvantage traces show <trace-id>` was manually validated on a temporary
   repository and showed `Health`, `Next actions`, selected files, warnings,
   spans, and artifacts for the recorded trace.

@@ -887,6 +887,10 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
 def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
     traces = _load_dashboard_traces(db_path, limit=limit)
     summary = _dashboard_summary(traces)
+    workflow_options = "".join(
+        f"<option value=\"{html.escape(workflow)}\">{html.escape(workflow)}</option>"
+        for workflow in sorted({str(trace.get("workflow") or "unknown") for trace in traces})
+    )
     action_items = summary.get("action_items") or []
     action_items_html = (
         "".join(
@@ -927,6 +931,22 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         spans = trace.get("spans") or []
         annotations = trace.get("annotations") or []
         provider_usage = trace.get("provider_usage") or []
+        trace_text = " ".join(
+            [
+                str(trace.get("task") or ""),
+                str(trace.get("trace_id") or ""),
+                str(trace.get("repo_path") or ""),
+                str(trace.get("workflow") or ""),
+                str(trace.get("quality_status") or ""),
+                " ".join(str(path) for path in selected_files),
+                " ".join(str(item) for item in missing),
+            ]
+        ).lower()
+        attention_flag = (
+            "true"
+            if missing or trace.get("quality_status") in {"failed", "warning", "unknown", "unverified"}
+            else "false"
+        )
         selected_html = (
             "".join(f"<li>{html.escape(str(path))}</li>" for path in selected_files)
             if selected_files
@@ -978,7 +998,11 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         )
         trace_cards.append(
             f"""
-            <article class="trace-card">
+            <article class="trace-card"
+              data-quality="{html.escape(str(trace.get('quality_status', 'unknown')))}"
+              data-workflow="{html.escape(str(trace.get('workflow', 'unknown')))}"
+              data-attention="{attention_flag}"
+              data-search="{html.escape(trace_text)}">
               <div class="trace-topline">
                 <div>
                   <h3>{html.escape(str(trace.get('task', 'Untitled task')))}</h3>
@@ -1099,6 +1123,39 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
       .trace-grid {{
         display: grid;
         gap: 1rem;
+      }}
+      .controls {{
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) repeat(3, max-content);
+        gap: 0.75rem;
+        align-items: center;
+        margin: 0 0 1rem;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 18px 50px var(--shadow);
+        padding: 0.85rem;
+      }}
+      .controls input, .controls select {{
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 0.65rem 0.75rem;
+        color: var(--ink);
+        background: var(--panel);
+        font: inherit;
+      }}
+      .controls label {{
+        display: inline-flex;
+        gap: 0.35rem;
+        align-items: center;
+        color: var(--muted);
+        font-size: 0.9rem;
+        white-space: nowrap;
+      }}
+      .result-count {{
+        color: var(--muted);
+        font-size: 0.9rem;
+        text-align: right;
       }}
       .panel {{
         padding: 1rem;
@@ -1256,6 +1313,12 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         .layout {{
           grid-template-columns: 1fr;
         }}
+        .controls {{
+          grid-template-columns: 1fr;
+        }}
+        .result-count {{
+          text-align: left;
+        }}
       }}
     </style>
   </head>
@@ -1280,8 +1343,28 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         <div class="stat"><strong>${_fmt_float(summary['provider_reported_cost_usd'])}</strong><span>provider reported cost</span></div>
       </section>
       <section class="layout">
-        <div class="trace-grid">
+        <div>
+          <section class="controls" aria-label="Trace filters">
+            <input id="traceSearch" type="search" placeholder="Search task, trace id, repo, file, warning..." />
+            <select id="qualityFilter" aria-label="Filter by quality">
+              <option value="">All quality</option>
+              <option value="failed">failed</option>
+              <option value="warning">warning</option>
+              <option value="unverified">unverified</option>
+              <option value="passed">passed</option>
+              <option value="annotated">annotated</option>
+              <option value="unknown">unknown</option>
+            </select>
+            <select id="workflowFilter" aria-label="Filter by workflow">
+              <option value="">All workflows</option>
+              {workflow_options}
+            </select>
+            <label><input id="attentionFilter" type="checkbox" /> attention</label>
+            <span id="traceResultCount" class="result-count"></span>
+          </section>
+          <div class="trace-grid" id="traceGrid">
           {cards_html}
+          </div>
         </div>
         <aside>
           <section class="panel">
@@ -1311,6 +1394,40 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         </aside>
       </section>
     </main>
+    <script>
+      const traceCards = Array.from(document.querySelectorAll(".trace-card"));
+      const searchInput = document.querySelector("#traceSearch");
+      const qualityFilter = document.querySelector("#qualityFilter");
+      const workflowFilter = document.querySelector("#workflowFilter");
+      const attentionFilter = document.querySelector("#attentionFilter");
+      const traceResultCount = document.querySelector("#traceResultCount");
+
+      function updateTraceFilters() {{
+        const query = (searchInput?.value || "").trim().toLowerCase();
+        const quality = qualityFilter?.value || "";
+        const workflow = workflowFilter?.value || "";
+        const attentionOnly = Boolean(attentionFilter?.checked);
+        let visible = 0;
+        for (const card of traceCards) {{
+          const matchesSearch = !query || card.dataset.search.includes(query);
+          const matchesQuality = !quality || card.dataset.quality === quality;
+          const matchesWorkflow = !workflow || card.dataset.workflow === workflow;
+          const matchesAttention = !attentionOnly || card.dataset.attention === "true";
+          const show = matchesSearch && matchesQuality && matchesWorkflow && matchesAttention;
+          card.hidden = !show;
+          if (show) visible += 1;
+        }}
+        if (traceResultCount) {{
+          traceResultCount.textContent = `${{visible}} / ${{traceCards.length}} traces`;
+        }}
+      }}
+
+      for (const control of [searchInput, qualityFilter, workflowFilter, attentionFilter]) {{
+        control?.addEventListener("input", updateTraceFilters);
+        control?.addEventListener("change", updateTraceFilters);
+      }}
+      updateTraceFilters();
+    </script>
   </body>
 </html>
 """
