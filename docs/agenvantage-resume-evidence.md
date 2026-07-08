@@ -63,10 +63,10 @@ Feature-work benchmark:
 - Median packed prompt: `1,863.0` tokens
 - Median prompt tokens saved: `72,249.5`
 - Median prompt reduction: `96.62%`
-- Total prompt tokens saved across 12 cases: `1,314,169`
-- Median pack runtime: `85.22 ms`
-- Mean pack runtime: `130.42 ms`
-- Total pack runtime across 12 cases: `1,565.07 ms`
+- Total prompt tokens saved across 12 cases: `1,314,997`
+- Median pack runtime: `78.08 ms`
+- Mean pack runtime: `118.62 ms`
+- Total pack runtime across 12 cases: `1,423.41 ms`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
@@ -151,10 +151,10 @@ Four practical repository feature runs:
 
 | Repository | User prompt | Full-scan prompt | Packed prompt | Tokens saved | Reduction | Runtime | Edit/test hit |
 |---|---:|---:|---:|---:|---:|---:|---|
-| `token-optimization` | `19` | `260,416` | `1,899` | `258,517` | `99.27%` | `319.66 ms` | yes/yes |
-| `mesh` | `20` | `37,676` | `1,761` | `35,915` | `95.33%` | `46.31 ms` | yes/yes |
-| `signalfoundry` | `19` | `36,627` | `1,797` | `34,830` | `95.09%` | `42.88 ms` | yes/yes |
-| `application-tracker` | `19` | `110,938` | `1,749` | `109,189` | `98.42%` | `130.85 ms` | yes/yes |
+| `token-optimization` | `19` | `260,690` | `1,966` | `258,724` | `99.25%` | `273.54 ms` | yes/yes |
+| `mesh` | `20` | `37,676` | `1,761` | `35,915` | `95.33%` | `38.47 ms` | yes/yes |
+| `signalfoundry` | `19` | `36,627` | `1,797` | `34,830` | `95.09%` | `36.73 ms` | yes/yes |
+| `application-tracker` | `19` | `110,938` | `1,749` | `109,189` | `98.42%` | `112.11 ms` | yes/yes |
 
 Latest feature-work performance optimization:
 
@@ -164,10 +164,10 @@ Latest feature-work performance optimization:
   overlap reduction from `8` to `4` lines, and tighter feature target budget
   from `2,000` to `1,800` tokens.
 - Baseline 12-case benchmark wall time: `2.89s`.
-- Optimized 12-case benchmark wall time: `1.71s`.
-- Wall-clock improvement: about `40.8%`.
+- Optimized 12-case benchmark wall time: `1.59s`.
+- Wall-clock improvement: about `45.0%`.
 - Median packed prompt changed from `1,993.0` to `1,863.0` tokens.
-- Median pack runtime changed from `151.08 ms` to `85.22 ms`.
+- Median pack runtime changed from `151.08 ms` to `78.08 ms`.
 - Quality gates unchanged: edit-target recall `1.0`, test-target recall
   `0.8333`, required-observation recall `0.9167`, answer-plan pass rate
   `0.8333`.

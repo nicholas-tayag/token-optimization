@@ -231,6 +231,7 @@ class CodeChunk:
     start_line: int
     end_line: int
     text: str
+    # Token count for the separator-wrapped block as inserted into prompts.
     tokens: int
     chunk_symbols: tuple[str, ...] = ()
     file_symbols: tuple[str, ...] = ()
@@ -241,6 +242,7 @@ class CodeChunk:
     redaction_types: tuple[str, ...] = ()
     score: float = 0.0
     matched_terms: tuple[str, ...] = ()
+    addition_tokens: int = 0
 
     def render(self) -> str:
         return (
@@ -540,6 +542,7 @@ def chunks_for_repo(
                 f"[SOURCE:{chunk_id}]\n"
                 f"```{_language_for_path(display_path)}\n{text.rstrip()}\n```"
             )
+            addition_tokens = counter.count(rendered + "\n\n")
             chunks.append(
                 CodeChunk(
                     chunk_id,
@@ -550,7 +553,7 @@ def chunks_for_repo(
                     start + 1,
                     end_line,
                     text,
-                    counter.count(rendered),
+                    addition_tokens,
                     _chunk_local_symbols(
                         symbol_occurrences,
                         start_line=start + 1,
@@ -562,6 +565,7 @@ def chunks_for_repo(
                     indexed_entry.imported_by_paths if indexed_entry is not None else (),
                     sum(chunk_redactions.values()),
                     tuple(sorted(chunk_redactions)),
+                    addition_tokens=addition_tokens,
                 )
             )
             if end_line == len(lines):
@@ -637,6 +641,7 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.redaction_types,
                 score,
                 matches,
+                chunk.addition_tokens,
             )
         )
     return tuple(
@@ -959,7 +964,7 @@ def build_multi_repo_context_package(
         addition = chunk.render() + "\n\n"
         # Budget checks use cached per-chunk additions instead of repeatedly
         # tokenizing the full growing prompt. Final accounting below remains exact.
-        cached = (addition, counter.count(addition))
+        cached = (addition, chunk.addition_tokens or counter.count(addition))
         addition_token_cache[chunk.chunk_id] = cached
         return cached
 

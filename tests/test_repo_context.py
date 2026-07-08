@@ -416,6 +416,24 @@ def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
     assert "redis" in report["covered_query_terms"]
 
 
+def test_full_scan_token_accounting_matches_rendered_prompt(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    counter = TokenCounter()
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=counter,
+        include_full_scan_prompt=True,
+    )
+
+    assert (
+        counter.count(report["full_scan_prompt_markdown"])
+        == report["prompt_token_accounting"]["full_scan_prompt_tokens"]
+    )
+
+
 def test_context_package_redacts_secret_values_before_rendering(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     raw_secret = "sk-prod1234567890abcdef"
