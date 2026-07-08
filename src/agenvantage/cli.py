@@ -32,6 +32,7 @@ from agenvantage.observability import (
     ANNOTATION_LABELS,
     annotate_trace,
     default_observability_db,
+    import_provider_usage_records,
     init_observability_store,
     list_traces,
     load_trace,
@@ -44,6 +45,7 @@ from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
     fixture_readiness_report,
     load_pricing_snapshot,
+    normalize_provider_records_payload,
     load_provider_validation_dataset,
     provider_validation_report_to_otel_export,
     reconcile_provider_costs,
@@ -674,6 +676,37 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print a readable Markdown summary instead of JSON.",
     )
+
+    provider = subparsers.add_parser(
+        "provider",
+        help="Import provider-reported usage into local traces.",
+    )
+    provider_subparsers = provider.add_subparsers(dest="provider_command", required=True)
+    provider_import = provider_subparsers.add_parser(
+        "import",
+        help="Import saved provider usage records or OTLP telemetry for one or more traces.",
+    )
+    provider_import.add_argument(
+        "--records",
+        required=True,
+        type=Path,
+        help="JSON file containing records, requests, saved validation report, or OTLP-style telemetry.",
+    )
+    provider_import.add_argument(
+        "--trace-id",
+        help="Trace ID to attach all imported records to. Omit when records contain trace_id.",
+    )
+    provider_import.add_argument("--repo", type=Path, default=Path("."))
+    provider_import.add_argument("--db", type=Path, help="Explicit observability database path.")
+    provider_import.add_argument("--pricing", type=Path, help="Optional pricing snapshot for cost fill-in.")
+    provider_import.add_argument("--provider", default="unknown", help="Provider label for imported records.")
+    provider_import.add_argument(
+        "--reconciliation-status",
+        default="unreconciled",
+        choices=("unreconciled", "estimated", "provider_reported", "costs_api_reconciled"),
+        help="How strongly imported costs are reconciled against provider billing.",
+    )
+    provider_import.add_argument("--json", dest="as_json", action="store_true")
 
     session = subparsers.add_parser(
         "session",
@@ -1559,6 +1592,24 @@ def _format_trace_detail(trace: dict[str, Any]) -> str:
             lines.append(
                 f"  - {annotation['label']} at {annotation['created_at']}: {note}"
             )
+    provider_usage = trace.get("provider_usage") or []
+    if provider_usage:
+        total_cost = sum(float(usage.get("request_cost_usd") or 0.0) for usage in provider_usage)
+        lines.append("")
+        lines.append("Provider-reported usage:")
+        lines.append(f"  Records: {len(provider_usage)}")
+        lines.append(f"  Reported cost: ${total_cost:.8f}")
+        for usage in provider_usage:
+            request_id = usage.get("request_id") or "no request id"
+            lines.append(
+                "  - "
+                f"{usage.get('provider', 'provider')} {usage.get('model') or ''} "
+                f"{request_id}: input={int(usage.get('input_tokens') or 0):,}, "
+                f"cached={int(usage.get('cached_input_tokens') or 0):,}, "
+                f"output={int(usage.get('output_tokens') or 0):,}, "
+                f"cost=${float(usage.get('request_cost_usd') or 0.0):.8f}, "
+                f"reconciliation={usage.get('reconciliation_status')}"
+            )
     return "\n".join(lines)
 
 
@@ -1890,6 +1941,53 @@ def _run_experiments(args: argparse.Namespace) -> None:
     else:
         print(json.dumps(report, indent=2))
     print(f"Experiment comparison attached to trace {trace_id}", file=sys.stderr)
+
+
+def _run_provider(args: argparse.Namespace) -> None:
+    if args.provider_command != "import":
+        raise SystemExit(f"Unknown provider command: {args.provider_command}")
+    raw_payload = json.loads(args.records.read_text(encoding="utf-8"))
+    pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
+    try:
+        records = normalize_provider_records_payload(raw_payload, pricing)
+    except ValueError:
+        if isinstance(raw_payload, dict) and any(
+            key in raw_payload
+            for key in ("input_tokens", "prompt_tokens", "usage", "request_cost_usd")
+        ):
+            records = normalize_provider_records_payload([raw_payload], pricing)
+        else:
+            raise
+    db_path = _observability_db_from_args(args, args.repo)
+    try:
+        summary = import_provider_usage_records(
+            db_path,
+            records,
+            trace_id=args.trace_id,
+            provider=args.provider,
+            reconciliation_status=args.reconciliation_status,
+        )
+    except KeyError as exc:
+        raise SystemExit(f"Trace not found: {exc.args[0]}") from exc
+    if args.as_json:
+        print(json.dumps(summary, indent=2))
+        return
+    lines = [
+        "AgenVantage provider usage imported.",
+        "",
+        f"Records: {summary['imported_count']}",
+        f"Traces:  {', '.join(summary['trace_ids']) if summary['trace_ids'] else 'none'}",
+        f"Input tokens:  {summary['total_input_tokens']:,}",
+        f"Cached tokens: {summary['total_cached_input_tokens']:,}",
+        f"Output tokens: {summary['total_output_tokens']:,}",
+        f"Reported/estimated request cost: ${summary['total_request_cost_usd']:.8f}",
+        f"Reconciliation: {summary['reconciliation_status']}",
+        "",
+        "Claim boundary:",
+        "  Imported provider usage is stored separately from local estimates.",
+        "  Treat cost as billed proof only when reconciliation status reflects provider billing evidence.",
+    ]
+    print("\n".join(lines))
 
 
 def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
@@ -2303,6 +2401,9 @@ def main() -> None:
         return
     if args.command == "experiments":
         _run_experiments(args)
+        return
+    if args.command == "provider":
+        _run_provider(args)
         return
     if args.command == "session":
         _run_session(args)

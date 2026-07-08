@@ -134,6 +134,7 @@ agenvantage traces list                       # inspect recent AI-agent task tra
 agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
+agenvantage provider import --records provider-usage.json --trace-id <trace-id>
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
@@ -209,6 +210,13 @@ actually succeeded after using the packed context. Supported labels are
 `agent_succeeded`, `agent_failed`, `context_missing`, `wrong_file_selected`,
 `tests_passed`, and `tests_failed`. The dashboard surfaces these labels so you
 can spot prompts that saved tokens but still failed quality.
+
+`agenvantage provider import --records ... --trace-id ...` attaches saved
+provider-reported usage to a local trace. It can normalize saved validation
+reports, request lists, or OTLP-style telemetry, and stores imported
+input/output/cached-token and cost fields separately from local estimates.
+Use `--reconciliation-status costs_api_reconciled` only when the imported
+records have been matched against provider billing evidence.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

@@ -127,6 +127,27 @@ def init_observability_store(db_path: Path) -> Path:
             """
         )
         connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS provider_usage (
+                usage_id TEXT PRIMARY KEY,
+                trace_id TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'unknown',
+                model TEXT NOT NULL DEFAULT '',
+                request_id TEXT NOT NULL DEFAULT '',
+                policy_id TEXT NOT NULL DEFAULT '',
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                request_cost_usd REAL NOT NULL DEFAULT 0,
+                latency_ms REAL NOT NULL DEFAULT 0,
+                reconciliation_status TEXT NOT NULL DEFAULT 'unreconciled',
+                imported_at TEXT NOT NULL,
+                raw_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(trace_id) REFERENCES traces(trace_id)
+            )
+            """
+        )
+        connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
         )
@@ -316,6 +337,10 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
             "SELECT * FROM annotations WHERE trace_id = ? ORDER BY created_at",
             (trace_id,),
         ).fetchall()
+        provider_usage = connection.execute(
+            "SELECT * FROM provider_usage WHERE trace_id = ? ORDER BY imported_at, usage_id",
+            (trace_id,),
+        ).fetchall()
     payload = dict(trace)
     payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
     payload["spans"] = [dict(row) for row in spans]
@@ -327,7 +352,120 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
     payload["annotations"] = [dict(row) for row in annotations]
     for annotation in payload["annotations"]:
         annotation["metadata"] = json.loads(annotation.pop("metadata_json") or "{}")
+    payload["provider_usage"] = [dict(row) for row in provider_usage]
+    for usage in payload["provider_usage"]:
+        usage["raw"] = json.loads(usage.pop("raw_json") or "{}")
     return payload
+
+
+def _int_value(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    return int(float(value))
+
+
+def _float_value(value: Any) -> float:
+    if value in (None, ""):
+        return 0.0
+    return float(value)
+
+
+def import_provider_usage_records(
+    db_path: Path,
+    records: list[dict[str, Any]],
+    *,
+    trace_id: str | None = None,
+    provider: str = "unknown",
+    reconciliation_status: str = "unreconciled",
+) -> dict[str, Any]:
+    init_observability_store(db_path)
+    if not records:
+        return {
+            "imported_count": 0,
+            "trace_ids": [],
+            "total_input_tokens": 0,
+            "total_cached_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_request_cost_usd": 0.0,
+        }
+    imported_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    imported_count = 0
+    trace_ids: set[str] = set()
+    total_input_tokens = 0
+    total_cached_input_tokens = 0
+    total_output_tokens = 0
+    total_request_cost = 0.0
+    with _connect(db_path) as connection:
+        for index, record in enumerate(records):
+            resolved_trace_id = str(record.get("trace_id") or trace_id or "").strip()
+            if not resolved_trace_id:
+                raise ValueError("Provider usage import requires --trace-id or per-record trace_id.")
+            trace = connection.execute(
+                "SELECT trace_id FROM traces WHERE trace_id = ?",
+                (resolved_trace_id,),
+            ).fetchone()
+            if trace is None:
+                raise KeyError(resolved_trace_id)
+            record_provider = str(record.get("provider") or provider or "unknown")
+            model = str(record.get("model") or record.get("gen_ai.response.model") or "")
+            request_id = str(
+                record.get("request_id")
+                or record.get("response_id")
+                or record.get("id")
+                or record.get("gen_ai.response.id")
+                or ""
+            )
+            policy_id = str(record.get("policy_id") or "")
+            input_tokens = _int_value(record.get("input_tokens"))
+            cached_input_tokens = _int_value(record.get("cached_input_tokens"))
+            output_tokens = _int_value(record.get("output_tokens"))
+            request_cost = _float_value(record.get("request_cost_usd"))
+            latency_ms = _float_value(record.get("latency_ms"))
+            fingerprint = hashlib.sha1(
+                json.dumps(record, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:12]
+            usage_id = f"{resolved_trace_id}:provider_usage:{request_id or index}:{fingerprint}"
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO provider_usage(
+                    usage_id, trace_id, provider, model, request_id, policy_id,
+                    input_tokens, cached_input_tokens, output_tokens,
+                    request_cost_usd, latency_ms, reconciliation_status,
+                    imported_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    usage_id,
+                    resolved_trace_id,
+                    record_provider,
+                    model,
+                    request_id,
+                    policy_id,
+                    input_tokens,
+                    cached_input_tokens,
+                    output_tokens,
+                    request_cost,
+                    latency_ms,
+                    reconciliation_status,
+                    imported_at,
+                    json.dumps(record, sort_keys=True, default=str),
+                ),
+            )
+            imported_count += 1
+            trace_ids.add(resolved_trace_id)
+            total_input_tokens += input_tokens
+            total_cached_input_tokens += cached_input_tokens
+            total_output_tokens += output_tokens
+            total_request_cost += request_cost
+    return {
+        "imported_count": imported_count,
+        "trace_ids": sorted(trace_ids),
+        "total_input_tokens": total_input_tokens,
+        "total_cached_input_tokens": total_cached_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "total_request_cost_usd": round(total_request_cost, 8),
+        "reconciliation_status": reconciliation_status,
+    }
 
 
 def _quality_status_from_label(label: str) -> str:
@@ -419,6 +557,8 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
             "warning_count": 0,
             "failed_count": 0,
             "annotated_count": 0,
+            "provider_usage_count": 0,
+            "provider_reported_cost_usd": 0.0,
         }
     reductions = sorted(float(trace.get("reduction_percent") or 0.0) for trace in traces)
     packed = sorted(int(trace.get("packed_prompt_tokens") or 0) for trace in traces)
@@ -439,6 +579,15 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "failed_count": sum(1 for trace in traces if trace.get("quality_status") == "failed"),
         "annotated_count": sum(1 for trace in traces if trace.get("annotations")),
+        "provider_usage_count": sum(len(trace.get("provider_usage") or []) for trace in traces),
+        "provider_reported_cost_usd": round(
+            sum(
+                float(usage.get("request_cost_usd") or 0.0)
+                for trace in traces
+                for usage in (trace.get("provider_usage") or [])
+            ),
+            8,
+        ),
     }
 
 
@@ -452,6 +601,7 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         missing = metadata.get("missing_signals") or []
         spans = trace.get("spans") or []
         annotations = trace.get("annotations") or []
+        provider_usage = trace.get("provider_usage") or []
         selected_html = (
             "".join(f"<li>{html.escape(str(path))}</li>" for path in selected_files)
             if selected_files
@@ -486,6 +636,21 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
             if annotations
             else "<li class=\"muted\">No user quality labels yet.</li>"
         )
+        provider_usage_html = (
+            "".join(
+                "<li>"
+                f"<strong>{html.escape(str(usage.get('provider', 'provider')))}</strong>"
+                f"<span>{_fmt_int(usage.get('input_tokens'))} in / "
+                f"{_fmt_int(usage.get('cached_input_tokens'))} cached / "
+                f"{_fmt_int(usage.get('output_tokens'))} out</span>"
+                f"<em>${_fmt_float(usage.get('request_cost_usd'))} "
+                f"{html.escape(str(usage.get('reconciliation_status', 'unreconciled')))}</em>"
+                "</li>"
+                for usage in provider_usage
+            )
+            if provider_usage
+            else "<li class=\"muted\">No provider-reported usage imported.</li>"
+        )
         trace_cards.append(
             f"""
             <article class="trace-card">
@@ -517,6 +682,10 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
               <details>
                 <summary>User quality labels</summary>
                 <ul class="annotations">{annotations_html}</ul>
+              </details>
+              <details>
+                <summary>Provider-reported usage</summary>
+                <ul class="provider-usage">{provider_usage_html}</ul>
               </details>
             </article>
             """
@@ -660,6 +829,12 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         gap: 0.8rem;
         padding: 0.25rem 0;
       }}
+      .provider-usage li {{
+        display: grid;
+        grid-template-columns: 8rem 1fr auto;
+        gap: 0.8rem;
+        padding: 0.25rem 0;
+      }}
       code {{
         background: #eee2c8;
         border-radius: 6px;
@@ -686,6 +861,8 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         <div class="stat"><strong>{_fmt_int(summary['warning_count'])}</strong><span>traces with warnings</span></div>
         <div class="stat"><strong>{_fmt_int(summary['failed_count'])}</strong><span>failed quality labels</span></div>
         <div class="stat"><strong>{_fmt_int(summary['annotated_count'])}</strong><span>annotated traces</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['provider_usage_count'])}</strong><span>provider usage records</span></div>
+        <div class="stat"><strong>${_fmt_float(summary['provider_reported_cost_usd'])}</strong><span>provider reported cost</span></div>
       </section>
       <section class="trace-grid">
         {cards_html}

@@ -499,6 +499,8 @@ Current implementation slice:
 
 ### Build 6: Provider Usage Import
 
+Status: partially implemented for saved usage import.
+
 Goal: support real cost proof without requiring every user to spend money.
 
 Tasks:
@@ -514,6 +516,18 @@ Acceptance:
   - local estimated cost;
   - provider reported cost/tokens when imported;
   - reconciliation status.
+
+Current implementation slice:
+
+- `agenvantage provider import --records ... --trace-id ...` imports saved
+  provider usage into the local trace store.
+- Supported inputs reuse the provider-validation normalizer: raw records,
+  request lists, saved validation reports, or OTLP-style spans/logs/metrics.
+- Imported `input_tokens`, `cached_input_tokens`, `output_tokens`,
+  `request_cost_usd`, latency, provider, model, and request IDs are stored in a
+  `provider_usage` table separate from local estimates.
+- Trace detail and the local dashboard show provider-reported usage and the
+  declared reconciliation status.
 
 ### Build 7: Agent Wrappers
 

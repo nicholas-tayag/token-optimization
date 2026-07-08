@@ -684,6 +684,91 @@ def test_experiments_compare_records_variants_and_trace_artifacts(tmp_path: Path
     assert "experiment_comparison" in shown.stdout
 
 
+def test_provider_import_attaches_usage_to_trace(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    observed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Explain the rate limiter fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    trace_line = next(line for line in observed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+    records = tmp_path / "provider-records.json"
+    records.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "request_id": "resp_cli_123",
+                        "model": "gpt-test",
+                        "input_tokens": 640,
+                        "cached_input_tokens": 256,
+                        "output_tokens": 80,
+                        "request_cost_usd": 0.00072,
+                        "latency_ms": 910,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "provider",
+            "import",
+            "--records",
+            str(records),
+            "--trace-id",
+            trace_id,
+            "--provider",
+            "openai",
+            "--reconciliation-status",
+            "provider_reported",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage provider usage imported" in imported.stdout
+    assert "Records: 1" in imported.stdout
+    assert "provider_reported" in imported.stdout
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Provider-reported usage:" in shown.stdout
+    assert "resp_cli_123" in shown.stdout
+    assert "cached=256" in shown.stdout
+    assert "reconciliation=provider_reported" in shown.stdout
+
+
 def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifact"
     recoverable_dir = artifact_root / "recoverable"

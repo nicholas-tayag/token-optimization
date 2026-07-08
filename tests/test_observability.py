@@ -4,6 +4,7 @@ from pathlib import Path
 
 from agenvantage.observability import (
     annotate_trace,
+    import_provider_usage_records,
     init_observability_store,
     list_traces,
     load_trace,
@@ -182,3 +183,57 @@ def test_annotate_trace_persists_label_and_updates_quality_status(tmp_path: Path
     dashboard = dashboard_path.read_text(encoding="utf-8")
     assert "failed quality labels" in dashboard
     assert "Saved tokens, but selected the wrong test surface." in dashboard
+
+
+def test_import_provider_usage_records_stays_separate_from_local_estimates(tmp_path: Path) -> None:
+    db_path = tmp_path / ".agenvantage" / "observability.db"
+    report = {
+        "task": "Measure real usage.",
+        "prompt_token_accounting": {
+            "full_scan_prompt_tokens": 3000,
+            "packed_prompt_tokens": 300,
+            "prompt_tokens_saved_vs_full_scan": 2700,
+            "prompt_reduction_percent_vs_full_scan": 90.0,
+        },
+        "selected_chunks": [{"path": "src/server.py"}],
+        "change_surface": {"missing_signals": []},
+    }
+    trace = record_pack_trace(
+        db_path,
+        markdown="# Context\n",
+        report=report,
+        repo_path=tmp_path,
+        workflow="feature",
+    )
+
+    summary = import_provider_usage_records(
+        db_path,
+        [
+            {
+                "request_id": "resp_123",
+                "model": "gpt-test",
+                "input_tokens": 320,
+                "cached_input_tokens": 128,
+                "output_tokens": 42,
+                "request_cost_usd": 0.00041,
+                "latency_ms": 700,
+            }
+        ],
+        trace_id=trace.trace_id,
+        provider="openai",
+        reconciliation_status="provider_reported",
+    )
+
+    loaded = load_trace(db_path, trace.trace_id)
+    assert summary["imported_count"] == 1
+    assert loaded["packed_prompt_tokens"] == 300
+    assert loaded["provider_usage"][0]["provider"] == "openai"
+    assert loaded["provider_usage"][0]["input_tokens"] == 320
+    assert loaded["provider_usage"][0]["cached_input_tokens"] == 128
+    assert loaded["provider_usage"][0]["request_cost_usd"] == 0.00041
+    assert loaded["provider_usage"][0]["reconciliation_status"] == "provider_reported"
+
+    dashboard_path = write_observability_dashboard(db_path, tmp_path / "dashboard.html")
+    dashboard = dashboard_path.read_text(encoding="utf-8")
+    assert "provider usage records" in dashboard
+    assert "provider reported cost" in dashboard
