@@ -316,7 +316,7 @@ def list_traces(db_path: Path, *, limit: int = 20) -> list[TraceRecord]:
     ]
 
 
-def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
+def load_trace(db_path: Path, trace_id: str, *, include_artifact_content: bool = False) -> dict[str, Any]:
     init_observability_store(db_path)
     with _connect(db_path) as connection:
         trace = connection.execute(
@@ -329,8 +329,11 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
             "SELECT * FROM spans WHERE trace_id = ? ORDER BY started_at",
             (trace_id,),
         ).fetchall()
+        artifact_columns = "artifact_id, kind, path, metadata_json"
+        if include_artifact_content:
+            artifact_columns += ", content"
         artifacts = connection.execute(
-            "SELECT artifact_id, kind, path, metadata_json FROM artifacts WHERE trace_id = ? ORDER BY kind",
+            f"SELECT {artifact_columns} FROM artifacts WHERE trace_id = ? ORDER BY kind",
             (trace_id,),
         ).fetchall()
         annotations = connection.execute(
@@ -356,6 +359,39 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
     for usage in payload["provider_usage"]:
         usage["raw"] = json.loads(usage.pop("raw_json") or "{}")
     return payload
+
+
+def load_trace_artifact(
+    db_path: Path,
+    trace_id: str,
+    *,
+    kind: str | None = None,
+    artifact_id: str | None = None,
+) -> dict[str, Any]:
+    init_observability_store(db_path)
+    if kind is None and artifact_id is None:
+        raise ValueError("load_trace_artifact requires kind or artifact_id.")
+    with _connect(db_path) as connection:
+        if artifact_id is not None:
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE trace_id = ? AND artifact_id = ?",
+                (trace_id, artifact_id),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                """
+                SELECT * FROM artifacts
+                WHERE trace_id = ? AND kind = ?
+                ORDER BY artifact_id
+                LIMIT 1
+                """,
+                (trace_id, kind),
+            ).fetchone()
+    if row is None:
+        raise KeyError(artifact_id or kind or "")
+    artifact = dict(row)
+    artifact["metadata"] = json.loads(artifact.pop("metadata_json") or "{}")
+    return artifact
 
 
 def _int_value(value: Any) -> int:

@@ -35,6 +35,7 @@ from agenvantage.observability import (
     default_observability_db,
     import_provider_usage_records,
     init_observability_store,
+    load_trace_artifact,
     list_traces,
     load_trace,
     record_pack_trace,
@@ -594,6 +595,23 @@ def _parser() -> argparse.ArgumentParser:
     traces_annotate.add_argument("--note", default="", help="Optional human-readable note.")
     traces_annotate.add_argument("--repo", type=Path, default=Path("."))
     traces_annotate.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_export = traces_subparsers.add_parser(
+        "export",
+        help="Export a stored trace artifact such as context Markdown or agent stdout.",
+    )
+    traces_export.add_argument("trace_id")
+    traces_export.add_argument(
+        "--kind",
+        default="context_markdown",
+        help="Artifact kind to export (default: context_markdown).",
+    )
+    traces_export.add_argument(
+        "--artifact-id",
+        help="Exact artifact ID to export instead of selecting by kind.",
+    )
+    traces_export.add_argument("--output", type=Path, help="Optional output file.")
+    traces_export.add_argument("--repo", type=Path, default=Path("."))
+    traces_export.add_argument("--db", type=Path, help="Explicit observability database path.")
 
     dashboard = subparsers.add_parser(
         "dashboard",
@@ -1751,6 +1769,35 @@ def _run_traces(args: argparse.Namespace) -> None:
                 ]
             )
         )
+        return
+    if args.traces_command == "export":
+        try:
+            artifact = load_trace_artifact(
+                db_path,
+                args.trace_id,
+                kind=None if args.artifact_id else args.kind,
+                artifact_id=args.artifact_id,
+            )
+        except KeyError as exc:
+            raise SystemExit(f"Artifact not found: {exc.args[0]}") from exc
+        content = str(artifact.get("content") or "")
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(content, encoding="utf-8")
+            print(
+                "\n".join(
+                    [
+                        "AgenVantage trace artifact exported.",
+                        "",
+                        f"Trace:    {args.trace_id}",
+                        f"Artifact: {artifact['artifact_id']}",
+                        f"Kind:     {artifact['kind']}",
+                        f"Output:   {args.output.resolve()}",
+                    ]
+                )
+            )
+        else:
+            print(content, end="" if content.endswith("\n") else "\n")
         return
     raise SystemExit(f"Unknown traces command: {args.traces_command}")
 

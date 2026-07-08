@@ -6,6 +6,7 @@ from agenvantage.observability import (
     annotate_trace,
     import_provider_usage_records,
     init_observability_store,
+    load_trace_artifact,
     list_traces,
     load_trace,
     record_pack_trace,
@@ -63,6 +64,8 @@ def test_record_pack_trace_persists_metrics_and_artifacts(tmp_path: Path) -> Non
         "context_markdown",
         "decision_manifest",
     }
+    artifact = load_trace_artifact(db_path, trace.trace_id, kind="context_markdown")
+    assert artifact["content"] == "# AgenVantage Context Package\n"
 
 
 def test_write_observability_dashboard_renders_trace_metrics(tmp_path: Path) -> None:

@@ -131,6 +131,7 @@ agenvantage run --summary                     # default scenario, readable outpu
 agenvantage observe init                      # create local trace storage
 agenvantage observe pack --task "..."         # pack context and record a trace
 agenvantage traces list                       # inspect recent AI-agent task traces
+agenvantage traces export <trace-id>          # recover stored context Markdown
 agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
@@ -211,6 +212,11 @@ actually succeeded after using the packed context. Supported labels are
 `agent_succeeded`, `agent_failed`, `context_missing`, `wrong_file_selected`,
 `tests_passed`, and `tests_failed`. The dashboard surfaces these labels so you
 can spot prompts that saved tokens but still failed quality.
+
+`agenvantage traces export <trace-id>` prints the stored `context_markdown`
+artifact by default. Use `--kind agent_stdout`, `--kind agent_stderr`, or
+`--artifact-id ...` to recover other stored artifacts, and `--output ...` to
+write them to disk.
 
 `agenvantage provider import --records ... --trace-id ...` attaches saved
 provider-reported usage to a local trace. It can normalize saved validation

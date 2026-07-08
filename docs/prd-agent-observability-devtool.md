@@ -380,6 +380,8 @@ Current implementation slice:
   records a local trace.
 - `agenvantage traces list` and `agenvantage traces show <trace-id>` inspect
   the stored trace.
+- `agenvantage traces export <trace-id>` recovers stored context Markdown or
+  agent-run artifacts from SQLite.
 - `agenvantage dashboard` writes `.agenvantage/observability-dashboard.html`
   and can open a local static dashboard from the SQLite trace store.
 - The initial trace schema stores traces, spans, and context/manifest artifacts.
@@ -428,6 +430,9 @@ Acceptance:
 - It reads from SQLite.
 - The current static version shows summary metrics, trace cards, selected
   files, missing-signal warnings, and spans for recent traces.
+- Trace artifacts can be recovered from the CLI with `traces export`, covering
+  the MVP copyable handoff requirement while the static dashboard remains
+  read-only.
 - A later server-backed version should add token trends, richer trace detail,
   filters, and a span waterfall.
 

@@ -563,6 +563,46 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     assert "agent_failed" in shown_after_annotation.stdout
     assert "Saved tokens, but missed the right behavior." in shown_after_annotation.stdout
 
+    exported = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "export",
+            trace_id,
+            "--kind",
+            "context_markdown",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert exported.stdout.startswith("# AgenVantage Context Package")
+
+    output = tmp_path / "exported-context.md"
+    export_file = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "export",
+            trace_id,
+            "--kind",
+            "context_markdown",
+            "--output",
+            str(output),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "AgenVantage trace artifact exported" in export_file.stdout
+    assert output.read_text(encoding="utf-8").startswith("# AgenVantage Context Package")
+
 
 def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
