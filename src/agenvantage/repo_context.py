@@ -219,6 +219,21 @@ _SECRET_ASSIGNMENT_PATTERN = re.compile(
 )
 _CAMEL_BOUNDARY_PATTERN = re.compile(r"([a-z0-9])([A-Z])")
 _TERM_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,}")
+_SECRET_ASSIGNMENT_MARKERS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "private_key",
+    "private-key",
+    "client_secret",
+    "client-secret",
+    "database_url",
+    "database-url",
+    "authorization",
+)
 
 
 @dataclass(frozen=True)
@@ -352,12 +367,30 @@ def _redact_sensitive_text(text: str) -> tuple[str, dict[str, int]]:
         quote = match.group("quote")
         return f"{match.group('key')}{match.group('sep')}{quote}[REDACTED_SECRET]{quote}"
 
-    redacted = _PRIVATE_KEY_BLOCK_PATTERN.sub(_replace_private_key, text)
+    redacted = text
+    lowered = text.lower()
+    if "private key" in lowered:
+        redacted = _PRIVATE_KEY_BLOCK_PATTERN.sub(_replace_private_key, redacted)
     for label, pattern, replacement in _SECRET_VALUE_PATTERNS:
+        if (
+            (label == "openai_api_key" and "sk-" not in redacted)
+            or (
+                label == "github_token"
+                and not any(
+                    marker in redacted
+                    for marker in ("ghp_", "gho_", "ghu_", "ghs_", "ghr_")
+                )
+            )
+            or (label == "github_fine_grained_token" and "github_pat_" not in redacted)
+            or (label == "aws_access_key" and "AKIA" not in redacted)
+            or (label == "bearer_token" and "bearer" not in redacted.lower())
+        ):
+            continue
         redacted, count = pattern.subn(replacement, redacted)
         if count:
             redaction_counts[label] += count
-    redacted = _SECRET_ASSIGNMENT_PATTERN.sub(_replace_assignment, redacted)
+    if any(marker in lowered for marker in _SECRET_ASSIGNMENT_MARKERS):
+        redacted = _SECRET_ASSIGNMENT_PATTERN.sub(_replace_assignment, redacted)
     return redacted, dict(redaction_counts)
 
 

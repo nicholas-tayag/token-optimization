@@ -686,6 +686,105 @@ def _fmt_float(value: Any) -> str:
         return "0.00"
 
 
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+
+
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, round((len(ordered) - 1) * percentile)))
+    return ordered[index]
+
+
+def _workflow_breakdown(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for trace in traces:
+        workflow = str(trace.get("workflow") or "unknown")
+        bucket = grouped.setdefault(
+            workflow,
+            {
+                "workflow": workflow,
+                "trace_count": 0,
+                "tokens_saved": 0,
+                "packed_tokens": [],
+                "reduction_percent": [],
+                "warning_count": 0,
+                "failed_count": 0,
+            },
+        )
+        bucket["trace_count"] += 1
+        bucket["tokens_saved"] += int(trace.get("tokens_saved") or 0)
+        bucket["packed_tokens"].append(float(trace.get("packed_prompt_tokens") or 0))
+        bucket["reduction_percent"].append(float(trace.get("reduction_percent") or 0))
+        if (trace.get("metadata") or {}).get("missing_signals"):
+            bucket["warning_count"] += 1
+        if trace.get("quality_status") == "failed":
+            bucket["failed_count"] += 1
+    rows = []
+    for bucket in grouped.values():
+        rows.append(
+            {
+                "workflow": bucket["workflow"],
+                "trace_count": bucket["trace_count"],
+                "tokens_saved": bucket["tokens_saved"],
+                "median_packed_tokens": int(_median(bucket["packed_tokens"])),
+                "median_reduction_percent": round(_median(bucket["reduction_percent"]), 2),
+                "warning_count": bucket["warning_count"],
+                "failed_count": bucket["failed_count"],
+            }
+        )
+    return sorted(rows, key=lambda item: (-int(item["trace_count"]), str(item["workflow"])))
+
+
+def _dashboard_action_items(traces: list[dict[str, Any]], *, limit: int = 8) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for trace in traces:
+        metadata = trace.get("metadata") or {}
+        missing = metadata.get("missing_signals") or []
+        quality_status = str(trace.get("quality_status") or "unknown")
+        annotations = trace.get("annotations") or []
+        if quality_status == "failed":
+            items.append(
+                {
+                    "severity": "critical",
+                    "title": "Failed quality label",
+                    "trace_id": trace.get("trace_id"),
+                    "task": trace.get("task"),
+                    "detail": "Review selected files and rerun with a narrower task or more context.",
+                }
+            )
+        if missing:
+            items.append(
+                {
+                    "severity": "warning",
+                    "title": "Missing context signals",
+                    "trace_id": trace.get("trace_id"),
+                    "task": trace.get("task"),
+                    "detail": "; ".join(str(item) for item in missing[:2]),
+                }
+            )
+        if quality_status in {"unknown", "unverified"} and not annotations:
+            items.append(
+                {
+                    "severity": "info",
+                    "title": "Needs quality label",
+                    "trace_id": trace.get("trace_id"),
+                    "task": trace.get("task"),
+                    "detail": "Annotate whether the packed context was sufficient after the agent run.",
+                }
+            )
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    return sorted(items, key=lambda item: severity_rank.get(str(item["severity"]), 9))[:limit]
+
+
 def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
     if not traces:
         return {
@@ -693,26 +792,43 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
             "total_tokens_saved": 0,
             "median_reduction_percent": 0.0,
             "median_packed_tokens": 0,
+            "p95_packed_tokens": 0,
             "warning_count": 0,
             "failed_count": 0,
             "annotated_count": 0,
             "provider_usage_count": 0,
             "provider_reported_cost_usd": 0.0,
+            "provider_input_tokens": 0,
+            "provider_cached_input_tokens": 0,
+            "cache_hit_rate_percent": 0.0,
+            "total_span_duration_ms": 0.0,
+            "p95_span_duration_ms": 0.0,
+            "workflow_breakdown": [],
+            "action_items": [],
         }
-    reductions = sorted(float(trace.get("reduction_percent") or 0.0) for trace in traces)
-    packed = sorted(int(trace.get("packed_prompt_tokens") or 0) for trace in traces)
-    midpoint = len(traces) // 2
-    if len(traces) % 2:
-        median_reduction = reductions[midpoint]
-        median_packed = packed[midpoint]
-    else:
-        median_reduction = (reductions[midpoint - 1] + reductions[midpoint]) / 2
-        median_packed = int((packed[midpoint - 1] + packed[midpoint]) / 2)
+    reductions = [float(trace.get("reduction_percent") or 0.0) for trace in traces]
+    packed = [float(trace.get("packed_prompt_tokens") or 0) for trace in traces]
+    provider_input_tokens = sum(
+        int(usage.get("input_tokens") or 0)
+        for trace in traces
+        for usage in (trace.get("provider_usage") or [])
+    )
+    provider_cached_tokens = sum(
+        int(usage.get("cached_input_tokens") or 0)
+        for trace in traces
+        for usage in (trace.get("provider_usage") or [])
+    )
+    span_durations = [
+        float(span.get("duration_ms") or 0.0)
+        for trace in traces
+        for span in (trace.get("spans") or [])
+    ]
     return {
         "trace_count": len(traces),
         "total_tokens_saved": sum(int(trace.get("tokens_saved") or 0) for trace in traces),
-        "median_reduction_percent": round(median_reduction, 2),
-        "median_packed_tokens": median_packed,
+        "median_reduction_percent": round(_median(reductions), 2),
+        "median_packed_tokens": int(_median(packed)),
+        "p95_packed_tokens": int(_percentile(packed, 0.95)),
         "warning_count": sum(
             1 for trace in traces if (trace.get("metadata") or {}).get("missing_signals")
         ),
@@ -727,12 +843,54 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
             ),
             8,
         ),
+        "provider_input_tokens": provider_input_tokens,
+        "provider_cached_input_tokens": provider_cached_tokens,
+        "cache_hit_rate_percent": round(
+            (provider_cached_tokens / provider_input_tokens * 100) if provider_input_tokens else 0.0,
+            2,
+        ),
+        "total_span_duration_ms": round(sum(span_durations), 2),
+        "p95_span_duration_ms": round(_percentile(span_durations, 0.95), 2),
+        "workflow_breakdown": _workflow_breakdown(traces),
+        "action_items": _dashboard_action_items(traces),
     }
 
 
 def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
     traces = _load_dashboard_traces(db_path, limit=limit)
     summary = _dashboard_summary(traces)
+    action_items = summary.get("action_items") or []
+    action_items_html = (
+        "".join(
+            "<li>"
+            f"<span class=\"severity {html.escape(str(item.get('severity', 'info')))}\">"
+            f"{html.escape(str(item.get('severity', 'info')))}</span>"
+            f"<strong>{html.escape(str(item.get('title', 'Action item')))}</strong>"
+            f"<span>{html.escape(str(item.get('task') or 'Untitled task'))}</span>"
+            f"<em>{html.escape(str(item.get('detail') or ''))}</em>"
+            "</li>"
+            for item in action_items
+        )
+        if action_items
+        else "<li class=\"muted\">No active action items. Keep labeling real agent outcomes.</li>"
+    )
+    workflow_rows = summary.get("workflow_breakdown") or []
+    workflow_html = (
+        "".join(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('workflow', 'unknown')))}</td>"
+            f"<td>{_fmt_int(row.get('trace_count'))}</td>"
+            f"<td>{_fmt_int(row.get('tokens_saved'))}</td>"
+            f"<td>{_fmt_int(row.get('median_packed_tokens'))}</td>"
+            f"<td>{_fmt_float(row.get('median_reduction_percent'))}%</td>"
+            f"<td>{_fmt_int(row.get('warning_count'))}</td>"
+            f"<td>{_fmt_int(row.get('failed_count'))}</td>"
+            "</tr>"
+            for row in workflow_rows
+        )
+        if workflow_rows
+        else "<tr><td colspan=\"7\" class=\"muted\">No workflow data yet.</td></tr>"
+    )
     trace_cards = []
     for trace in traces:
         metadata = trace.get("metadata") or {}
@@ -843,25 +1001,29 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
     <style>
       :root {{
         color-scheme: light;
-        --ink: #14213d;
+        --ink: #111827;
         --muted: #64748b;
-        --bg: #f5f1e8;
-        --panel: #fffaf0;
-        --line: #dfd4bd;
+        --bg: #eef2f6;
+        --panel: #ffffff;
+        --panel-soft: #f8fafc;
+        --line: #d8dee8;
         --accent: #0f766e;
-        --accent-2: #b45309;
+        --accent-2: #2563eb;
+        --warn: #b45309;
         --danger: #b91c1c;
-        font-family: ui-sans-serif, "Avenir Next", "Helvetica Neue", sans-serif;
+        --shadow: rgba(15, 23, 42, 0.08);
+        font-family: "Avenir Next", ui-sans-serif, "Helvetica Neue", sans-serif;
       }}
       body {{
         margin: 0;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 28rem),
-          linear-gradient(135deg, #f5f1e8 0%, #ede4d1 100%);
+          radial-gradient(circle at top left, rgba(37, 99, 235, 0.14), transparent 28rem),
+          radial-gradient(circle at 90% 15%, rgba(15, 118, 110, 0.16), transparent 24rem),
+          linear-gradient(135deg, #eef2f6 0%, #e6edf5 100%);
       }}
       header {{
-        padding: 2.25rem clamp(1rem, 4vw, 4rem) 1.5rem;
+        padding: 2.25rem clamp(1rem, 4vw, 4rem) 1rem;
       }}
       header h1 {{
         margin: 0;
@@ -877,17 +1039,23 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
       main {{
         padding: 0 clamp(1rem, 4vw, 4rem) 4rem;
       }}
+      .layout {{
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+        gap: 1rem;
+        align-items: start;
+      }}
       .stats {{
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 1rem;
         margin: 1.25rem 0 1.75rem;
       }}
-      .stat, .trace-card, .empty {{
-        background: rgba(255, 250, 240, 0.88);
+      .stat, .trace-card, .empty, .panel {{
+        background: rgba(255, 255, 255, 0.9);
         border: 1px solid var(--line);
-        border-radius: 20px;
-        box-shadow: 0 18px 50px rgba(80, 61, 31, 0.08);
+        border-radius: 18px;
+        box-shadow: 0 18px 50px var(--shadow);
       }}
       .stat {{
         padding: 1.15rem;
@@ -903,6 +1071,80 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
       .trace-grid {{
         display: grid;
         gap: 1rem;
+      }}
+      .panel {{
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }}
+      .panel h2 {{
+        margin: 0 0 0.75rem;
+        font-size: 1rem;
+        letter-spacing: -0.02em;
+      }}
+      .ops-grid {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+      }}
+      .ops-grid div {{
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.75rem;
+      }}
+      .ops-grid strong {{
+        display: block;
+        font-size: 1.25rem;
+      }}
+      .actions {{
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }}
+      .actions li {{
+        display: grid;
+        gap: 0.25rem;
+        border-top: 1px solid var(--line);
+        padding: 0.75rem 0;
+      }}
+      .actions li:first-child {{
+        border-top: 0;
+        padding-top: 0;
+      }}
+      .severity {{
+        width: fit-content;
+        border-radius: 999px;
+        padding: 0.12rem 0.45rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        background: #e0f2fe;
+        color: #0369a1;
+      }}
+      .severity.critical {{
+        background: #fee2e2;
+        color: var(--danger);
+      }}
+      .severity.warning {{
+        background: #fef3c7;
+        color: var(--warn);
+      }}
+      table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.86rem;
+      }}
+      th, td {{
+        border-top: 1px solid var(--line);
+        padding: 0.5rem 0.35rem;
+        text-align: right;
+      }}
+      th:first-child, td:first-child {{
+        text-align: left;
+      }}
+      th {{
+        color: var(--muted);
+        font-weight: 700;
       }}
       .trace-card {{
         padding: 1.15rem;
@@ -982,6 +1224,11 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
       .empty {{
         padding: 1.5rem;
       }}
+      @media (max-width: 980px) {{
+        .layout {{
+          grid-template-columns: 1fr;
+        }}
+      }}
     </style>
   </head>
   <body>
@@ -997,14 +1244,43 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         <div class="stat"><strong>{_fmt_int(summary['total_tokens_saved'])}</strong><span>tokens saved</span></div>
         <div class="stat"><strong>{_fmt_float(summary['median_reduction_percent'])}%</strong><span>median reduction</span></div>
         <div class="stat"><strong>{_fmt_int(summary['median_packed_tokens'])}</strong><span>median packed tokens</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['p95_packed_tokens'])}</strong><span>p95 packed tokens</span></div>
         <div class="stat"><strong>{_fmt_int(summary['warning_count'])}</strong><span>traces with warnings</span></div>
         <div class="stat"><strong>{_fmt_int(summary['failed_count'])}</strong><span>failed quality labels</span></div>
         <div class="stat"><strong>{_fmt_int(summary['annotated_count'])}</strong><span>annotated traces</span></div>
         <div class="stat"><strong>{_fmt_int(summary['provider_usage_count'])}</strong><span>provider usage records</span></div>
         <div class="stat"><strong>${_fmt_float(summary['provider_reported_cost_usd'])}</strong><span>provider reported cost</span></div>
       </section>
-      <section class="trace-grid">
-        {cards_html}
+      <section class="layout">
+        <div class="trace-grid">
+          {cards_html}
+        </div>
+        <aside>
+          <section class="panel">
+            <h2>Operations</h2>
+            <div class="ops-grid">
+              <div><strong>{_fmt_int(summary['provider_input_tokens'])}</strong><span>provider input tokens</span></div>
+              <div><strong>{_fmt_int(summary['provider_cached_input_tokens'])}</strong><span>cached input tokens</span></div>
+              <div><strong>{_fmt_float(summary['cache_hit_rate_percent'])}%</strong><span>cache hit rate</span></div>
+              <div><strong>{_fmt_float(summary['p95_span_duration_ms'])} ms</strong><span>p95 span latency</span></div>
+              <div><strong>{_fmt_float(summary['total_span_duration_ms'])} ms</strong><span>total traced duration</span></div>
+              <div><strong>{_fmt_int(summary['annotated_count'])}/{_fmt_int(summary['trace_count'])}</strong><span>quality labels</span></div>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>Action queue</h2>
+            <ul class="actions">{action_items_html}</ul>
+          </section>
+          <section class="panel">
+            <h2>Workflow breakdown</h2>
+            <table>
+              <thead>
+                <tr><th>Workflow</th><th>Traces</th><th>Saved</th><th>Median pack</th><th>Reduction</th><th>Warn</th><th>Fail</th></tr>
+              </thead>
+              <tbody>{workflow_html}</tbody>
+            </table>
+          </section>
+        </aside>
       </section>
     </main>
   </body>

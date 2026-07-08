@@ -35,6 +35,10 @@ Current implemented scope:
   hashes
 - Reproducibility support: manifests include a path-independent bundle
   fingerprint for comparing generated artifact content across output directories
+- Local observability platform: `agenvantage dashboard` renders a Datadog/New
+  Relic-style trace cockpit with KPI tiles, operations metrics, cache hit rate,
+  p95 span latency, an action queue, workflow breakdowns, trace cards, selected
+  files, quality labels, and provider-usage imports
 
 Out of scope for verified resume claims right now:
 
@@ -63,10 +67,10 @@ Feature-work benchmark:
 - Median packed prompt: `1,863.0` tokens
 - Median prompt tokens saved: `72,249.5`
 - Median prompt reduction: `96.62%`
-- Total prompt tokens saved across 12 cases: `1,314,997`
-- Median pack runtime: `78.08 ms`
-- Mean pack runtime: `118.62 ms`
-- Total pack runtime across 12 cases: `1,423.41 ms`
+- Total prompt tokens saved across 12 cases: `1,325,356`
+- Median pack runtime: `61.54 ms`
+- Mean pack runtime: `97.3 ms`
+- Total pack runtime across 12 cases: `1,167.56 ms`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
@@ -164,13 +168,22 @@ Latest feature-work performance optimization:
   overlap reduction from `8` to `4` lines, and tighter feature target budget
   from `2,000` to `1,800` tokens.
 - Baseline 12-case benchmark wall time: `2.89s`.
-- Optimized 12-case benchmark wall time: `1.59s`.
-- Wall-clock improvement: about `45.0%`.
+- Optimized 12-case benchmark wall time: `1.32s`.
+- Wall-clock improvement: about `54.3%`.
 - Median packed prompt changed from `1,993.0` to `1,863.0` tokens.
-- Median pack runtime changed from `151.08 ms` to `78.08 ms`.
+- Median pack runtime changed from `151.08 ms` to `61.54 ms`.
 - Quality gates unchanged: edit-target recall `1.0`, test-target recall
   `0.8333`, required-observation recall `0.9167`, answer-plan pass rate
   `0.8333`.
+
+Local observability dashboard validation:
+
+- `agenvantage dashboard --demo --output artifacts/platform-dashboard-demo.html`
+  rendered successfully.
+- Dashboard includes platform sections for `Operations`, `Action queue`, and
+  `Workflow breakdown`.
+- Demo dashboard surfaces provider cache hit rate and p95 span latency from the
+  local SQLite trace store.
 
 Regression/use-case benchmark:
 
@@ -186,7 +199,7 @@ Regression/use-case benchmark:
 
 Automated test validation:
 
-- `./.venv/bin/pytest`: `128 passed`
+- `./.venv/bin/pytest`: `129 passed`
 - Feature-work validation acceptance: `passed`
 - Session cache-readiness validation acceptance: `passed`
 - Mesh feature validation:

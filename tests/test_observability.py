@@ -100,6 +100,9 @@ def test_write_observability_dashboard_renders_trace_metrics(tmp_path: Path) -> 
 
     html = dashboard_path.read_text(encoding="utf-8")
     assert "Agent Observability" in html
+    assert "Operations" in html
+    assert "Action queue" in html
+    assert "Workflow breakdown" in html
     assert "Add diagnostics." in html
     assert "875" in html
     assert "87.50%" in html
@@ -241,6 +244,8 @@ def test_import_provider_usage_records_stays_separate_from_local_estimates(tmp_p
     dashboard = dashboard_path.read_text(encoding="utf-8")
     assert "provider usage records" in dashboard
     assert "provider reported cost" in dashboard
+    assert "cache hit rate" in dashboard
+    assert "40.00%" in dashboard
 
 
 def test_seed_demo_trace_creates_teaching_dashboard_data(tmp_path: Path) -> None:
