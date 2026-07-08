@@ -605,6 +605,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only list traces that need review: failed, warning, unknown, unverified, or missing signals.",
     )
+    traces_list.add_argument("--json", dest="as_json", action="store_true")
     traces_show = traces_subparsers.add_parser("show", help="Show one local trace.")
     traces_show.add_argument("trace_id")
     traces_show.add_argument("--repo", type=Path, default=Path("."))
@@ -1678,6 +1679,44 @@ def _format_trace_list(
     return "\n".join(lines)
 
 
+def _trace_record_to_dict(trace: Any) -> dict[str, Any]:
+    return {
+        "trace_id": trace.trace_id,
+        "task": trace.task,
+        "repo_path": trace.repo_path,
+        "workflow": trace.workflow,
+        "created_at": trace.created_at,
+        "status": trace.status,
+        "quality_status": trace.quality_status,
+        "full_scan_prompt_tokens": trace.full_scan_prompt_tokens,
+        "packed_prompt_tokens": trace.packed_prompt_tokens,
+        "tokens_saved": trace.tokens_saved,
+        "reduction_percent": trace.reduction_percent,
+        "selected_file_count": trace.selected_file_count,
+    }
+
+
+def _format_trace_list_json(
+    traces: list[Any],
+    db_path: Path,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> str:
+    active_filters = {
+        key: value
+        for key, value in (filters or {}).items()
+        if value not in (None, False, "")
+    }
+    payload = {
+        "workflow": "trace_list",
+        "db_path": str(db_path.resolve()),
+        "filters": active_filters,
+        "trace_count": len(traces),
+        "traces": [_trace_record_to_dict(trace) for trace in traces],
+    }
+    return json.dumps(payload, indent=2)
+
+
 def _trace_provider_totals(trace: dict[str, Any]) -> dict[str, Any]:
     provider_usage = trace.get("provider_usage") or []
     input_tokens = sum(int(usage.get("input_tokens") or 0) for usage in provider_usage)
@@ -1879,20 +1918,24 @@ def _run_traces(args: argparse.Namespace) -> None:
             "min_saved": args.min_saved,
             "attention": args.attention,
         }
-        print(
-            _format_trace_list(
-                list_traces(
-                    db_path,
-                    limit=args.limit,
-                    quality_status=args.quality_status,
-                    workflow=args.workflow,
-                    min_tokens_saved=args.min_saved,
-                    attention_only=args.attention,
-                ),
-                db_path,
-                filters=filters,
-            )
+        traces = list_traces(
+            db_path,
+            limit=args.limit,
+            quality_status=args.quality_status,
+            workflow=args.workflow,
+            min_tokens_saved=args.min_saved,
+            attention_only=args.attention,
         )
+        if args.as_json:
+            print(_format_trace_list_json(traces, db_path, filters=filters))
+        else:
+            print(
+                _format_trace_list(
+                    traces,
+                    db_path,
+                    filters=filters,
+                )
+            )
         return
     if args.traces_command == "show":
         try:

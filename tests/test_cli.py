@@ -586,6 +586,30 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     assert "Filters: attention=True" in attention_list.stdout
     assert trace_id in attention_list.stdout
 
+    json_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--quality-status",
+            "failed",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    trace_payload = json.loads(json_list.stdout)
+    assert trace_payload["workflow"] == "trace_list"
+    assert trace_payload["filters"] == {"quality_status": "failed"}
+    assert trace_payload["trace_count"] == 1
+    assert trace_payload["traces"][0]["trace_id"] == trace_id
+    assert trace_payload["traces"][0]["quality_status"] == "failed"
+    assert trace_payload["traces"][0]["workflow"] == "feature"
+
     shown_after_annotation = subprocess.run(
         [
             sys.executable,

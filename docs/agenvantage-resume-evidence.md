@@ -45,7 +45,8 @@ Current implemented scope:
   provider usage reconciliation totals
 - Trace triage CLI: `agenvantage traces list` supports quality-status,
   workflow, minimum-token-savings, and attention-needed filters while showing
-  quality status and workflow on each trace row
+  quality status and workflow on each trace row; `--json` emits the same
+  filtered view for scripts, dashboards, and future UI surfaces
 
 Out of scope for verified resume claims right now:
 
@@ -197,6 +198,9 @@ Local observability dashboard validation:
 - `agenvantage traces list --quality-status failed --attention` was manually
   validated on a temporary repository and showed active filters, trace quality,
   workflow, saved tokens, selected-file count, and task.
+- `agenvantage traces list --quality-status failed --json` was manually
+  validated on a temporary repository and emitted parseable JSON containing
+  `workflow`, `db_path`, `filters`, `trace_count`, and trace rows.
 
 Regression/use-case benchmark:
 
