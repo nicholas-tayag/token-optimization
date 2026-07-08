@@ -466,6 +466,8 @@ Current implementation slice:
 
 ### Build 5: User Feedback And Quality Labels
 
+Status: partially implemented for manual trace annotations.
+
 Goal: bridge local metrics with actual usefulness.
 
 Tasks:
@@ -484,6 +486,16 @@ Tasks:
 Acceptance:
 
 - Dashboard can answer: "Which prompts saved tokens but failed quality?"
+
+Current implementation slice:
+
+- `agenvantage traces annotate <trace-id>` attaches a user quality label and
+  optional note to a trace.
+- Supported labels are `agent_succeeded`, `agent_failed`, `context_missing`,
+  `wrong_file_selected`, `tests_passed`, and `tests_failed`.
+- Trace detail output and the local dashboard surface the annotation history.
+- Failure labels update trace `quality_status` to `failed`; success labels
+  update it to `passed`.
 
 ### Build 6: Provider Usage Import
 

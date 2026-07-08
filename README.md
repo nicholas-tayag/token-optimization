@@ -131,6 +131,7 @@ agenvantage run --summary                     # default scenario, readable outpu
 agenvantage observe init                      # create local trace storage
 agenvantage observe pack --task "..."         # pack context and record a trace
 agenvantage traces list                       # inspect recent AI-agent task traces
+agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
 agenvantage validate-provider --dry-run --summary
@@ -186,6 +187,7 @@ Start with:
 agenvantage observe init
 agenvantage observe pack --task "Add tests for upload limits"
 agenvantage traces list
+agenvantage traces annotate <trace-id> --label agent_succeeded --note "Patch applied cleanly"
 agenvantage dashboard
 agenvantage experiments compare --task "Add tests for upload limits" --summary
 ```
@@ -201,6 +203,12 @@ local-first foundation for the Datadog-style agent observability workflow descri
 prints a Markdown comparison of full-scan, packed, cache-aligned, and
 mixed-artifact prompt variants. Use `--input-price-per-million` to add local
 estimated cost columns. These are planning metrics, not provider-billed proof.
+
+`agenvantage traces annotate <trace-id>` lets you label whether the agent
+actually succeeded after using the packed context. Supported labels are
+`agent_succeeded`, `agent_failed`, `context_missing`, `wrong_file_selected`,
+`tests_passed`, and `tests_failed`. The dashboard surfaces these labels so you
+can spot prompts that saved tokens but still failed quality.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

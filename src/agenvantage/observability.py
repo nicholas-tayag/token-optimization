@@ -11,6 +11,16 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
+ANNOTATION_LABELS = {
+    "agent_succeeded",
+    "agent_failed",
+    "context_missing",
+    "wrong_file_selected",
+    "tests_passed",
+    "tests_failed",
+}
+_SUCCESS_LABELS = {"agent_succeeded", "tests_passed"}
+_FAILURE_LABELS = {"agent_failed", "context_missing", "wrong_file_selected", "tests_failed"}
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,19 @@ def init_observability_store(db_path: Path) -> Path:
                 kind TEXT NOT NULL,
                 path TEXT,
                 content TEXT,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY(trace_id) REFERENCES traces(trace_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS annotations (
+                annotation_id TEXT PRIMARY KEY,
+                trace_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY(trace_id) REFERENCES traces(trace_id)
             )
@@ -289,6 +312,10 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
             "SELECT artifact_id, kind, path, metadata_json FROM artifacts WHERE trace_id = ? ORDER BY kind",
             (trace_id,),
         ).fetchall()
+        annotations = connection.execute(
+            "SELECT * FROM annotations WHERE trace_id = ? ORDER BY created_at",
+            (trace_id,),
+        ).fetchall()
     payload = dict(trace)
     payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
     payload["spans"] = [dict(row) for row in spans]
@@ -297,7 +324,70 @@ def load_trace(db_path: Path, trace_id: str) -> dict[str, Any]:
     payload["artifacts"] = [dict(row) for row in artifacts]
     for artifact in payload["artifacts"]:
         artifact["metadata"] = json.loads(artifact.pop("metadata_json") or "{}")
+    payload["annotations"] = [dict(row) for row in annotations]
+    for annotation in payload["annotations"]:
+        annotation["metadata"] = json.loads(annotation.pop("metadata_json") or "{}")
     return payload
+
+
+def _quality_status_from_label(label: str) -> str:
+    if label in _FAILURE_LABELS:
+        return "failed"
+    if label in _SUCCESS_LABELS:
+        return "passed"
+    return "annotated"
+
+
+def annotate_trace(
+    db_path: Path,
+    trace_id: str,
+    *,
+    label: str,
+    note: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    init_observability_store(db_path)
+    if label not in ANNOTATION_LABELS:
+        allowed = ", ".join(sorted(ANNOTATION_LABELS))
+        raise ValueError(f"Unsupported annotation label: {label}. Expected one of: {allowed}")
+    created_ns = time.time_ns()
+    created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(created_ns / 1_000_000_000))
+    annotation_id = f"{trace_id}:annotation:{created_ns}"
+    quality_status = _quality_status_from_label(label)
+    with _connect(db_path) as connection:
+        trace = connection.execute(
+            "SELECT trace_id FROM traces WHERE trace_id = ?",
+            (trace_id,),
+        ).fetchone()
+        if trace is None:
+            raise KeyError(trace_id)
+        connection.execute(
+            """
+            INSERT INTO annotations(annotation_id, trace_id, label, note, created_at, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                annotation_id,
+                trace_id,
+                label,
+                note,
+                created_at,
+                json.dumps(metadata or {}, sort_keys=True),
+            ),
+        )
+        connection.execute(
+            "UPDATE traces SET quality_status = ? WHERE trace_id = ?",
+            (quality_status, trace_id),
+        )
+    return {
+        "annotation_id": annotation_id,
+        "trace_id": trace_id,
+        "label": label,
+        "note": note,
+        "created_at": created_at,
+        "metadata": metadata or {},
+        "quality_status": quality_status,
+    }
 
 
 def _load_dashboard_traces(db_path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -327,6 +417,8 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
             "median_reduction_percent": 0.0,
             "median_packed_tokens": 0,
             "warning_count": 0,
+            "failed_count": 0,
+            "annotated_count": 0,
         }
     reductions = sorted(float(trace.get("reduction_percent") or 0.0) for trace in traces)
     packed = sorted(int(trace.get("packed_prompt_tokens") or 0) for trace in traces)
@@ -345,6 +437,8 @@ def _dashboard_summary(traces: list[dict[str, Any]]) -> dict[str, Any]:
         "warning_count": sum(
             1 for trace in traces if (trace.get("metadata") or {}).get("missing_signals")
         ),
+        "failed_count": sum(1 for trace in traces if trace.get("quality_status") == "failed"),
+        "annotated_count": sum(1 for trace in traces if trace.get("annotations")),
     }
 
 
@@ -357,6 +451,7 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         selected_files = metadata.get("selected_files") or []
         missing = metadata.get("missing_signals") or []
         spans = trace.get("spans") or []
+        annotations = trace.get("annotations") or []
         selected_html = (
             "".join(f"<li>{html.escape(str(path))}</li>" for path in selected_files)
             if selected_files
@@ -378,6 +473,18 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
             )
             if spans
             else "<li class=\"muted\">No spans recorded.</li>"
+        )
+        annotations_html = (
+            "".join(
+                "<li>"
+                f"<strong>{html.escape(str(annotation.get('label', 'annotation')).replace('_', ' '))}</strong>"
+                f"<span>{html.escape(str(annotation.get('note') or 'No note.'))}</span>"
+                f"<em>{html.escape(str(annotation.get('created_at', '')))}</em>"
+                "</li>"
+                for annotation in annotations
+            )
+            if annotations
+            else "<li class=\"muted\">No user quality labels yet.</li>"
         )
         trace_cards.append(
             f"""
@@ -406,6 +513,10 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
               <details>
                 <summary>Spans</summary>
                 <ul class="spans">{spans_html}</ul>
+              </details>
+              <details>
+                <summary>User quality labels</summary>
+                <ul class="annotations">{annotations_html}</ul>
               </details>
             </article>
             """
@@ -543,6 +654,12 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         gap: 0.8rem;
         padding: 0.25rem 0;
       }}
+      .annotations li {{
+        display: grid;
+        grid-template-columns: 12rem 1fr auto;
+        gap: 0.8rem;
+        padding: 0.25rem 0;
+      }}
       code {{
         background: #eee2c8;
         border-radius: 6px;
@@ -567,6 +684,8 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         <div class="stat"><strong>{_fmt_float(summary['median_reduction_percent'])}%</strong><span>median reduction</span></div>
         <div class="stat"><strong>{_fmt_int(summary['median_packed_tokens'])}</strong><span>median packed tokens</span></div>
         <div class="stat"><strong>{_fmt_int(summary['warning_count'])}</strong><span>traces with warnings</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['failed_count'])}</strong><span>failed quality labels</span></div>
+        <div class="stat"><strong>{_fmt_int(summary['annotated_count'])}</strong><span>annotated traces</span></div>
       </section>
       <section class="trace-grid">
         {cards_html}

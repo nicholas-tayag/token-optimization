@@ -523,6 +523,46 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     assert "Token accounting:" in shown.stdout
     assert "src/rate_limiter.py" in shown.stdout
 
+    annotated = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "annotate",
+            trace_id,
+            "--label",
+            "agent_failed",
+            "--note",
+            "Saved tokens, but missed the right behavior.",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage trace annotated" in annotated.stdout
+    assert "Status: failed" in annotated.stdout
+
+    shown_after_annotation = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "User quality labels:" in shown_after_annotation.stdout
+    assert "agent_failed" in shown_after_annotation.stdout
+    assert "Saved tokens, but missed the right behavior." in shown_after_annotation.stdout
+
 
 def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)

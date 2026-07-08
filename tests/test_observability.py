@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agenvantage.observability import (
+    annotate_trace,
     init_observability_store,
     list_traces,
     load_trace,
@@ -141,3 +142,43 @@ def test_record_trace_artifact_and_span_attach_to_existing_trace(tmp_path: Path)
     assert artifact_id in {artifact["artifact_id"] for artifact in loaded["artifacts"]}
     assert span_id in {span["span_id"] for span in loaded["spans"]}
     assert any(span["kind"] == "experiment.compare" for span in loaded["spans"])
+
+
+def test_annotate_trace_persists_label_and_updates_quality_status(tmp_path: Path) -> None:
+    db_path = tmp_path / ".agenvantage" / "observability.db"
+    report = {
+        "task": "Fix flaky tests.",
+        "prompt_token_accounting": {
+            "full_scan_prompt_tokens": 2000,
+            "packed_prompt_tokens": 200,
+            "prompt_tokens_saved_vs_full_scan": 1800,
+            "prompt_reduction_percent_vs_full_scan": 90.0,
+        },
+        "selected_chunks": [{"path": "tests/test_server.py"}],
+        "change_surface": {"missing_signals": []},
+    }
+    trace = record_pack_trace(
+        db_path,
+        markdown="# Context\n",
+        report=report,
+        repo_path=tmp_path,
+        workflow="feature",
+    )
+
+    annotation = annotate_trace(
+        db_path,
+        trace.trace_id,
+        label="agent_failed",
+        note="Saved tokens, but selected the wrong test surface.",
+    )
+
+    assert annotation["quality_status"] == "failed"
+    loaded = load_trace(db_path, trace.trace_id)
+    assert loaded["quality_status"] == "failed"
+    assert loaded["annotations"][0]["label"] == "agent_failed"
+    assert loaded["annotations"][0]["note"] == "Saved tokens, but selected the wrong test surface."
+
+    dashboard_path = write_observability_dashboard(db_path, tmp_path / "dashboard.html")
+    dashboard = dashboard_path.read_text(encoding="utf-8")
+    assert "failed quality labels" in dashboard
+    assert "Saved tokens, but selected the wrong test surface." in dashboard

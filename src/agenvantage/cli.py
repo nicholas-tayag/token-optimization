@@ -29,6 +29,8 @@ from agenvantage.modality import (
     verify_recoverable_block,
 )
 from agenvantage.observability import (
+    ANNOTATION_LABELS,
+    annotate_trace,
     default_observability_db,
     init_observability_store,
     list_traces,
@@ -575,6 +577,20 @@ def _parser() -> argparse.ArgumentParser:
     traces_show.add_argument("--repo", type=Path, default=Path("."))
     traces_show.add_argument("--db", type=Path, help="Explicit observability database path.")
     traces_show.add_argument("--json", dest="as_json", action="store_true")
+    traces_annotate = traces_subparsers.add_parser(
+        "annotate",
+        help="Attach a user quality label to a trace.",
+    )
+    traces_annotate.add_argument("trace_id")
+    traces_annotate.add_argument(
+        "--label",
+        required=True,
+        choices=tuple(sorted(ANNOTATION_LABELS)),
+        help="Outcome label for the agent task.",
+    )
+    traces_annotate.add_argument("--note", default="", help="Optional human-readable note.")
+    traces_annotate.add_argument("--repo", type=Path, default=Path("."))
+    traces_annotate.add_argument("--db", type=Path, help="Explicit observability database path.")
 
     dashboard = subparsers.add_parser(
         "dashboard",
@@ -1534,6 +1550,15 @@ def _format_trace_detail(trace: dict[str, Any]) -> str:
         for artifact in artifacts:
             path = artifact.get("path") or "stored in SQLite"
             lines.append(f"  - {artifact['kind']}: {path}")
+    annotations = trace.get("annotations") or []
+    if annotations:
+        lines.append("")
+        lines.append("User quality labels:")
+        for annotation in annotations:
+            note = annotation.get("note") or "No note."
+            lines.append(
+                f"  - {annotation['label']} at {annotation['created_at']}: {note}"
+            )
     return "\n".join(lines)
 
 
@@ -1588,6 +1613,29 @@ def _run_traces(args: argparse.Namespace) -> None:
             print(json.dumps(trace, indent=2))
         else:
             print(_format_trace_detail(trace))
+        return
+    if args.traces_command == "annotate":
+        try:
+            annotation = annotate_trace(
+                db_path,
+                args.trace_id,
+                label=args.label,
+                note=args.note,
+            )
+        except KeyError as exc:
+            raise SystemExit(f"Trace not found: {args.trace_id}") from exc
+        print(
+            "\n".join(
+                [
+                    "AgenVantage trace annotated.",
+                    "",
+                    f"Trace:  {annotation['trace_id']}",
+                    f"Label:  {annotation['label']}",
+                    f"Status: {annotation['quality_status']}",
+                    f"Note:   {annotation['note'] or 'No note.'}",
+                ]
+            )
+        )
         return
     raise SystemExit(f"Unknown traces command: {args.traces_command}")
 
