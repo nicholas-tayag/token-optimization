@@ -6,6 +6,7 @@ import re
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -159,7 +160,8 @@ _FEATURE_RESERVED_COUNTS = {
 }
 # Feature packs should stop after high-signal edit/test/config coverage instead
 # of spending the caller's whole budget on low-marginal repository context.
-_FEATURE_TARGET_CONTEXT_BUDGET = 2_000
+_FEATURE_TARGET_CONTEXT_BUDGET = 1_800
+_FEATURE_CHUNK_OVERLAP_LINES = 4
 _PRIVATE_KEY_BLOCK_PATTERN = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
@@ -215,6 +217,8 @@ _SECRET_ASSIGNMENT_PATTERN = re.compile(
     """,
     re.VERBOSE,
 )
+_CAMEL_BOUNDARY_PATTERN = re.compile(r"([a-z0-9])([A-Z])")
+_TERM_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,}")
 
 
 @dataclass(frozen=True)
@@ -274,6 +278,7 @@ def _language_for_path(relative_path: str) -> str:
     )
 
 
+@lru_cache(maxsize=16_384)
 def _term_variants(term: str) -> tuple[str, ...]:
     variants = {term, *(piece for piece in term.split("-") if piece and piece != term)}
     for candidate in tuple(variants):
@@ -293,18 +298,18 @@ def _term_variants(term: str) -> tuple[str, ...]:
 
 
 def _terms(value: str) -> list[str]:
-    split_camel = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value).replace("_", " ")
+    split_camel = _CAMEL_BOUNDARY_PATTERN.sub(r"\1 \2", value).replace("_", " ")
     terms: list[str] = []
-    for raw_term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", split_camel):
+    for raw_term in _TERM_PATTERN.findall(split_camel):
         term = raw_term.lower()
         terms.extend(_term_variants(term))
     return terms
 
 
 def _query_concepts(value: str) -> tuple[tuple[str, set[str]], ...]:
-    split_camel = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value).replace("_", " ")
+    split_camel = _CAMEL_BOUNDARY_PATTERN.sub(r"\1 \2", value).replace("_", " ")
     concepts: list[tuple[str, set[str]]] = []
-    for raw_term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", split_camel):
+    for raw_term in _TERM_PATTERN.findall(split_camel):
         label = raw_term.lower()
         if len(label) <= 1 or label in _STOP_WORDS:
             continue
@@ -451,25 +456,23 @@ def source_files(
     if not repo.is_dir():
         raise ValueError(f"Repository path does not exist: {repo}")
 
-    tracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "-z"],
+    git_files = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
         capture_output=True,
         check=False,
         text=True,
     )
-    untracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if tracked.returncode == 0 and untracked.returncode == 0:
-        git_paths = {
-            repo / item
-            for output in (tracked.stdout, untracked.stdout)
-            for item in output.split("\0")
-            if item
-        }
+    if git_files.returncode == 0:
+        git_paths = {repo / item for item in git_files.stdout.split("\0") if item}
         candidates = iter(git_paths)
     else:
         candidates = (path for path in repo.rglob("*") if path.is_file())
@@ -509,7 +512,7 @@ def chunks_for_repo(
             raw_text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        redacted_text, _ = _redact_sensitive_text(raw_text)
+        redacted_text, file_redactions = _redact_sensitive_text(raw_text)
         original_lines = raw_text.splitlines()
         lines = redacted_text.splitlines()
         if len(original_lines) != len(lines):
@@ -529,7 +532,9 @@ def chunks_for_repo(
             end_line = start + len(content_lines)
             text = "\n".join(content_lines)
             original_text = "\n".join(original_lines[start:end_line])
-            chunk_redactions = _redact_sensitive_text(original_text)[1]
+            chunk_redactions = (
+                _redact_sensitive_text(original_text)[1] if file_redactions else {}
+            )
             chunk_id = f"{display_path}#L{start + 1}-L{end_line}"
             rendered = (
                 f"[SOURCE:{chunk_id}]\n"
@@ -877,6 +882,7 @@ def build_multi_repo_context_package(
         chunks = chunks_for_repo(
             repo_input.root,
             counter,
+            overlap_lines=_FEATURE_CHUNK_OVERLAP_LINES if workflow == "feature" else 8,
             files=files,
             repo_label=repo_input.label if len(repo_inputs) > 1 else None,
             file_index=index_result.entries,
@@ -943,14 +949,32 @@ def build_multi_repo_context_package(
     selected_terms: set[str] = set()
     selected_dependency_targets: Counter[tuple[str, str]] = Counter()
     multiple_repos = len(repo_inputs) > 1
+    selected_budget_tokens = required_tokens
+    addition_token_cache: dict[str, tuple[str, int]] = {}
+
+    def _addition_for(chunk: CodeChunk) -> tuple[str, int]:
+        cached = addition_token_cache.get(chunk.chunk_id)
+        if cached is not None:
+            return cached
+        addition = chunk.render() + "\n\n"
+        # Budget checks use cached per-chunk additions instead of repeatedly
+        # tokenizing the full growing prompt. Final accounting below remains exact.
+        cached = (addition, counter.count(addition))
+        addition_token_cache[chunk.chunk_id] = cached
+        return cached
+
+    def _fits_budget(addition_tokens: int, limit: int) -> bool:
+        return selected_budget_tokens + addition_tokens <= limit
+
     if change_surface is not None:
         for chunk in _select_feature_reserved_chunks(ranked, change_surface):
-            addition = chunk.render() + "\n\n"
-            if counter.count(rendered + addition) > budget:
+            addition, addition_tokens = _addition_for(chunk)
+            if not _fits_budget(addition_tokens, budget):
                 excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
                 continue
             selected.append(chunk)
             rendered += addition
+            selected_budget_tokens += addition_tokens
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
             selected_terms.update(chunk.matched_terms)
@@ -1006,8 +1030,8 @@ def build_multi_repo_context_package(
         if chunk.score < _MIN_RELEVANCE_SCORE:
             excluded.append({"id": chunk.chunk_id, "reason": "below relevance threshold"})
             continue
-        addition = chunk.render() + "\n\n"
-        if counter.count(rendered + addition) <= effective_budget:
+        addition, addition_tokens = _addition_for(chunk)
+        if _fits_budget(addition_tokens, effective_budget):
             selected.append(chunk)
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
@@ -1015,12 +1039,17 @@ def build_multi_repo_context_package(
             for local_import_path in chunk.file_local_import_paths:
                 selected_dependency_targets[(chunk.repo_label, local_import_path)] += 1
             rendered += addition
+            selected_budget_tokens += addition_tokens
         else:
             excluded.append({"id": chunk.chunk_id, "reason": "exceeds effective token budget"})
 
     selected_tokens = counter.count(rendered)
-    full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
-    candidate_corpus_tokens = counter.count(full_rendered)
+    # The full-scan prompt is prefix + the same separator-wrapped chunk blocks.
+    # Counting those blocks additively avoids building and tokenizing a huge
+    # counterfactual prompt on normal runs while preserving the same accounting.
+    candidate_corpus_tokens = required_tokens + sum(
+        _addition_for(chunk)[1] for chunk in candidate_chunks
+    )
     user_prompt_tokens = counter.count(task)
     savings = candidate_corpus_tokens - selected_tokens
     packed_context_plus_instructions_tokens = max(selected_tokens - user_prompt_tokens, 0)
@@ -1121,6 +1150,7 @@ def build_multi_repo_context_package(
         ],
     }
     if include_full_scan_prompt:
+        full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
         report["full_scan_prompt_markdown"] = full_rendered.rstrip() + "\n"
     if len(repo_inputs) == 1:
         report["repo"] = str(repo_inputs[0].root)

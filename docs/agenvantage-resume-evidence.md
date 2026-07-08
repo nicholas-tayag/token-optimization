@@ -1,6 +1,6 @@
 # AgenVantage Resume Evidence
 
-Last updated: 2026-07-07
+Last updated: 2026-07-08
 
 ## Project Scope
 
@@ -23,6 +23,8 @@ Current implemented scope:
   prompt-token accounting
 - Validation harness: 12 manually annotated feature-work tasks across
   `token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`
+- Feature-work benchmark runtime instrumentation for measuring realistic local
+  packing latency in addition to token reduction and retrieval quality
 - Pxpipe-inspired mixed-modality artifact mode: estimates or writes local PNG
   pages for bulky gist-level context while exact implementation evidence,
   factsheet sidecars, and recoverable source blocks remain text
@@ -55,13 +57,16 @@ Feature-work benchmark:
 - Selected test-target recall: `0.9167`
 - Required-observation recall: `0.9167`
 - Answer-plan pass rate: `0.8333`
-- Mean selected chunk count: `4.58`
+- Mean selected chunk count: `4.17`
 - Missing-signal warning rate: `0.5833`
-- Median full-scan prompt: `80,921.5` tokens
-- Median packed prompt: `1,993.0` tokens
-- Median prompt tokens saved: `78,813.0`
-- Median prompt reduction: `96.73%`
-- Total prompt tokens saved across 12 cases: `1,318,563`
+- Median full-scan prompt: `74,311.0` tokens
+- Median packed prompt: `1,863.0` tokens
+- Median prompt tokens saved: `72,249.5`
+- Median prompt reduction: `96.62%`
+- Total prompt tokens saved across 12 cases: `1,314,169`
+- Median pack runtime: `85.22 ms`
+- Mean pack runtime: `130.42 ms`
+- Total pack runtime across 12 cases: `1,565.07 ms`
 - Acceptance result: `passed`
 
 Feature-provider dry-run with pricing snapshot:
@@ -144,12 +149,28 @@ Practical Mesh feature validation:
 
 Four practical repository feature runs:
 
-| Repository | Full-scan prompt | Packed prompt | Tokens saved | Reduction |
-|---|---:|---:|---:|---:|
-| `token-optimization` | `178,592` | `5,709` | `172,883` | `96.8%` |
-| `mesh` | `40,761` | `5,976` | `34,785` | `85.34%` |
-| `signalfoundry` | `39,638` | `4,784` | `34,854` | `87.93%` |
-| `application-tracker` | `120,539` | `5,941` | `114,598` | `95.07%` |
+| Repository | User prompt | Full-scan prompt | Packed prompt | Tokens saved | Reduction | Runtime | Edit/test hit |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `token-optimization` | `19` | `260,416` | `1,899` | `258,517` | `99.27%` | `319.66 ms` | yes/yes |
+| `mesh` | `20` | `37,676` | `1,761` | `35,915` | `95.33%` | `46.31 ms` | yes/yes |
+| `signalfoundry` | `19` | `36,627` | `1,797` | `34,830` | `95.09%` | `42.88 ms` | yes/yes |
+| `application-tracker` | `19` | `110,938` | `1,749` | `109,189` | `98.42%` | `130.85 ms` | yes/yes |
+
+Latest feature-work performance optimization:
+
+- Change: cached term-variant expansion, cached incremental per-chunk budget
+  token checks, additive full-scan token accounting, single-call Git file
+  discovery, redaction fast-path for files without secrets, feature-only chunk
+  overlap reduction from `8` to `4` lines, and tighter feature target budget
+  from `2,000` to `1,800` tokens.
+- Baseline 12-case benchmark wall time: `2.89s`.
+- Optimized 12-case benchmark wall time: `1.71s`.
+- Wall-clock improvement: about `40.8%`.
+- Median packed prompt changed from `1,993.0` to `1,863.0` tokens.
+- Median pack runtime changed from `151.08 ms` to `85.22 ms`.
+- Quality gates unchanged: edit-target recall `1.0`, test-target recall
+  `0.8333`, required-observation recall `0.9167`, answer-plan pass rate
+  `0.8333`.
 
 Regression/use-case benchmark:
 
@@ -178,7 +199,7 @@ Automated test validation:
 Strongest single bullet:
 
 ```text
-Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing median feature-task prompt size from 80.9K to 2.0K tokens (96.7%) while achieving 100% edit-target recall and 83.3% test-target recall.
+Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing median feature-task prompt size from 74.3K to 1.9K tokens (96.6%) while achieving 100% edit-target recall and 83.3% test-target recall.
 ```
 
 More implementation-focused bullet:
@@ -196,7 +217,7 @@ Validated AgenVantage on a real Mesh feature by reducing a full-scan coding-agen
 More conservative public-project bullet:
 
 ```text
-Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 96.7% across 12 annotated tasks while maintaining full edit-target recall and passing the answer-plan acceptance suite.
+Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 96.6% across 12 annotated tasks while maintaining full edit-target recall and passing the answer-plan acceptance suite.
 ```
 
 Cache-readiness bullet:

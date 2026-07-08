@@ -48,4 +48,7 @@ def test_feature_work_validation_meets_phase_one_acceptance(tmp_path: Path) -> N
     assert summary["required_observation_recall"] >= 0.8
     assert summary["answer_plan_pass_rate"] >= 0.8
     assert summary["median_token_reduction_percent"] >= 85.0
+    assert summary["median_pack_runtime_ms"] > 0
+    assert summary["total_pack_runtime_ms"] >= summary["median_pack_runtime_ms"]
+    assert all(case["pack_runtime_ms"] > 0 for case in report["cases"])
     assert summary["acceptance"]["overall_pass"] is True
