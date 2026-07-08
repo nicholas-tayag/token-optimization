@@ -135,6 +135,7 @@ agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
 agenvantage provider import --records provider-usage.json --trace-id <trace-id>
+agenvantage agent run --task "..." -- <command>
 agenvantage validate-provider --dry-run --summary
 agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
 .venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
@@ -217,6 +218,12 @@ reports, request lists, or OTLP-style telemetry, and stores imported
 input/output/cached-token and cost fields separately from local estimates.
 Use `--reconciliation-status costs_api_reconciled` only when the imported
 records have been matched against provider billing evidence.
+
+`agenvantage agent run --task "..." -- <command>` is the first local wrapper
+for daily coding-agent workflows. It packs context, passes the Markdown package
+to the command on stdin by default, captures stdout/stderr, records an
+`agent.external` span, and labels the trace succeeded or failed from the exit
+code.
 
 For the end-to-end billed-cost proof workflow, including live request spans,
 OTLP export, and provider-cost reconciliation, see

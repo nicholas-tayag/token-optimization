@@ -531,6 +531,8 @@ Current implementation slice:
 
 ### Build 7: Agent Wrappers
 
+Status: partially implemented as `agenvantage agent run`.
+
 Goal: connect AgenVantage to daily workflows.
 
 Potential commands:
@@ -553,6 +555,19 @@ MVP wrapper behavior:
 Acceptance:
 
 - Users can see an end-to-end trace from task to external agent result.
+
+Current implementation slice:
+
+- `agenvantage agent run --task "..." -- <command>` packs feature context,
+  writes an optional handoff file, and passes the context package on stdin by
+  default.
+- The wrapper records a normal context-pack trace plus an `agent.external` span
+  with command, duration, exit code, and stdin handoff metadata.
+- Captured stdout and stderr are stored as trace artifacts.
+- Exit code `0` adds an `agent_succeeded` annotation; non-zero exits add
+  `agent_failed`.
+- The initial wrapper uses `agent run` instead of replacing `agenvantage run`
+  because `agenvantage run` already exists for synthetic policy experiments.
 
 ## 8. Non-Goals For MVP
 

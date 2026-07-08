@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -707,6 +708,69 @@ def _parser() -> argparse.ArgumentParser:
         help="How strongly imported costs are reconciled against provider billing.",
     )
     provider_import.add_argument("--json", dest="as_json", action="store_true")
+
+    agent = subparsers.add_parser(
+        "agent",
+        help="Run external coding-agent commands with AgenVantage context and tracing.",
+    )
+    agent_subparsers = agent.add_subparsers(dest="agent_command", required=True)
+    agent_run = agent_subparsers.add_parser(
+        "run",
+        help="Pack context, pass it to an external command, and record the run.",
+    )
+    agent_run.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    agent_run.add_argument("--task", required=True, help="Feature task to run through the agent.")
+    agent_run.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe controlling instructions and provenance (default: feature).",
+    )
+    agent_run.add_argument("--budget", type=int, default=None)
+    agent_run.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    agent_run.add_argument("--top-k", type=int, default=None)
+    agent_run.add_argument("--include-diff", action="store_true")
+    agent_run.add_argument("--include-log", action="store_true")
+    agent_run.add_argument("--include-glob", action="append", default=[])
+    agent_run.add_argument("--exclude-glob", action="append", default=[])
+    agent_run.add_argument("--db", type=Path, help="Explicit observability database path.")
+    agent_run.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help="Optional mixed-modality context mode.",
+    )
+    agent_run.add_argument(
+        "--modality-profile",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+    )
+    agent_run.add_argument("--modality-output-dir", type=Path)
+    agent_run.add_argument(
+        "--handoff-file",
+        type=Path,
+        help="Optional path to write the context package before running the command.",
+    )
+    agent_run.add_argument(
+        "--no-stdin",
+        action="store_true",
+        help="Do not pass the context package to the command on stdin.",
+    )
+    agent_run.add_argument(
+        "--allow-failure",
+        action="store_true",
+        help="Record non-zero command exits without making the wrapper exit non-zero.",
+    )
+    agent_run.add_argument(
+        "external_command",
+        nargs=argparse.REMAINDER,
+        help="External command to run after --, for example: -- codex \"implement X\".",
+    )
 
     session = subparsers.add_parser(
         "session",
@@ -1990,6 +2054,110 @@ def _run_provider(args: argparse.Namespace) -> None:
     print("\n".join(lines))
 
 
+def _normalize_agent_command(command: list[str]) -> list[str]:
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise SystemExit('Agent run requires a command after "--".')
+    return command
+
+
+def _run_agent(args: argparse.Namespace) -> None:
+    if args.agent_command != "run":
+        raise SystemExit(f"Unknown agent command: {args.agent_command}")
+    command = _normalize_agent_command(list(args.external_command))
+    markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
+    repo = Path(settings["repos"][0])
+    db_path = _observability_db_from_args(args, repo)
+    trace = record_pack_trace(
+        db_path,
+        markdown=markdown,
+        report=report,
+        repo_path=repo,
+        workflow="agent.run",
+        artifact_paths={"markdown": args.handoff_file, "manifest": None},
+    )
+    if args.handoff_file is not None:
+        args.handoff_file.parent.mkdir(parents=True, exist_ok=True)
+        args.handoff_file.write_text(markdown, encoding="utf-8")
+
+    started = time.time()
+    completed = subprocess.run(
+        command,
+        cwd=repo,
+        input=None if args.no_stdin else markdown,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    duration_ms = max((time.time() - started) * 1000, 0.0)
+    record_trace_span(
+        db_path,
+        trace.trace_id,
+        name="External agent command",
+        kind="agent.external",
+        duration_ms=duration_ms,
+        input_tokens=trace.packed_prompt_tokens,
+        metadata={
+            "command": command,
+            "exit_code": completed.returncode,
+            "stdin_handoff": not args.no_stdin,
+        },
+    )
+    record_trace_artifact(
+        db_path,
+        trace.trace_id,
+        kind="agent_stdout",
+        content=completed.stdout,
+        metadata={"command": command, "exit_code": completed.returncode},
+    )
+    record_trace_artifact(
+        db_path,
+        trace.trace_id,
+        kind="agent_stderr",
+        content=completed.stderr,
+        metadata={"command": command, "exit_code": completed.returncode},
+    )
+    if completed.returncode == 0:
+        annotate_trace(
+            db_path,
+            trace.trace_id,
+            label="agent_succeeded",
+            note="External command exited with status 0.",
+        )
+    else:
+        annotate_trace(
+            db_path,
+            trace.trace_id,
+            label="agent_failed",
+            note=f"External command exited with status {completed.returncode}.",
+        )
+
+    print(
+        "\n".join(
+            [
+                "AgenVantage agent run recorded.",
+                "",
+                f"Trace: {trace.trace_id}",
+                f"Command: {' '.join(command)}",
+                f"Exit code: {completed.returncode}",
+                f"Duration: {duration_ms:.2f} ms",
+                f"Context: {trace.packed_prompt_tokens:,} packed tokens; "
+                f"{trace.tokens_saved:,} saved vs full scan",
+                f"Next: agenvantage traces show {trace.trace_id}",
+            ]
+        )
+    )
+    if completed.stdout:
+        print("\n--- stdout ---")
+        print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
+    if completed.stderr:
+        print("\n--- stderr ---", file=sys.stderr)
+        print(completed.stderr, end="" if completed.stderr.endswith("\n") else "\n", file=sys.stderr)
+    if completed.returncode != 0 and not args.allow_failure:
+        raise SystemExit(completed.returncode)
+
+
 def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
     cache = session.get("cache", {})
     prompt_accounting = session.get("prompt_token_accounting", {})
@@ -2404,6 +2572,9 @@ def main() -> None:
         return
     if args.command == "provider":
         _run_provider(args)
+        return
+    if args.command == "agent":
+        _run_agent(args)
         return
     if args.command == "session":
         _run_session(args)

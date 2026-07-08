@@ -769,6 +769,62 @@ def test_provider_import_attaches_usage_to_trace(tmp_path: Path) -> None:
     assert "reconciliation=provider_reported" in shown.stdout
 
 
+def test_agent_run_passes_context_and_records_external_command(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    handoff = tmp_path / "handoff.md"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "agent",
+            "run",
+            "--task",
+            "Explain the rate limiter fail open behavior",
+            "--handoff-file",
+            str(handoff),
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "text = sys.stdin.read(); "
+                "print('saw_context=' + str('# AgenVantage Context Package' in text))"
+            ),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage agent run recorded" in completed.stdout
+    assert "saw_context=True" in completed.stdout
+    assert handoff.read_text(encoding="utf-8").startswith("# AgenVantage Context Package")
+    trace_line = next(line for line in completed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "agent.external" in shown.stdout
+    assert "agent_stdout" in shown.stdout
+    assert "agent_succeeded" in shown.stdout
+
+
 def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifact"
     recoverable_dir = artifact_root / "recoverable"

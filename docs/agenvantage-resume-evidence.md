@@ -165,7 +165,7 @@ Regression/use-case benchmark:
 
 Automated test validation:
 
-- `./.venv/bin/pytest`: `125 passed`
+- `./.venv/bin/pytest`: `126 passed`
 - Feature-work validation acceptance: `passed`
 - Session cache-readiness validation acceptance: `passed`
 - Mesh feature validation:
