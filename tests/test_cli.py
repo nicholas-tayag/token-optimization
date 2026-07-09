@@ -669,6 +669,92 @@ def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -
     assert output.read_text(encoding="utf-8").startswith("# AgenVantage Context Package")
 
 
+def test_checkup_reports_repo_hygiene_and_observability_state(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    (tmp_path / "artifacts" / "local-report.txt").write_text(
+        "generated report\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage checkup" in completed.stdout
+    assert "Observability database" in completed.stdout
+    assert "Generated artifacts" in completed.stdout
+    assert "Status:  warn" in completed.stdout
+    assert "agenvantage observe init" in completed.stdout
+
+    json_completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(json_completed.stdout)
+    assert payload["workflow"] == "checkup"
+    assert payload["overall_status"] == "warn"
+    assert payload["metrics"]["untracked_path_count"] >= 1
+    assert any(finding["id"] == "observability_db" for finding in payload["findings"])
+
+
+def test_checkup_counts_observed_traces(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "demo",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["metrics"]["trace_count"] == 1
+    assert payload["summary"]["pass"] >= 1
+    assert any(
+        finding["id"] == "observability_db" and finding["status"] == "pass"
+        for finding in payload["findings"]
+    )
+
+
 def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / "tests").mkdir()

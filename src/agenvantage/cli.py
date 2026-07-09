@@ -675,6 +675,23 @@ def _parser() -> argparse.ArgumentParser:
         help="Print the dashboard URI instead of opening a browser tab.",
     )
 
+    checkup = subparsers.add_parser(
+        "checkup",
+        help="Audit local AgenVantage repo hygiene and observability readiness.",
+        description=(
+            "Run a read-only local checkup before agent work. It verifies Git hygiene, "
+            "observability storage, dashboard readiness, and generated artifact noise."
+        ),
+    )
+    checkup.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root to inspect (default: current directory).",
+    )
+    checkup.add_argument("--db", type=Path, help="Explicit observability database path.")
+    checkup.add_argument("--json", dest="as_json", action="store_true")
+
     experiments = subparsers.add_parser(
         "experiments",
         help="Compare local context optimization strategies for agent tasks.",
@@ -1590,6 +1607,277 @@ def _observability_db_from_args(args: argparse.Namespace, repo: Path | None = No
     if getattr(args, "db", None) is not None:
         return Path(args.db)
     return default_observability_db(repo or getattr(args, "repo", None) or Path("."))
+
+
+def _git_output(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _checkup_finding(
+    finding_id: str,
+    status: str,
+    title: str,
+    detail: str,
+    next_action: str,
+) -> dict[str, str]:
+    return {
+        "id": finding_id,
+        "status": status,
+        "title": title,
+        "detail": detail,
+        "next_action": next_action,
+    }
+
+
+def _build_checkup_report(repo: Path, db_path: Path) -> dict[str, Any]:
+    repo = repo.resolve()
+    db_path = db_path.resolve()
+    dashboard_path = repo / ".agenvantage" / "observability-dashboard.html"
+    artifacts_path = repo / "artifacts"
+    findings: list[dict[str, str]] = []
+
+    if not repo.exists():
+        findings.append(
+            _checkup_finding(
+                "repo_exists",
+                "fail",
+                "Repository path",
+                f"{repo} does not exist.",
+                "Run checkup from an existing repository or pass --repo.",
+            )
+        )
+        return {
+            "workflow": "checkup",
+            "repo_path": str(repo),
+            "db_path": str(db_path),
+            "dashboard_path": str(dashboard_path),
+            "version": __version__,
+            "summary": {"pass": 0, "warn": 0, "fail": 1},
+            "overall_status": "fail",
+            "metrics": {},
+            "findings": findings,
+        }
+
+    git_status = _git_output(repo, ["status", "--short"])
+    git_available = git_status.returncode == 0
+    status_lines = [
+        line for line in git_status.stdout.splitlines() if line.strip()
+    ] if git_available else []
+    dirty_tracked = [line for line in status_lines if not line.startswith("?? ")]
+    untracked = [line for line in status_lines if line.startswith("?? ")]
+
+    if git_available:
+        if dirty_tracked:
+            findings.append(
+                _checkup_finding(
+                    "git_tracked_changes",
+                    "warn",
+                    "Tracked Git changes",
+                    f"{len(dirty_tracked)} tracked change(s) are present.",
+                    "Commit, stash, or review tracked work before large agent edits.",
+                )
+            )
+        else:
+            findings.append(
+                _checkup_finding(
+                    "git_tracked_changes",
+                    "pass",
+                    "Tracked Git changes",
+                    "No tracked modifications detected.",
+                    "Safe to run read-only planning or scoped agent edits.",
+                )
+            )
+        if untracked:
+            findings.append(
+                _checkup_finding(
+                    "git_untracked_files",
+                    "warn",
+                    "Untracked files",
+                    f"{len(untracked)} untracked path(s) are visible to Git.",
+                    "Ignore generated files or add intentional files before committing.",
+                )
+            )
+        else:
+            findings.append(
+                _checkup_finding(
+                    "git_untracked_files",
+                    "pass",
+                    "Untracked files",
+                    "No untracked paths detected.",
+                    "Git status is clean for generated-file noise.",
+                )
+            )
+    else:
+        findings.append(
+            _checkup_finding(
+                "git_status",
+                "warn",
+                "Git status",
+                "This path is not a readable Git worktree.",
+                "Run checkup inside a Git repository for safer agent workflows.",
+            )
+        )
+
+    if db_path.exists():
+        traces = list_traces(db_path, limit=1000)
+        trace_count = len(traces)
+        attention_count = sum(
+            1
+            for trace in traces
+            if trace.quality_status in {"unknown", "unverified", "warning", "failed"}
+        )
+        findings.append(
+            _checkup_finding(
+                "observability_db",
+                "pass",
+                "Observability database",
+                f"Found {trace_count} trace(s) in {db_path}.",
+                "Use `agenvantage traces list --attention` to triage risky runs.",
+            )
+        )
+    else:
+        trace_count = 0
+        attention_count = 0
+        findings.append(
+            _checkup_finding(
+                "observability_db",
+                "warn",
+                "Observability database",
+                f"No local trace database found at {db_path}.",
+                "Run `agenvantage observe init` or `agenvantage observe pack --task ...`.",
+            )
+        )
+
+    if dashboard_path.exists():
+        findings.append(
+            _checkup_finding(
+                "dashboard",
+                "pass",
+                "Local dashboard",
+                f"Dashboard exists at {dashboard_path}.",
+                "Run `agenvantage dashboard --no-browser` to refresh it.",
+            )
+        )
+    else:
+        findings.append(
+            _checkup_finding(
+                "dashboard",
+                "warn",
+                "Local dashboard",
+                "No generated observability dashboard found.",
+                "Run `agenvantage dashboard --demo --no-browser` for a first local view.",
+            )
+        )
+
+    artifacts_ignored = False
+    if git_available:
+        artifacts_ignored = (
+            _git_output(repo, ["check-ignore", "-q", "artifacts"]).returncode == 0
+        )
+    if artifacts_path.exists() and not artifacts_ignored:
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "warn",
+                "Generated artifacts",
+                "`artifacts/` exists but is not fully ignored by Git.",
+                "Add generated artifact paths to .gitignore or move long-lived fixtures elsewhere.",
+            )
+        )
+    elif artifacts_path.exists():
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "pass",
+                "Generated artifacts",
+                "`artifacts/` exists and is ignored by Git.",
+                "Keep generated benchmark and dashboard outputs out of commits.",
+            )
+        )
+    else:
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "pass",
+                "Generated artifacts",
+                "No local artifacts directory detected.",
+                "Generated reports will be checked again after benchmark or dashboard runs.",
+            )
+        )
+
+    summary = {
+        status: sum(1 for finding in findings if finding["status"] == status)
+        for status in ("pass", "warn", "fail")
+    }
+    overall = "fail" if summary["fail"] else "warn" if summary["warn"] else "pass"
+    return {
+        "workflow": "checkup",
+        "repo_path": str(repo),
+        "db_path": str(db_path),
+        "dashboard_path": str(dashboard_path),
+        "version": __version__,
+        "summary": summary,
+        "overall_status": overall,
+        "metrics": {
+            "git_status_entries": len(status_lines),
+            "tracked_change_count": len(dirty_tracked),
+            "untracked_path_count": len(untracked),
+            "trace_count": trace_count,
+            "attention_trace_count": attention_count,
+            "artifacts_ignored": artifacts_ignored,
+        },
+        "findings": findings,
+    }
+
+
+def _format_checkup_report(report: dict[str, Any]) -> str:
+    summary = report["summary"]
+    metrics = report["metrics"]
+    lines = [
+        "AgenVantage checkup",
+        "",
+        f"Repo:    {report['repo_path']}",
+        f"DB:      {report['db_path']}",
+        f"Version: {report['version']}",
+        f"Status:  {report['overall_status']}",
+        "",
+        "Summary:",
+        f"  pass={summary['pass']} warn={summary['warn']} fail={summary['fail']}",
+        (
+            f"  traces={metrics.get('trace_count', 0)} "
+            f"attention={metrics.get('attention_trace_count', 0)}"
+        ),
+        (
+            f"  tracked_changes={metrics.get('tracked_change_count', 0)} "
+            f"untracked={metrics.get('untracked_path_count', 0)}"
+        ),
+        "",
+        "Findings:",
+    ]
+    for finding in report["findings"]:
+        lines.extend(
+            [
+                f"  [{finding['status']}] {finding['title']}",
+                f"    {finding['detail']}",
+                f"    Next: {finding['next_action']}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _run_checkup(args: argparse.Namespace) -> None:
+    repo = Path(args.repo)
+    db_path = _observability_db_from_args(args, repo)
+    report = _build_checkup_report(repo, db_path)
+    if args.as_json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(_format_checkup_report(report))
 
 
 def _format_trace_created(trace: Any, db_path: Path, report: dict[str, Any]) -> str:
@@ -2815,6 +3103,9 @@ def main() -> None:
         return
     if args.command == "dashboard":
         _run_observability_dashboard(args)
+        return
+    if args.command == "checkup":
+        _run_checkup(args)
         return
     if args.command == "experiments":
         _run_experiments(args)

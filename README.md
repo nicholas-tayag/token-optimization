@@ -131,6 +131,7 @@ agenvantage run --summary                     # default scenario, readable outpu
 agenvantage observe init                      # create local trace storage
 agenvantage observe demo                      # seed a no-API demo trace
 agenvantage observe pack --task "..."         # pack context and record a trace
+agenvantage checkup                           # audit local agent-workflow hygiene
 agenvantage traces list                       # inspect recent AI-agent task traces
 agenvantage traces export <trace-id>          # recover stored context Markdown
 agenvantage traces annotate <trace-id> --label agent_succeeded
@@ -192,6 +193,7 @@ Start with:
 agenvantage observe init
 agenvantage observe demo
 agenvantage observe pack --task "Add tests for upload limits"
+agenvantage checkup
 agenvantage traces list
 agenvantage traces annotate <trace-id> --label agent_succeeded --note "Patch applied cleanly"
 agenvantage dashboard
@@ -204,6 +206,11 @@ context-pack operation. `agenvantage dashboard` writes
 overview of token savings, selected files, warnings, and spans. This is the
 local-first foundation for the Datadog-style agent observability workflow described in
 [docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md).
+
+`agenvantage checkup` is the read-only preflight for that workflow. It reports
+Git hygiene, local trace-store readiness, dashboard availability, generated
+artifact noise, and next commands to run. Add `--json` when a script or future
+UI needs the same pass/warn/fail findings as structured data.
 
 `agenvantage experiments compare --task "..." --summary` records a trace and
 prints a Markdown comparison of full-scan, packed, cache-aligned, and
