@@ -1,6 +1,6 @@
 # AgenVantage Resume Evidence
 
-Last updated: 2026-07-02
+Last updated: 2026-07-08
 
 ## Project Scope
 
@@ -23,6 +23,31 @@ Current implemented scope:
   prompt-token accounting
 - Validation harness: 12 manually annotated feature-work tasks across
   `token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`
+- Feature-work benchmark runtime instrumentation for measuring realistic local
+  packing latency in addition to token reduction and retrieval quality
+- Pxpipe-inspired mixed-modality artifact mode: estimates or writes local PNG
+  pages for bulky gist-level context while exact implementation evidence,
+  factsheet sidecars, and recoverable source blocks remain text
+- Exact-source recovery CLI: `agenvantage rehydrate --manifest ... --id rec_...`
+  retrieves original text for imaged blocks
+- Artifact integrity verification: `agenvantage rehydrate --manifest ... --verify`
+  checks image hashes, PNG signatures, factsheet hashes, and recoverable source
+  hashes
+- Reproducibility support: manifests include a path-independent bundle
+  fingerprint for comparing generated artifact content across output directories
+- Local observability platform: `agenvantage dashboard` renders a Datadog/New
+  Relic-style trace cockpit with KPI tiles, operations metrics, cache hit rate,
+  p95 span latency, an action queue, workflow breakdowns, trace cards, selected
+  files, quality labels, provider-usage imports, and client-side trace search
+  and filters for quality, workflow, and attention-needed traces
+- Trace detail console: `agenvantage traces show <trace-id>` now presents a
+  platform-style health summary, next-action queue, token accounting, selected
+  files, missing-signal warnings, spans, artifacts, quality labels, and
+  provider usage reconciliation totals
+- Trace triage CLI: `agenvantage traces list` supports quality-status,
+  workflow, minimum-token-savings, and attention-needed filters while showing
+  quality status and workflow on each trace row; `--json` emits the same
+  filtered view for scripts, dashboards, and future UI surfaces
 
 Out of scope for verified resume claims right now:
 
@@ -30,6 +55,7 @@ Out of scope for verified resume claims right now:
 - Production latency reduction
 - Broad downstream answer-quality retention across many workloads
 - Embedding/vector search or background indexing daemon
+- Actual image-packed provider requests
 
 ## Verified Metrics
 
@@ -41,17 +67,82 @@ Feature-work benchmark:
 - Edit-target recall: `1.0`
 - Test-target recall: `0.8333`
 - Selected edit-target recall: `1.0`
-- Selected test-target recall: `1.0`
-- Required-observation recall: `1.0`
+- Selected test-target recall: `0.9167`
+- Required-observation recall: `0.9167`
 - Answer-plan pass rate: `0.8333`
-- Mean selected chunk count: `14.08`
+- Mean selected chunk count: `4.17`
 - Missing-signal warning rate: `0.5833`
-- Median full-scan prompt: `80,648.5` tokens
-- Median packed prompt: `5,938.5` tokens
-- Median prompt tokens saved: `74,760.0`
-- Median prompt reduction: `90.91%`
-- Total prompt tokens saved across 12 cases: `1,067,887`
+- Median full-scan prompt: `74,311.0` tokens
+- Median packed prompt: `1,863.0` tokens
+- Median prompt tokens saved: `72,249.5`
+- Median prompt reduction: `96.62%`
+- Total prompt tokens saved across 12 cases: `1,325,356`
+- Median pack runtime: `61.54 ms`
+- Mean pack runtime: `97.3 ms`
+- Total pack runtime across 12 cases: `1,167.56 ms`
 - Acceptance result: `passed`
+
+Feature-provider dry-run with pricing snapshot:
+
+- Cases: `12`
+- Median full-scan prompt: `80,968.5` tokens
+- Median AgenVantage packed prompt: `2,040.0` tokens
+- Median prompt reduction: `96.66%`
+- Median estimated full-scan cold input cost: `$0.02024212`
+- Median estimated packed warm input cost: `$0.00005707`
+- Median estimated warm input savings: `99.72%`
+- Total estimated full-scan cold input cost: `$0.33599175`
+- Total estimated packed warm input cost: `$0.00069888`
+- Total estimated packed warm input savings: `$0.33529287`
+- Cost scope: theoretical input-only estimate from a saved pricing snapshot,
+  not provider-billed usage
+
+Session cache-readiness benchmark:
+
+- Cases: `12`
+- Cache-eligible rate: `1.0`
+- Median stable prefix: `2,003.0` tokens
+- Median dynamic packet: `89.5` tokens
+- Median full-scan prompt: `80,946.5` tokens
+- Median reusable prefix: `95.59%`
+- Median estimated warm reduction versus full scan: `99.86%`
+- Total estimated warm tokens saved versus full scan: `1,342,244`
+- Acceptance result: `passed`
+
+Pxpipe-inspired mixed-modality artifact benchmark:
+
+- Cases: `12`
+- Scope: local PNG artifact pipeline with estimated token accounting, not live
+  provider-billed savings
+- Full-scan median text prompt: `80,968.5` tokens
+- Full-scan median estimated image prompt: `19,044.0` tokens
+- Full-scan theoretical modality reduction before safety gate: `76.57%`
+- Full-scan image-candidate rate after safety gate: `0.0`
+- Packed median text prompt: `2,040.0` tokens
+- Packed median estimated image prompt: `4,761.0` tokens
+- Packed theoretical modality reduction before safety gate: `-133.38%`
+- Packed image-candidate rate after safety gate: `0.0`
+- Median retrieval tokens saved before modality: `78,813.0`
+- Total retrieval tokens saved across 12 cases: `1,318,563`
+- Total rough-estimator incremental modality tokens saved after packing: `0`
+- Artifact image case rate: `0.25`
+- Total artifact images written: `3`
+- Total factsheets written: `3`
+- Total recoverable source blocks: `5`
+- Total artifact incremental tokens saved after packing: `527`
+- Artifact manifests verified: `3/3`
+- Artifact bundles verified: `3/3`
+- Artifact manifest verification errors: `0`
+- Recoverability: `agenvantage rehydrate` verifies image hashes, PNG signatures,
+  factsheets, and `rec_...` source blocks, then retrieves exact source text with
+  hash checks
+- Median end-to-end safe candidate reduction: `96.66%`
+
+Interpretation: image-token packing is not a replacement for retrieval on this
+workload. The whole-prompt estimator now refuses packed prompts with exact
+identifier density, while the block-level artifact pipeline still images safe
+gist-tolerant background chunks after AgenVantage has found the right code
+context.
 
 Practical Mesh feature validation:
 
@@ -71,12 +162,48 @@ Practical Mesh feature validation:
 
 Four practical repository feature runs:
 
-| Repository | Full-scan prompt | Packed prompt | Tokens saved | Reduction |
-|---|---:|---:|---:|---:|
-| `token-optimization` | `178,592` | `5,709` | `172,883` | `96.8%` |
-| `mesh` | `40,761` | `5,976` | `34,785` | `85.34%` |
-| `signalfoundry` | `39,638` | `4,784` | `34,854` | `87.93%` |
-| `application-tracker` | `120,539` | `5,941` | `114,598` | `95.07%` |
+| Repository | User prompt | Full-scan prompt | Packed prompt | Tokens saved | Reduction | Runtime | Edit/test hit |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `token-optimization` | `19` | `260,690` | `1,966` | `258,724` | `99.25%` | `273.54 ms` | yes/yes |
+| `mesh` | `20` | `37,676` | `1,761` | `35,915` | `95.33%` | `38.47 ms` | yes/yes |
+| `signalfoundry` | `19` | `36,627` | `1,797` | `34,830` | `95.09%` | `36.73 ms` | yes/yes |
+| `application-tracker` | `19` | `110,938` | `1,749` | `109,189` | `98.42%` | `112.11 ms` | yes/yes |
+
+Latest feature-work performance optimization:
+
+- Change: cached term-variant expansion, cached incremental per-chunk budget
+  token checks, additive full-scan token accounting, single-call Git file
+  discovery, redaction fast-path for files without secrets, feature-only chunk
+  overlap reduction from `8` to `4` lines, and tighter feature target budget
+  from `2,000` to `1,800` tokens.
+- Baseline 12-case benchmark wall time: `2.89s`.
+- Optimized 12-case benchmark wall time: `1.32s`.
+- Wall-clock improvement: about `54.3%`.
+- Median packed prompt changed from `1,993.0` to `1,863.0` tokens.
+- Median pack runtime changed from `151.08 ms` to `61.54 ms`.
+- Quality gates unchanged: edit-target recall `1.0`, test-target recall
+  `0.8333`, required-observation recall `0.9167`, answer-plan pass rate
+  `0.8333`.
+
+Local observability dashboard validation:
+
+- `agenvantage dashboard --demo --output artifacts/platform-dashboard-demo.html`
+  rendered successfully.
+- Dashboard includes platform sections for `Operations`, `Action queue`, and
+  `Workflow breakdown`.
+- Demo dashboard surfaces provider cache hit rate and p95 span latency from the
+  local SQLite trace store.
+- Demo dashboard was rendered with dependency-free client-side filters for
+  search, quality, workflow, and attention-needed traces.
+- `agenvantage traces show <trace-id>` was manually validated on a temporary
+  repository and showed `Health`, `Next actions`, selected files, warnings,
+  spans, and artifacts for the recorded trace.
+- `agenvantage traces list --quality-status failed --attention` was manually
+  validated on a temporary repository and showed active filters, trace quality,
+  workflow, saved tokens, selected-file count, and task.
+- `agenvantage traces list --quality-status failed --json` was manually
+  validated on a temporary repository and emitted parseable JSON containing
+  `workflow`, `db_path`, `filters`, `trace_count`, and trace rows.
 
 Regression/use-case benchmark:
 
@@ -92,8 +219,9 @@ Regression/use-case benchmark:
 
 Automated test validation:
 
-- `./.venv/bin/pytest`: `81 passed`
+- `./.venv/bin/pytest`: `129 passed`
 - Feature-work validation acceptance: `passed`
+- Session cache-readiness validation acceptance: `passed`
 - Mesh feature validation:
   - `node --check server.js`: passed
   - `node --check scripts/server-smoke-test.js`: passed
@@ -104,13 +232,13 @@ Automated test validation:
 Strongest single bullet:
 
 ```text
-Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing median grounded prompt size from 80.6K to 5.9K tokens (90.9%) while achieving 100% edit-target recall and 83.3% test-target recall.
+Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing median feature-task prompt size from 74.3K to 1.9K tokens (96.6%) while achieving 100% edit-target recall and 83.3% test-target recall.
 ```
 
 More implementation-focused bullet:
 
 ```text
-Developed a feature-work context planner with line-addressed symbol indexing, reverse-import expansion, and category-aware packing for edit files, tests, config, and supporting code; passed a 12-case benchmark with 100% required-observation recall and 83.3% answer-plan pass rate.
+Developed a feature-work context planner with line-addressed symbol indexing, reverse-import expansion, and category-aware packing for edit files, tests, config, and supporting code; passed a 12-case benchmark with 91.7% required-observation recall and 83.3% answer-plan pass rate.
 ```
 
 Practical validation bullet:
@@ -122,7 +250,19 @@ Validated AgenVantage on a real Mesh feature by reducing a full-scan coding-agen
 More conservative public-project bullet:
 
 ```text
-Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 90.9% across 12 annotated tasks while maintaining full edit-target recall and full required-observation coverage.
+Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 96.6% across 12 annotated tasks while maintaining full edit-target recall and passing the answer-plan acceptance suite.
+```
+
+Cache-readiness bullet:
+
+```text
+Added cache-aware feature sessions that split stable repository context from per-turn task packets; validated 12 local feature sessions with 2.0K-token median stable prefixes, 89.5-token median dynamic packets, and 95.59% reusable-prefix share.
+```
+
+Forward-looking compression bullet:
+
+```text
+Implemented a pxpipe-inspired mixed-modality artifact mode that keeps exact coding evidence as text while rendering safe background context to PNGs with hash-verified factsheet sidecars and recoverable source IDs; after tightening text retrieval first, benchmarked 3 local image artifacts, 3 factsheets, 5 recoverable blocks, and 527 additional estimated tokens saved after retrieval.
 ```
 
 ## Interview Explanation
@@ -134,9 +274,9 @@ The project attacks coding-agent context overload. Instead of pasting an entire
 repo into a model, AgenVantage scans the repo locally, indexes symbols and
 imports, identifies the likely edit and test surface for a feature request, and
 emits a compact handoff prompt. I validated it on 12 real feature-work tasks
-across four personal repos. The median full-scan prompt was about 80.6K tokens;
-the median packed prompt was about 5.9K tokens, a 90.9% reduction, while still
-finding all expected edit files and all required behavior observations.
+across four personal repos. The median full-scan prompt was about 80.9K tokens;
+the median packed prompt was about 2.0K tokens, a 96.7% reduction, while still
+finding all expected edit files and 91.7% of required behavior observations.
 ```
 
 If asked whether it proves API cost savings:
@@ -146,6 +286,17 @@ Not yet as a billed-provider claim. What I have proven is local prompt-token
 reduction with retrieval sufficiency. The next validation step is live provider
 telemetry showing that smaller, cache-aligned prompts produce lower billed input
 cost without a quality regression.
+```
+
+If asked about pxpipe-style image compression:
+
+```text
+I researched pxpipe and borrowed the production pattern, not the billed-savings
+claim. AgenVantage now has a local mixed-modality path that keeps edit/test
+evidence as text, renders only safe background chunks as PNGs, adds hash-verified
+factsheet sidecars for exact identifiers, and writes recoverable source blocks. The benchmark
+showed retrieval remains the main win, with image artifacts adding selective
+estimated savings after the context is already packed.
 ```
 
 If asked why the Mesh plain-agent baseline also succeeded:
@@ -162,10 +313,17 @@ implementation.
 
 - Feature benchmark JSON: `artifacts/feature-work-validation.json`
 - Feature benchmark Markdown: `artifacts/feature-work-validation.md`
+- Feature provider dry-run report:
+  `artifacts/feature-provider-validation-dry-run.json`
+- Session cache-readiness JSON: `artifacts/session-cache-validation.json`
+- Session cache-readiness Markdown: `artifacts/session-cache-validation.md`
+- Modality tradeoff JSON: `artifacts/modality-tradeoff-validation.json`
+- Modality tradeoff Markdown: `artifacts/modality-tradeoff-validation.md`
 - Mesh context-vs-plain comparison:
   `artifacts/mesh-context-vs-plain-feature-validation.md`
 - Feature benchmark fixture: `examples/feature_work_validation_cases.json`
 - Feature benchmark runner: `benchmarks/feature_work_validation.py`
+- Session cache benchmark runner: `benchmarks/session_cache_validation.py`
+- Modality tradeoff runner: `benchmarks/modality_tradeoff_validation.py`
 - Mesh PR: <https://github.com/nicholas-tayag/mesh/pull/1>
-- AgenVantage PR: <https://github.com/nicholas-tayag/token-optimization/pull/2>
-
+- AgenVantage PR: <https://github.com/nicholas-tayag/token-optimization/pull/3>

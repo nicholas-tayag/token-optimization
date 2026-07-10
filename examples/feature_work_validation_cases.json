@@ -357,5 +357,19 @@
     "minimum_required_observation_recall": 0.8,
     "minimum_answer_plan_pass_rate": 0.8,
     "minimum_median_token_reduction_percent": 85.0
+  },
+  "provider_validation": {
+    "dataset_id": "feature-work-provider-validation",
+    "environment_scope": "local_feature_work",
+    "minimum_cacheable_prefix_tokens": 1024,
+    "recommended_warm_requests_per_policy": 30,
+    "minimum_distinct_cases_for_broad_claim": 30,
+    "minimum_failure_types_for_broad_claim": 6
+  },
+  "session_cache_acceptance": {
+    "minimum_cache_eligible_rate": 1.0,
+    "minimum_median_reusable_prefix_percent": 95.0,
+    "maximum_median_dynamic_packet_tokens": 120,
+    "minimum_median_warm_reduction_percent_vs_full_scan": 95.0
   }
 }

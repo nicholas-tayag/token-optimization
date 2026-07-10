@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,40 @@ from agenvantage import __version__
 from agenvantage.config import PackConfig, load_pack_config
 from agenvantage.env import load_dotenv
 from agenvantage.experiment import load_scenario, run_experiment
+from agenvantage.feature_provider_validation import (
+    feature_provider_fixture_readiness_report,
+    load_feature_provider_dataset,
+    run_feature_provider_validation,
+    summarize_saved_feature_provider_validation_report,
+)
+from agenvantage.modality import (
+    PROVIDER_PROFILES,
+    apply_multimodal_pack,
+    recoverable_blocks_from_manifest,
+    resolve_recoverable_text_path,
+    verify_mixed_modality_manifest,
+    verify_recoverable_block,
+)
+from agenvantage.observability import (
+    ANNOTATION_LABELS,
+    annotate_trace,
+    default_observability_db,
+    import_provider_usage_records,
+    init_observability_store,
+    load_trace_artifact,
+    list_traces,
+    load_trace,
+    record_pack_trace,
+    record_trace_artifact,
+    record_trace_span,
+    seed_demo_trace,
+    write_observability_dashboard,
+)
 from agenvantage.provider_validation import (
     OpenAIResponsesTransport,
     fixture_readiness_report,
     load_pricing_snapshot,
+    normalize_provider_records_payload,
     load_provider_validation_dataset,
     provider_validation_report_to_otel_export,
     reconcile_provider_costs,
@@ -32,6 +63,13 @@ from agenvantage.repo_context import (
     build_multi_repo_context_package,
     write_package_outputs,
 )
+from agenvantage.session import (
+    build_session_task,
+    create_feature_session,
+    default_session_path,
+    load_session_artifact,
+    save_session_artifact,
+)
 from agenvantage.telemetry import configure_console_tracing, flush_tracing
 from agenvantage.tokenizer import TokenCounter
 
@@ -39,6 +77,8 @@ _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
 _DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
 _DEFAULT_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "provider_validation_cases.json"
+_DEFAULT_FEATURE_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "feature_work_validation_cases.json"
+_DEFAULT_REPOS_ROOT = _PACKAGE_ROOT.parent
 _DEFAULT_BUDGET = 360
 _DEFAULT_DEMO_OUTPUT = _PACKAGE_ROOT / "artifacts" / "oncall-report.json"
 _DEFAULT_PACK_BUDGET = 6000
@@ -244,6 +284,117 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    validate_feature_provider = subparsers.add_parser(
+        "validate-feature-provider",
+        help="Run or summarize provider-backed validation for feature-work context packing.",
+        description=(
+            "Compare full-scan, AgenVantage-packed, and cache-aligned feature-work "
+            "prompts with provider usage, request cost, latency, and deterministic "
+            "answer-plan grading."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_FEATURE_PROVIDER_FIXTURE,
+        help=(
+            "Feature-work validation fixture JSON "
+            f"(default: {_DEFAULT_FEATURE_PROVIDER_FIXTURE.relative_to(_PACKAGE_ROOT)})."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--repos-root",
+        type=Path,
+        default=_DEFAULT_REPOS_ROOT,
+        help=f"Directory containing benchmark repositories (default: {_DEFAULT_REPOS_ROOT}).",
+    )
+    validate_feature_provider.add_argument(
+        "--pricing",
+        type=Path,
+        help="Versioned pricing snapshot JSON used to compute request cost.",
+    )
+    validate_feature_provider.add_argument(
+        "--records",
+        type=Path,
+        help="Optional JSON output path for raw request records and summary.",
+    )
+    validate_feature_provider.add_argument(
+        "--replay",
+        type=Path,
+        help="Summarize a previously saved feature-provider validation JSON report.",
+    )
+    validate_feature_provider.add_argument(
+        "--normalize",
+        type=Path,
+        help=(
+            "Normalize raw request records or OTLP-style span exports into a "
+            "provider-validation summary without calling a provider."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build prompt variants and token metrics locally without making provider calls.",
+    )
+    validate_feature_provider.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a human-readable summary instead of raw JSON.",
+    )
+    validate_feature_provider.add_argument(
+        "--trace-console",
+        action="store_true",
+        help="Print OpenTelemetry feature-provider spans to the console.",
+    )
+    validate_feature_provider.add_argument(
+        "--model",
+        default="gpt-4o-mini",
+        help="Provider model identifier for live validation.",
+    )
+    validate_feature_provider.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Number of times to run each case/policy combination.",
+    )
+    validate_feature_provider.add_argument(
+        "--max-cases",
+        type=int,
+        default=None,
+        help="Optional limit on the number of feature cases to run.",
+    )
+    validate_feature_provider.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable holding the OpenAI API key.",
+    )
+    validate_feature_provider.add_argument(
+        "--base-url",
+        default="https://api.openai.com/v1",
+        help="Responses API base URL.",
+    )
+    validate_feature_provider.add_argument(
+        "--environment-scope",
+        default=None,
+        help=(
+            "Optional evidence scope override such as local_feature_work or production. "
+            "Use only when the saved artifact came from that environment."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--reconcile-costs",
+        type=Path,
+        help=(
+            "Optional OpenAI Costs API export used to reconcile request-level "
+            "estimated costs against organization-level recorded costs."
+        ),
+    )
+    validate_feature_provider.add_argument(
+        "--otel-export",
+        type=Path,
+        help="Optional OTLP-style JSON export path for the feature-provider records.",
+    )
+
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
     view.add_argument(
         "--report",
@@ -330,10 +481,470 @@ def _parser() -> argparse.ArgumentParser:
         help="Print a structured agent handoff payload for IDE or agent workflows.",
     )
     pack.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help=(
+            "Optional mixed-modality context mode: off keeps text-only output, "
+            "estimate reports modality math, artifact writes local PNG context pages."
+        ),
+    )
+    pack.add_argument(
+        "--modality-profile",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+        help="Provider image-token profile used for multimodal estimates (default: auto from --model).",
+    )
+    pack.add_argument(
+        "--modality-output-dir",
+        type=Path,
+        help="Directory for multimodal artifacts (default: artifacts/context-images/<pack-id>).",
+    )
+    pack.add_argument(
         "--copy",
         action="store_true",
         help="Copy the Markdown context package to the system clipboard.",
     )
+
+    observe = subparsers.add_parser(
+        "observe",
+        help="Record local AI-agent task traces and context metrics.",
+        description=(
+            "Beginner-friendly observability commands for local AI coding-agent work. "
+            "A trace is one task; spans are the steps inside it."
+        ),
+    )
+    observe_subparsers = observe.add_subparsers(dest="observe_command", required=True)
+
+    observe_init = observe_subparsers.add_parser(
+        "init",
+        help="Create the local AgenVantage observability database.",
+    )
+    observe_init.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    observe_init.add_argument("--db", type=Path, help="Explicit observability database path.")
+
+    observe_demo = observe_subparsers.add_parser(
+        "demo",
+        help="Seed a local demo trace for the observability dashboard.",
+    )
+    observe_demo.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    observe_demo.add_argument("--db", type=Path, help="Explicit observability database path.")
+
+    observe_pack = observe_subparsers.add_parser(
+        "pack",
+        help="Pack context and record a local observability trace.",
+    )
+    observe_pack.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    observe_pack.add_argument("--task", required=True, help="Feature task to prepare context for.")
+    observe_pack.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe controlling instructions and provenance (default: feature).",
+    )
+    observe_pack.add_argument("--budget", type=int, default=None)
+    observe_pack.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    observe_pack.add_argument("--top-k", type=int, default=None)
+    observe_pack.add_argument("--include-diff", action="store_true")
+    observe_pack.add_argument("--include-log", action="store_true")
+    observe_pack.add_argument("--include-glob", action="append", default=[])
+    observe_pack.add_argument("--exclude-glob", action="append", default=[])
+    observe_pack.add_argument("--output", type=Path, help="Optional Markdown context output.")
+    observe_pack.add_argument("--manifest", type=Path, help="Optional JSON manifest output.")
+    observe_pack.add_argument("--db", type=Path, help="Explicit observability database path.")
+    observe_pack.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help="Optional mixed-modality context mode.",
+    )
+    observe_pack.add_argument(
+        "--modality-profile",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+    )
+    observe_pack.add_argument("--modality-output-dir", type=Path)
+
+    traces = subparsers.add_parser(
+        "traces",
+        help="Inspect local AgenVantage observability traces.",
+    )
+    traces_subparsers = traces.add_subparsers(dest="traces_command", required=True)
+    traces_list = traces_subparsers.add_parser("list", help="List recent local traces.")
+    traces_list.add_argument("--repo", type=Path, default=Path("."))
+    traces_list.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_list.add_argument("--limit", type=int, default=20)
+    traces_list.add_argument(
+        "--quality-status",
+        choices=("unknown", "unverified", "warning", "annotated", "passed", "failed"),
+        help="Only list traces with this quality status.",
+    )
+    traces_list.add_argument("--workflow", help="Only list traces for one workflow.")
+    traces_list.add_argument(
+        "--min-saved",
+        type=int,
+        help="Only list traces that saved at least this many prompt tokens.",
+    )
+    traces_list.add_argument(
+        "--attention",
+        action="store_true",
+        help="Only list traces that need review: failed, warning, unknown, unverified, or missing signals.",
+    )
+    traces_list.add_argument("--json", dest="as_json", action="store_true")
+    traces_show = traces_subparsers.add_parser("show", help="Show one local trace.")
+    traces_show.add_argument("trace_id")
+    traces_show.add_argument("--repo", type=Path, default=Path("."))
+    traces_show.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_show.add_argument("--json", dest="as_json", action="store_true")
+    traces_annotate = traces_subparsers.add_parser(
+        "annotate",
+        help="Attach a user quality label to a trace.",
+    )
+    traces_annotate.add_argument("trace_id")
+    traces_annotate.add_argument(
+        "--label",
+        required=True,
+        choices=tuple(sorted(ANNOTATION_LABELS)),
+        help="Outcome label for the agent task.",
+    )
+    traces_annotate.add_argument("--note", default="", help="Optional human-readable note.")
+    traces_annotate.add_argument("--repo", type=Path, default=Path("."))
+    traces_annotate.add_argument("--db", type=Path, help="Explicit observability database path.")
+    traces_export = traces_subparsers.add_parser(
+        "export",
+        help="Export a stored trace artifact such as context Markdown or agent stdout.",
+    )
+    traces_export.add_argument("trace_id")
+    traces_export.add_argument(
+        "--kind",
+        default="context_markdown",
+        help="Artifact kind to export (default: context_markdown).",
+    )
+    traces_export.add_argument(
+        "--artifact-id",
+        help="Exact artifact ID to export instead of selecting by kind.",
+    )
+    traces_export.add_argument("--output", type=Path, help="Optional output file.")
+    traces_export.add_argument("--repo", type=Path, default=Path("."))
+    traces_export.add_argument("--db", type=Path, help="Explicit observability database path.")
+
+    dashboard = subparsers.add_parser(
+        "dashboard",
+        help="Generate and open the local AgenVantage observability dashboard.",
+        description=(
+            "Render local trace metrics as a Datadog-style HTML dashboard with token "
+            "savings, selected files, warnings, and spans."
+        ),
+    )
+    dashboard.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root for .agenvantage/observability.db (default: current directory).",
+    )
+    dashboard.add_argument("--db", type=Path, help="Explicit observability database path.")
+    dashboard.add_argument(
+        "--demo",
+        action="store_true",
+        help="Seed a deterministic demo trace before rendering the dashboard.",
+    )
+    dashboard.add_argument(
+        "--output",
+        type=Path,
+        help="HTML output path (default: .agenvantage/observability-dashboard.html).",
+    )
+    dashboard.add_argument("--limit", type=int, default=100, help="Maximum traces to render.")
+    dashboard.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the dashboard URI instead of opening a browser tab.",
+    )
+
+    checkup = subparsers.add_parser(
+        "checkup",
+        help="Audit local AgenVantage repo hygiene and observability readiness.",
+        description=(
+            "Run a read-only local checkup before agent work. It verifies Git hygiene, "
+            "observability storage, dashboard readiness, and generated artifact noise."
+        ),
+    )
+    checkup.add_argument(
+        "--repo",
+        type=Path,
+        default=Path("."),
+        help="Repository root to inspect (default: current directory).",
+    )
+    checkup.add_argument("--db", type=Path, help="Explicit observability database path.")
+    checkup.add_argument("--json", dest="as_json", action="store_true")
+
+    experiments = subparsers.add_parser(
+        "experiments",
+        help="Compare local context optimization strategies for agent tasks.",
+    )
+    experiments_subparsers = experiments.add_subparsers(
+        dest="experiments_command",
+        required=True,
+    )
+    experiments_compare = experiments_subparsers.add_parser(
+        "compare",
+        help="Compare full-scan, packed, cache-aligned, and mixed-artifact prompt variants.",
+    )
+    experiments_compare.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    experiments_compare.add_argument("--task", required=True, help="Feature task to compare.")
+    experiments_compare.add_argument("--trace-id", help="Attach results to an existing trace.")
+    experiments_compare.add_argument("--budget", type=int, default=None)
+    experiments_compare.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    experiments_compare.add_argument("--top-k", type=int, default=None)
+    experiments_compare.add_argument("--include-diff", action="store_true")
+    experiments_compare.add_argument("--include-log", action="store_true")
+    experiments_compare.add_argument("--include-glob", action="append", default=[])
+    experiments_compare.add_argument("--exclude-glob", action="append", default=[])
+    experiments_compare.add_argument("--db", type=Path, help="Explicit observability database path.")
+    experiments_compare.add_argument(
+        "--input-price-per-million",
+        type=float,
+        default=None,
+        help="Optional input-token price used for local estimated cost comparisons.",
+    )
+    experiments_compare.add_argument(
+        "--cached-input-price-ratio",
+        type=float,
+        default=0.1,
+        help="Warm-cache input price ratio used for cache-aligned estimates (default: 0.1).",
+    )
+    experiments_compare.add_argument(
+        "--output",
+        type=Path,
+        help="Optional JSON report output path.",
+    )
+    experiments_compare.add_argument(
+        "--markdown-output",
+        type=Path,
+        help="Optional Markdown proof output path.",
+    )
+    experiments_compare.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a readable Markdown summary instead of JSON.",
+    )
+
+    provider = subparsers.add_parser(
+        "provider",
+        help="Import provider-reported usage into local traces.",
+    )
+    provider_subparsers = provider.add_subparsers(dest="provider_command", required=True)
+    provider_import = provider_subparsers.add_parser(
+        "import",
+        help="Import saved provider usage records or OTLP telemetry for one or more traces.",
+    )
+    provider_import.add_argument(
+        "--records",
+        required=True,
+        type=Path,
+        help="JSON file containing records, requests, saved validation report, or OTLP-style telemetry.",
+    )
+    provider_import.add_argument(
+        "--trace-id",
+        help="Trace ID to attach all imported records to. Omit when records contain trace_id.",
+    )
+    provider_import.add_argument("--repo", type=Path, default=Path("."))
+    provider_import.add_argument("--db", type=Path, help="Explicit observability database path.")
+    provider_import.add_argument("--pricing", type=Path, help="Optional pricing snapshot for cost fill-in.")
+    provider_import.add_argument("--provider", default="unknown", help="Provider label for imported records.")
+    provider_import.add_argument(
+        "--reconciliation-status",
+        default="unreconciled",
+        choices=("unreconciled", "estimated", "provider_reported", "costs_api_reconciled"),
+        help="How strongly imported costs are reconciled against provider billing.",
+    )
+    provider_import.add_argument("--json", dest="as_json", action="store_true")
+
+    agent = subparsers.add_parser(
+        "agent",
+        help="Run external coding-agent commands with AgenVantage context and tracing.",
+    )
+    agent_subparsers = agent.add_subparsers(dest="agent_command", required=True)
+    agent_run = agent_subparsers.add_parser(
+        "run",
+        help="Pack context, pass it to an external command, and record the run.",
+    )
+    agent_run.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    agent_run.add_argument("--task", required=True, help="Feature task to run through the agent.")
+    agent_run.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe controlling instructions and provenance (default: feature).",
+    )
+    agent_run.add_argument("--budget", type=int, default=None)
+    agent_run.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    agent_run.add_argument("--top-k", type=int, default=None)
+    agent_run.add_argument("--include-diff", action="store_true")
+    agent_run.add_argument("--include-log", action="store_true")
+    agent_run.add_argument("--include-glob", action="append", default=[])
+    agent_run.add_argument("--exclude-glob", action="append", default=[])
+    agent_run.add_argument("--db", type=Path, help="Explicit observability database path.")
+    agent_run.add_argument(
+        "--multimodal",
+        choices=("off", "estimate", "artifact"),
+        default="off",
+        help="Optional mixed-modality context mode.",
+    )
+    agent_run.add_argument(
+        "--modality-profile",
+        choices=("auto", *tuple(sorted(PROVIDER_PROFILES))),
+        default="auto",
+    )
+    agent_run.add_argument("--modality-output-dir", type=Path)
+    agent_run.add_argument(
+        "--handoff-file",
+        type=Path,
+        help="Optional path to write the context package before running the command.",
+    )
+    agent_run.add_argument(
+        "--no-stdin",
+        action="store_true",
+        help="Do not pass the context package to the command on stdin.",
+    )
+    agent_run.add_argument(
+        "--allow-failure",
+        action="store_true",
+        help="Record non-zero command exits without making the wrapper exit non-zero.",
+    )
+    agent_run.add_argument(
+        "external_command",
+        nargs=argparse.REMAINDER,
+        help="External command to run after --, for example: -- codex \"implement X\".",
+    )
+
+    session = subparsers.add_parser(
+        "session",
+        help="Create and reuse cache-aligned feature-work context sessions.",
+        description=(
+            "Split feature-work context into a stable reusable prefix and small "
+            "dynamic task packets for repeated agent prompts."
+        ),
+    )
+    session_subparsers = session.add_subparsers(dest="session_command", required=True)
+
+    session_init = session_subparsers.add_parser(
+        "init",
+        help="Create a cache-aligned feature session artifact from local repository context.",
+    )
+    session_init.add_argument(
+        "--repo",
+        type=Path,
+        action="append",
+        help="Repository to inspect (default: current directory). Repeat for multiple repos.",
+    )
+    session_init.add_argument("--task", required=True, help="Initial feature task.")
+    session_init.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default=None,
+        help="Task recipe for the initial context package (default: feature).",
+    )
+    session_init.add_argument("--budget", type=int, default=None)
+    session_init.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    session_init.add_argument("--top-k", type=int, default=None)
+    session_init.add_argument("--include-diff", action="store_true")
+    session_init.add_argument("--include-log", action="store_true")
+    session_init.add_argument("--include-glob", action="append", default=[])
+    session_init.add_argument("--exclude-glob", action="append", default=[])
+    session_init.add_argument("--session-id", help="Optional stable session identifier.")
+    session_init.add_argument(
+        "--output",
+        type=Path,
+        help="Session JSON output path (default: <repo>/.agenvantage/sessions/<id>.json).",
+    )
+    session_init.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print the full session artifact as JSON.",
+    )
+
+    session_task = session_subparsers.add_parser(
+        "task",
+        help="Build a dynamic task packet from an existing feature session.",
+    )
+    session_task.add_argument("--session", type=Path, required=True, help="Session JSON path.")
+    session_task.add_argument("--task", required=True, help="Follow-up task for the session.")
+    session_task.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    session_task.add_argument("--output", type=Path, help="Optional Markdown prompt output.")
+    session_task.add_argument("--manifest", type=Path, help="Optional JSON task manifest output.")
+    session_task.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Print only the cache-aligned prompt Markdown.",
+    )
+    session_task.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print the full task artifact as JSON.",
+    )
+    session_task.add_argument(
+        "--copy",
+        action="store_true",
+        help="Copy the cache-aligned prompt to the system clipboard.",
+    )
+
+    rehydrate = subparsers.add_parser(
+        "rehydrate",
+        help="Recover exact source text from a mixed-modality artifact manifest.",
+        description=(
+            "List or print recoverable rec_... blocks written by "
+            "agenvantage pack --multimodal artifact."
+        ),
+    )
+    rehydrate.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="Mixed-modality artifact manifest.json path.",
+    )
+    rehydrate.add_argument(
+        "--id",
+        dest="recoverable_id",
+        help="Recoverable block id to print, for example rec_ab12cd34ef56.",
+    )
+    rehydrate.add_argument(
+        "--list",
+        action="store_true",
+        help="List recoverable block ids instead of printing block text.",
+    )
+    rehydrate.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify image attachments and recoverable source hashes in the manifest.",
+    )
+    rehydrate.add_argument("--output", type=Path, help="Optional output path for recovered text.")
     return parser
 
 
@@ -379,6 +990,7 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
 
     provenance = report.get("provenance", {})
     prompt_accounting = report.get("prompt_token_accounting", {})
+    safety = report.get("safety", {})
     lines = [
         "AgenVantage context package",
         "",
@@ -419,6 +1031,27 @@ def _format_pack_summary(report: dict[str, Any], preset_name: str) -> str:
             f"Provenance: {', '.join(bits)} "
             f"({provenance.get('selected_provenance_tokens', 0)} tokens)"
         )
+    if safety.get("selected_secret_redaction_count"):
+        lines.append(
+            "Safety: "
+            f"redacted {safety['selected_secret_redaction_count']} secret-looking value(s)"
+        )
+    multimodal = report.get("multimodal") or {}
+    if multimodal.get("enabled"):
+        lines.append(
+            "Multimodal: "
+            f"{multimodal.get('mode')} "
+            f"decision={multimodal.get('decision_reason')} "
+            f"images={len(multimodal.get('image_attachments', []))} "
+            f"estimated_mixed={multimodal.get('estimated_mixed_prompt_tokens')} tokens"
+        )
+        if multimodal.get("estimated_tokens_saved_vs_packed_text", 0) > 0:
+            lines.append(
+                "Multimodal savings: "
+                f"{multimodal['estimated_tokens_saved_vs_packed_text']} tokens "
+                f"({multimodal['estimated_reduction_percent_vs_packed_text']}%) "
+                "vs packed text"
+            )
     if report.get("uncovered_query_terms"):
         lines.append(f"Uncovered concepts: {', '.join(report['uncovered_query_terms'])}")
     change_surface = report.get("change_surface") or {}
@@ -471,6 +1104,10 @@ def _build_handoff_payload(markdown: str, report: dict[str, Any], preset_name: s
             "missing_signals": list(change_surface.get("missing_signals", [])),
         },
         "prompt_token_accounting": report.get("prompt_token_accounting", {}),
+        "modality_plan": report.get("multimodal", {}),
+        "image_attachments": (report.get("multimodal") or {}).get("image_attachments", []),
+        "factsheets": (report.get("multimodal") or {}).get("factsheets", []),
+        "recoverable_blocks": (report.get("multimodal") or {}).get("recoverable_blocks", []),
         "selected_chunks": report.get("selected_chunks", []),
         "prompt_markdown": markdown,
     }
@@ -654,6 +1291,116 @@ def _format_provider_fixture_summary(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_feature_provider_fixture_summary(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    policy_summary = summary.get("policies", {})
+    lines = [
+        "AgenVantage feature-provider fixture",
+        "",
+        f"Dataset: {report['dataset_id']}",
+        f"Cases: {report['case_count']}",
+        f"Environment scope: {report['environment_scope']}",
+        (
+            "Median prompt reduction: "
+            f"{summary.get('median_agenvantage_prompt_reduction_percent', 0.0)}% "
+            "for AgenVantage packed vs full scan"
+        ),
+        (
+            "Median prompts: "
+            f"full-scan={summary.get('median_full_scan_prompt_tokens', 0.0)} "
+            f"agenvantage={summary.get('median_agenvantage_packed_prompt_tokens', 0.0)}"
+        ),
+    ]
+    cost = summary.get("estimated_input_cost")
+    if isinstance(cost, dict):
+        lines.extend(
+            [
+                (
+                    "Estimated input cost: "
+                    f"full-scan cold=${cost.get('median_full_unaligned_cold_input_cost_usd', 0.0):.8f} "
+                    f"packed warm=${cost.get('median_budgeted_cache_aligned_warm_input_cost_usd', 0.0):.8f}"
+                ),
+                (
+                    "Estimated warm input savings: "
+                    f"{cost.get('median_budgeted_cache_aligned_warm_input_cost_reduction_percent', 0.0)}% "
+                    "median vs full-scan cold input"
+                ),
+            ]
+        )
+    lines.extend(
+        [
+        (
+            "Cache-ready packed cases: "
+            f"{summary.get('cache_aligned_eligible_cases', 0)}/{report['case_count']} "
+            f"(minimum stable prefix {report['minimum_cacheable_prefix_tokens']})"
+        ),
+        "",
+        "Policy readiness:",
+        ]
+    )
+    for policy_id in (
+        "full_unaligned",
+        "full_cache_aligned",
+        "budgeted_unaligned",
+        "budgeted_cache_aligned",
+    ):
+        policy = policy_summary.get(policy_id)
+        if not isinstance(policy, dict):
+            continue
+        lines.append(
+            "  "
+            f"{policy_id:<22} "
+            f"median_tokens={policy.get('median_local_prompt_tokens', 0.0):<9} "
+            f"stable={policy.get('median_stable_prefix_tokens', 0.0):<8} "
+            f"reduction={policy.get('median_prompt_reduction_percent_vs_full_scan', 0.0)}% "
+            f"cache_ready={policy.get('cache_eligible_case_count', 0)}/{report['case_count']}"
+        )
+    return "\n".join(lines)
+
+
+def _format_feature_provider_validation_summary(report: dict[str, Any]) -> str:
+    lines = [
+        "AgenVantage feature-provider validation",
+        "",
+        f"Dataset: {report.get('dataset_id') or 'replay'}",
+        f"Records: {report.get('record_count', 0)}",
+    ]
+    prompt = report.get("prompt_readiness")
+    if isinstance(prompt, dict):
+        lines.extend(
+            [
+                (
+                    "Prompt reduction: "
+                    f"{prompt.get('median_agenvantage_prompt_reduction_percent', 0.0)}% "
+                    "median AgenVantage packed vs full scan"
+                ),
+                (
+                    "Median prompts: "
+                    f"full-scan={prompt.get('median_full_scan_prompt_tokens', 0.0)} "
+                    f"agenvantage={prompt.get('median_agenvantage_packed_prompt_tokens', 0.0)}"
+                ),
+            ]
+        )
+        cost = prompt.get("estimated_input_cost")
+        if isinstance(cost, dict):
+            lines.extend(
+                [
+                    (
+                        "Estimated input cost: "
+                        f"full-scan cold=${cost.get('median_full_unaligned_cold_input_cost_usd', 0.0):.8f} "
+                        f"packed warm=${cost.get('median_budgeted_cache_aligned_warm_input_cost_usd', 0.0):.8f}"
+                    ),
+                    (
+                        "Estimated warm input savings: "
+                        f"{cost.get('median_budgeted_cache_aligned_warm_input_cost_reduction_percent', 0.0)}% "
+                        "median vs full-scan cold input"
+                    ),
+                ]
+            )
+    lines.extend(["", _format_provider_validation_summary(report)])
+    return "\n".join(lines)
+
+
 def _copy_to_clipboard(text: str) -> bool:
     if sys.platform == "darwin":
         commands = [["pbcopy"]]
@@ -728,7 +1475,11 @@ def _run_experiment(
     return report
 
 
-def _resolve_pack_settings(args: argparse.Namespace) -> dict[str, Any]:
+def _resolve_pack_settings(
+    args: argparse.Namespace,
+    *,
+    default_preset: str = DEFAULT_PRESET,
+) -> dict[str, Any]:
     repos = args.repo if args.repo else [Path(".")]
     config: PackConfig = load_pack_config(list(repos) + [Path(".")])
 
@@ -739,7 +1490,7 @@ def _resolve_pack_settings(args: argparse.Namespace) -> dict[str, Any]:
     top_k = args.top_k if args.top_k is not None else config.top_k
     if top_k is None:
         top_k = _DEFAULT_PACK_TOP_K
-    preset_name = args.preset or config.preset or DEFAULT_PRESET
+    preset_name = args.preset or config.preset or default_preset
     preset = get_preset(preset_name)
 
     include_globs = tuple(config.include_glob) + tuple(args.include_glob)
@@ -760,17 +1511,22 @@ def _resolve_pack_settings(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _run_pack(args: argparse.Namespace) -> None:
-    settings = _resolve_pack_settings(args)
+def _build_pack_artifacts(
+    args: argparse.Namespace,
+    *,
+    default_preset: str = DEFAULT_PRESET,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    settings = _resolve_pack_settings(args, default_preset=default_preset)
     preset = settings["preset"]
     repos = settings["repos"]
+    counter = TokenCounter(settings["model"])
 
     if len(repos) == 1:
         markdown, report = build_context_package(
             repos[0],
             args.task,
             settings["budget"],
-            TokenCounter(settings["model"]),
+            counter,
             settings["top_k"],
             instructions=preset.instructions,
             include_diff=settings["include_diff"],
@@ -784,7 +1540,7 @@ def _run_pack(args: argparse.Namespace) -> None:
             repos,
             args.task,
             settings["budget"],
-            TokenCounter(settings["model"]),
+            counter,
             settings["top_k"],
             instructions=preset.instructions,
             include_diff=settings["include_diff"],
@@ -795,6 +1551,20 @@ def _run_pack(args: argparse.Namespace) -> None:
         )
 
     report["preset"] = settings["preset_name"]
+    markdown, report = apply_multimodal_pack(
+        markdown,
+        report,
+        counter,
+        mode=getattr(args, "multimodal", "off"),
+        output_dir=getattr(args, "modality_output_dir", None),
+        profile_id=getattr(args, "modality_profile", "auto"),
+        model=settings["model"],
+    )
+    return markdown, report, settings
+
+
+def _run_pack(args: argparse.Namespace) -> None:
+    markdown, report, settings = _build_pack_artifacts(args)
     write_package_outputs(markdown, report, args.output, args.manifest)
 
     if args.stdout:
@@ -818,6 +1588,9 @@ def _run_pack(args: argparse.Namespace) -> None:
         notices.append(f"Context package written to {args.output.resolve()}")
     if args.manifest:
         notices.append(f"Decision manifest written to {args.manifest.resolve()}")
+    multimodal = report.get("multimodal") or {}
+    if args.multimodal == "artifact" and multimodal.get("image_attachments"):
+        notices.append(f"Multimodal artifacts written to {multimodal.get('artifact_root')}")
 
     machine_readable = args.stdout or args.as_json or args.handoff_json
     if notices:
@@ -828,6 +1601,1303 @@ def _run_pack(args: argparse.Namespace) -> None:
             print()
             for notice in notices:
                 print(notice)
+
+
+def _observability_db_from_args(args: argparse.Namespace, repo: Path | None = None) -> Path:
+    if getattr(args, "db", None) is not None:
+        return Path(args.db)
+    return default_observability_db(repo or getattr(args, "repo", None) or Path("."))
+
+
+def _git_output(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _checkup_finding(
+    finding_id: str,
+    status: str,
+    title: str,
+    detail: str,
+    next_action: str,
+) -> dict[str, str]:
+    return {
+        "id": finding_id,
+        "status": status,
+        "title": title,
+        "detail": detail,
+        "next_action": next_action,
+    }
+
+
+def _build_checkup_report(repo: Path, db_path: Path) -> dict[str, Any]:
+    repo = repo.resolve()
+    db_path = db_path.resolve()
+    dashboard_path = repo / ".agenvantage" / "observability-dashboard.html"
+    artifacts_path = repo / "artifacts"
+    findings: list[dict[str, str]] = []
+
+    if not repo.exists():
+        findings.append(
+            _checkup_finding(
+                "repo_exists",
+                "fail",
+                "Repository path",
+                f"{repo} does not exist.",
+                "Run checkup from an existing repository or pass --repo.",
+            )
+        )
+        return {
+            "workflow": "checkup",
+            "repo_path": str(repo),
+            "db_path": str(db_path),
+            "dashboard_path": str(dashboard_path),
+            "version": __version__,
+            "summary": {"pass": 0, "warn": 0, "fail": 1},
+            "overall_status": "fail",
+            "metrics": {},
+            "findings": findings,
+        }
+
+    git_status = _git_output(repo, ["status", "--short"])
+    git_available = git_status.returncode == 0
+    status_lines = [
+        line for line in git_status.stdout.splitlines() if line.strip()
+    ] if git_available else []
+    dirty_tracked = [line for line in status_lines if not line.startswith("?? ")]
+    untracked = [line for line in status_lines if line.startswith("?? ")]
+
+    if git_available:
+        if dirty_tracked:
+            findings.append(
+                _checkup_finding(
+                    "git_tracked_changes",
+                    "warn",
+                    "Tracked Git changes",
+                    f"{len(dirty_tracked)} tracked change(s) are present.",
+                    "Commit, stash, or review tracked work before large agent edits.",
+                )
+            )
+        else:
+            findings.append(
+                _checkup_finding(
+                    "git_tracked_changes",
+                    "pass",
+                    "Tracked Git changes",
+                    "No tracked modifications detected.",
+                    "Safe to run read-only planning or scoped agent edits.",
+                )
+            )
+        if untracked:
+            findings.append(
+                _checkup_finding(
+                    "git_untracked_files",
+                    "warn",
+                    "Untracked files",
+                    f"{len(untracked)} untracked path(s) are visible to Git.",
+                    "Ignore generated files or add intentional files before committing.",
+                )
+            )
+        else:
+            findings.append(
+                _checkup_finding(
+                    "git_untracked_files",
+                    "pass",
+                    "Untracked files",
+                    "No untracked paths detected.",
+                    "Git status is clean for generated-file noise.",
+                )
+            )
+    else:
+        findings.append(
+            _checkup_finding(
+                "git_status",
+                "warn",
+                "Git status",
+                "This path is not a readable Git worktree.",
+                "Run checkup inside a Git repository for safer agent workflows.",
+            )
+        )
+
+    if db_path.exists():
+        traces = list_traces(db_path, limit=1000)
+        trace_count = len(traces)
+        attention_count = sum(
+            1
+            for trace in traces
+            if trace.quality_status in {"unknown", "unverified", "warning", "failed"}
+        )
+        findings.append(
+            _checkup_finding(
+                "observability_db",
+                "pass",
+                "Observability database",
+                f"Found {trace_count} trace(s) in {db_path}.",
+                "Use `agenvantage traces list --attention` to triage risky runs.",
+            )
+        )
+    else:
+        trace_count = 0
+        attention_count = 0
+        findings.append(
+            _checkup_finding(
+                "observability_db",
+                "warn",
+                "Observability database",
+                f"No local trace database found at {db_path}.",
+                "Run `agenvantage observe init` or `agenvantage observe pack --task ...`.",
+            )
+        )
+
+    if dashboard_path.exists():
+        findings.append(
+            _checkup_finding(
+                "dashboard",
+                "pass",
+                "Local dashboard",
+                f"Dashboard exists at {dashboard_path}.",
+                "Run `agenvantage dashboard --no-browser` to refresh it.",
+            )
+        )
+    else:
+        findings.append(
+            _checkup_finding(
+                "dashboard",
+                "warn",
+                "Local dashboard",
+                "No generated observability dashboard found.",
+                "Run `agenvantage dashboard --demo --no-browser` for a first local view.",
+            )
+        )
+
+    artifacts_ignored = False
+    if git_available:
+        artifacts_ignored = (
+            _git_output(repo, ["check-ignore", "-q", "artifacts"]).returncode == 0
+        )
+    if artifacts_path.exists() and not artifacts_ignored:
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "warn",
+                "Generated artifacts",
+                "`artifacts/` exists but is not fully ignored by Git.",
+                "Add generated artifact paths to .gitignore or move long-lived fixtures elsewhere.",
+            )
+        )
+    elif artifacts_path.exists():
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "pass",
+                "Generated artifacts",
+                "`artifacts/` exists and is ignored by Git.",
+                "Keep generated benchmark and dashboard outputs out of commits.",
+            )
+        )
+    else:
+        findings.append(
+            _checkup_finding(
+                "generated_artifacts",
+                "pass",
+                "Generated artifacts",
+                "No local artifacts directory detected.",
+                "Generated reports will be checked again after benchmark or dashboard runs.",
+            )
+        )
+
+    summary = {
+        status: sum(1 for finding in findings if finding["status"] == status)
+        for status in ("pass", "warn", "fail")
+    }
+    overall = "fail" if summary["fail"] else "warn" if summary["warn"] else "pass"
+    return {
+        "workflow": "checkup",
+        "repo_path": str(repo),
+        "db_path": str(db_path),
+        "dashboard_path": str(dashboard_path),
+        "version": __version__,
+        "summary": summary,
+        "overall_status": overall,
+        "metrics": {
+            "git_status_entries": len(status_lines),
+            "tracked_change_count": len(dirty_tracked),
+            "untracked_path_count": len(untracked),
+            "trace_count": trace_count,
+            "attention_trace_count": attention_count,
+            "artifacts_ignored": artifacts_ignored,
+        },
+        "findings": findings,
+    }
+
+
+def _format_checkup_report(report: dict[str, Any]) -> str:
+    summary = report["summary"]
+    metrics = report["metrics"]
+    lines = [
+        "AgenVantage checkup",
+        "",
+        f"Repo:    {report['repo_path']}",
+        f"DB:      {report['db_path']}",
+        f"Version: {report['version']}",
+        f"Status:  {report['overall_status']}",
+        "",
+        "Summary:",
+        f"  pass={summary['pass']} warn={summary['warn']} fail={summary['fail']}",
+        (
+            f"  traces={metrics.get('trace_count', 0)} "
+            f"attention={metrics.get('attention_trace_count', 0)}"
+        ),
+        (
+            f"  tracked_changes={metrics.get('tracked_change_count', 0)} "
+            f"untracked={metrics.get('untracked_path_count', 0)}"
+        ),
+        "",
+        "Findings:",
+    ]
+    for finding in report["findings"]:
+        lines.extend(
+            [
+                f"  [{finding['status']}] {finding['title']}",
+                f"    {finding['detail']}",
+                f"    Next: {finding['next_action']}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _run_checkup(args: argparse.Namespace) -> None:
+    repo = Path(args.repo)
+    db_path = _observability_db_from_args(args, repo)
+    report = _build_checkup_report(repo, db_path)
+    if args.as_json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(_format_checkup_report(report))
+
+
+def _format_trace_created(trace: Any, db_path: Path, report: dict[str, Any]) -> str:
+    change_surface = report.get("change_surface") or {}
+    edit_targets = [
+        str(item.get("path"))
+        for item in change_surface.get("edit_targets", [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    test_targets = [
+        str(item.get("path"))
+        for item in change_surface.get("test_targets", [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    missing = [str(item) for item in change_surface.get("missing_signals", [])]
+    lines = [
+        "AgenVantage observed context pack",
+        "",
+        f"Trace: {trace.trace_id}",
+        f"Task:  {trace.task}",
+        f"DB:    {db_path.resolve()}",
+        "",
+        "Context:",
+        f"  Full scan: {trace.full_scan_prompt_tokens:,} tokens",
+        f"  Packed:    {trace.packed_prompt_tokens:,} tokens",
+        f"  Saved:     {trace.tokens_saved:,} tokens ({trace.reduction_percent}%)",
+        "",
+    ]
+    if edit_targets:
+        lines.append(f"Likely edit files: {', '.join(edit_targets)}")
+    if test_targets:
+        lines.append(f"Tests to inspect: {', '.join(test_targets)}")
+    if missing:
+        lines.append("Warnings:")
+        lines.extend(f"  - {item}" for item in missing)
+    lines.extend(
+        [
+            "",
+            "Why this matters:",
+            "  The agent performs better when it sees the right files, but whole-repo prompts burn tokens.",
+            "  AgenVantage recorded this local trace so you can inspect context and cost over time.",
+            "",
+            f"Next: agenvantage traces show {trace.trace_id}",
+        ]
+    )
+    return "\n".join(lines).rstrip()
+
+
+def _format_trace_list(
+    traces: list[Any],
+    db_path: Path,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> str:
+    if not traces:
+        filter_lines = []
+        for key, value in (filters or {}).items():
+            if value not in (None, False, ""):
+                filter_lines.append(f"  {key}: {value}")
+        filter_section = (
+            "\n\nActive filters:\n" + "\n".join(filter_lines)
+            if filter_lines
+            else ""
+        )
+        return (
+            "No AgenVantage traces found.\n\n"
+            f"DB: {db_path.resolve()}\n"
+            f"{filter_section}\n"
+            'Try: agenvantage observe pack --task "Add tests for upload limits"'
+        )
+    lines = ["AgenVantage traces", "", f"DB: {db_path.resolve()}"]
+    active_filters = [
+        f"{key}={value}"
+        for key, value in (filters or {}).items()
+        if value not in (None, False, "")
+    ]
+    if active_filters:
+        lines.extend(["", f"Filters: {', '.join(active_filters)}"])
+    lines.append("")
+    for trace in traces:
+        lines.append(
+            f"{trace.trace_id}  {trace.created_at}  "
+            f"quality={trace.quality_status}  workflow={trace.workflow}  "
+            f"saved={trace.tokens_saved:,} ({trace.reduction_percent}%)  "
+            f"files={trace.selected_file_count}  {trace.task}"
+        )
+    return "\n".join(lines)
+
+
+def _trace_record_to_dict(trace: Any) -> dict[str, Any]:
+    return {
+        "trace_id": trace.trace_id,
+        "task": trace.task,
+        "repo_path": trace.repo_path,
+        "workflow": trace.workflow,
+        "created_at": trace.created_at,
+        "status": trace.status,
+        "quality_status": trace.quality_status,
+        "full_scan_prompt_tokens": trace.full_scan_prompt_tokens,
+        "packed_prompt_tokens": trace.packed_prompt_tokens,
+        "tokens_saved": trace.tokens_saved,
+        "reduction_percent": trace.reduction_percent,
+        "selected_file_count": trace.selected_file_count,
+    }
+
+
+def _format_trace_list_json(
+    traces: list[Any],
+    db_path: Path,
+    *,
+    filters: dict[str, Any] | None = None,
+) -> str:
+    active_filters = {
+        key: value
+        for key, value in (filters or {}).items()
+        if value not in (None, False, "")
+    }
+    payload = {
+        "workflow": "trace_list",
+        "db_path": str(db_path.resolve()),
+        "filters": active_filters,
+        "trace_count": len(traces),
+        "traces": [_trace_record_to_dict(trace) for trace in traces],
+    }
+    return json.dumps(payload, indent=2)
+
+
+def _trace_provider_totals(trace: dict[str, Any]) -> dict[str, Any]:
+    provider_usage = trace.get("provider_usage") or []
+    input_tokens = sum(int(usage.get("input_tokens") or 0) for usage in provider_usage)
+    cached_tokens = sum(int(usage.get("cached_input_tokens") or 0) for usage in provider_usage)
+    output_tokens = sum(int(usage.get("output_tokens") or 0) for usage in provider_usage)
+    cost = sum(float(usage.get("request_cost_usd") or 0.0) for usage in provider_usage)
+    latency_ms = sum(float(usage.get("latency_ms") or 0.0) for usage in provider_usage)
+    return {
+        "record_count": len(provider_usage),
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_tokens,
+        "output_tokens": output_tokens,
+        "cache_hit_rate_percent": (cached_tokens / input_tokens * 100) if input_tokens else 0.0,
+        "request_cost_usd": cost,
+        "latency_ms": latency_ms,
+    }
+
+
+def _trace_next_actions(trace: dict[str, Any]) -> list[str]:
+    metadata = trace.get("metadata") or {}
+    missing = metadata.get("missing_signals") or []
+    annotations = trace.get("annotations") or []
+    provider_usage = trace.get("provider_usage") or []
+    quality_status = str(trace.get("quality_status") or "unknown")
+    actions: list[str] = []
+    if quality_status == "failed":
+        actions.append("Investigate failed quality label before reusing this context pattern.")
+    if missing:
+        actions.append("Review missing-signal warnings and rerun with narrower task terms or more provenance.")
+    if quality_status in {"unknown", "unverified"} and not annotations:
+        actions.append("Annotate the trace after the agent run: agent_succeeded, context_missing, or tests_failed.")
+    if not provider_usage:
+        actions.append("Import provider usage if available to compare local token estimates with billed usage.")
+    if not actions:
+        actions.append("No immediate action required; keep monitoring future runs for regressions.")
+    return actions
+
+
+def _format_trace_detail(trace: dict[str, Any]) -> str:
+    metadata = trace.get("metadata") or {}
+    selected_files = metadata.get("selected_files") or []
+    missing = metadata.get("missing_signals") or []
+    spans = trace.get("spans") or []
+    provider_totals = _trace_provider_totals(trace)
+    span_total_ms = sum(float(span.get("duration_ms") or 0.0) for span in spans)
+    trace_status = str(trace.get("quality_status") or "unknown")
+    lines = [
+        "AgenVantage trace",
+        "",
+        f"Trace: {trace['trace_id']}",
+        f"Task:  {trace['task']}",
+        f"Repo:  {trace['repo_path']}",
+        f"Status: {trace['status']}",
+        f"Quality: {trace_status}",
+        "",
+        "Health:",
+        f"  Token reduction: {float(trace['reduction_percent']):.2f}%",
+        f"  Selected files:  {len(selected_files)}",
+        f"  Warnings:        {len(missing)}",
+        f"  Spans:           {len(spans)} ({span_total_ms:.2f} ms total)",
+        (
+            "  Provider usage:  "
+            f"{provider_totals['record_count']} records, "
+            f"${provider_totals['request_cost_usd']:.8f}, "
+            f"{provider_totals['cache_hit_rate_percent']:.2f}% cache hit"
+        ),
+        "",
+        "Next actions:",
+        *[f"  - {item}" for item in _trace_next_actions(trace)],
+        "",
+        "Token accounting:",
+        f"  Full scan: {int(trace['full_scan_prompt_tokens']):,}",
+        f"  Packed:    {int(trace['packed_prompt_tokens']):,}",
+        f"  Saved:     {int(trace['tokens_saved']):,} ({trace['reduction_percent']}%)",
+        "",
+        "Selected files:",
+    ]
+    if selected_files:
+        lines.extend(f"  - {path}" for path in selected_files)
+    else:
+        lines.append("  none")
+    if missing:
+        lines.append("")
+        lines.append("Warnings:")
+        lines.extend(f"  - {item}" for item in missing)
+    lines.append("")
+    lines.append("Spans:")
+    if spans:
+        for span in spans:
+            lines.append(
+                f"  - {span['kind']}: {float(span['duration_ms']):.2f} ms, "
+                f"input_tokens={span['input_tokens']}"
+            )
+    else:
+        lines.append("  none")
+    artifacts = trace.get("artifacts") or []
+    if artifacts:
+        lines.append("")
+        lines.append("Artifacts:")
+        for artifact in artifacts:
+            path = artifact.get("path") or "stored in SQLite"
+            lines.append(f"  - {artifact['kind']}: {path}")
+    annotations = trace.get("annotations") or []
+    if annotations:
+        lines.append("")
+        lines.append("User quality labels:")
+        for annotation in annotations:
+            note = annotation.get("note") or "No note."
+            lines.append(
+                f"  - {annotation['label']} at {annotation['created_at']}: {note}"
+            )
+    provider_usage = trace.get("provider_usage") or []
+    if provider_usage:
+        lines.append("")
+        lines.append("Provider-reported usage:")
+        lines.append(f"  Records: {provider_totals['record_count']}")
+        lines.append(f"  Input tokens: {provider_totals['input_tokens']:,}")
+        lines.append(f"  Cached input tokens: {provider_totals['cached_input_tokens']:,}")
+        lines.append(f"  Output tokens: {provider_totals['output_tokens']:,}")
+        lines.append(f"  Cache hit rate: {provider_totals['cache_hit_rate_percent']:.2f}%")
+        lines.append(f"  Reported latency: {provider_totals['latency_ms']:.2f} ms")
+        lines.append(f"  Reported cost: ${provider_totals['request_cost_usd']:.8f}")
+        for usage in provider_usage:
+            request_id = usage.get("request_id") or "no request id"
+            lines.append(
+                "  - "
+                f"{usage.get('provider', 'provider')} {usage.get('model') or ''} "
+                f"{request_id}: input={int(usage.get('input_tokens') or 0):,}, "
+                f"cached={int(usage.get('cached_input_tokens') or 0):,}, "
+                f"output={int(usage.get('output_tokens') or 0):,}, "
+                f"cost=${float(usage.get('request_cost_usd') or 0.0):.8f}, "
+                f"reconciliation={usage.get('reconciliation_status')}"
+            )
+    return "\n".join(lines)
+
+
+def _run_observe(args: argparse.Namespace) -> None:
+    if args.observe_command == "init":
+        db_path = _observability_db_from_args(args, args.repo)
+        init_observability_store(db_path)
+        print(
+            "\n".join(
+                [
+                    "AgenVantage observability initialized.",
+                    "",
+                    "A trace = one developer task.",
+                    "A span = one step inside that task, like scanning files or packing context.",
+                    "A metric = a number, like tokens saved or estimated cost.",
+                    "",
+                    f"Local database: {db_path.resolve()}",
+                    'Try: agenvantage observe pack --task "Add tests for upload limits"',
+                ]
+            )
+        )
+        return
+    if args.observe_command == "demo":
+        db_path = _observability_db_from_args(args, args.repo)
+        trace = seed_demo_trace(db_path, repo_path=args.repo)
+        print(
+            "\n".join(
+                [
+                    "AgenVantage demo trace created.",
+                    "",
+                    f"Trace: {trace.trace_id}",
+                    f"DB:    {db_path.resolve()}",
+                    "",
+                    "This demo shows token savings, selected files, an agent span,",
+                    "a quality label, and provider-usage fields without calling an API.",
+                    "",
+                    "Next: agenvantage dashboard",
+                ]
+            )
+        )
+        return
+    if args.observe_command == "pack":
+        markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
+        write_package_outputs(markdown, report, args.output, args.manifest)
+        repo = Path(settings["repos"][0])
+        db_path = _observability_db_from_args(args, repo)
+        trace = record_pack_trace(
+            db_path,
+            markdown=markdown,
+            report=report,
+            repo_path=repo,
+            workflow=str(settings["preset_name"]),
+            artifact_paths={"markdown": args.output, "manifest": args.manifest},
+        )
+        print(_format_trace_created(trace, db_path, report))
+        return
+    raise SystemExit(f"Unknown observe command: {args.observe_command}")
+
+
+def _run_traces(args: argparse.Namespace) -> None:
+    db_path = _observability_db_from_args(args, args.repo)
+    if args.traces_command == "list":
+        filters = {
+            "quality_status": args.quality_status,
+            "workflow": args.workflow,
+            "min_saved": args.min_saved,
+            "attention": args.attention,
+        }
+        traces = list_traces(
+            db_path,
+            limit=args.limit,
+            quality_status=args.quality_status,
+            workflow=args.workflow,
+            min_tokens_saved=args.min_saved,
+            attention_only=args.attention,
+        )
+        if args.as_json:
+            print(_format_trace_list_json(traces, db_path, filters=filters))
+        else:
+            print(
+                _format_trace_list(
+                    traces,
+                    db_path,
+                    filters=filters,
+                )
+            )
+        return
+    if args.traces_command == "show":
+        try:
+            trace = load_trace(db_path, args.trace_id)
+        except KeyError as exc:
+            raise SystemExit(f"Trace not found: {args.trace_id}") from exc
+        if args.as_json:
+            print(json.dumps(trace, indent=2))
+        else:
+            print(_format_trace_detail(trace))
+        return
+    if args.traces_command == "annotate":
+        try:
+            annotation = annotate_trace(
+                db_path,
+                args.trace_id,
+                label=args.label,
+                note=args.note,
+            )
+        except KeyError as exc:
+            raise SystemExit(f"Trace not found: {args.trace_id}") from exc
+        print(
+            "\n".join(
+                [
+                    "AgenVantage trace annotated.",
+                    "",
+                    f"Trace:  {annotation['trace_id']}",
+                    f"Label:  {annotation['label']}",
+                    f"Status: {annotation['quality_status']}",
+                    f"Note:   {annotation['note'] or 'No note.'}",
+                ]
+            )
+        )
+        return
+    if args.traces_command == "export":
+        try:
+            artifact = load_trace_artifact(
+                db_path,
+                args.trace_id,
+                kind=None if args.artifact_id else args.kind,
+                artifact_id=args.artifact_id,
+            )
+        except KeyError as exc:
+            raise SystemExit(f"Artifact not found: {exc.args[0]}") from exc
+        content = str(artifact.get("content") or "")
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(content, encoding="utf-8")
+            print(
+                "\n".join(
+                    [
+                        "AgenVantage trace artifact exported.",
+                        "",
+                        f"Trace:    {args.trace_id}",
+                        f"Artifact: {artifact['artifact_id']}",
+                        f"Kind:     {artifact['kind']}",
+                        f"Output:   {args.output.resolve()}",
+                    ]
+                )
+            )
+        else:
+            print(content, end="" if content.endswith("\n") else "\n")
+        return
+    raise SystemExit(f"Unknown traces command: {args.traces_command}")
+
+
+def _run_observability_dashboard(args: argparse.Namespace) -> None:
+    repo = Path(args.repo).resolve()
+    db_path = _observability_db_from_args(args, repo)
+    if getattr(args, "demo", False):
+        seed_demo_trace(db_path, repo_path=repo)
+    output = Path(args.output) if args.output is not None else repo / ".agenvantage" / "observability-dashboard.html"
+    dashboard_path = write_observability_dashboard(db_path, output, limit=args.limit)
+    dashboard_uri = dashboard_path.resolve().as_uri()
+    print(f"AgenVantage observability dashboard written to {dashboard_path.resolve()}")
+    if args.no_browser:
+        print(dashboard_uri)
+    else:
+        webbrowser.open(dashboard_uri)
+
+
+def _estimated_input_cost(tokens: float, price_per_million: float | None) -> float | None:
+    if price_per_million is None:
+        return None
+    return round((tokens / 1_000_000) * price_per_million, 8)
+
+
+def _experiment_variant(
+    *,
+    variant_id: str,
+    label: str,
+    prompt_tokens: int,
+    baseline_tokens: int,
+    input_price_per_million: float | None,
+    cache_eligible_tokens: int = 0,
+    cached_input_price_ratio: float = 0.1,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    tokens_saved = baseline_tokens - prompt_tokens
+    reduction = round((tokens_saved / baseline_tokens * 100) if baseline_tokens else 0.0, 2)
+    cache_eligible_tokens = max(min(cache_eligible_tokens, prompt_tokens), 0)
+    non_cached_tokens = prompt_tokens - cache_eligible_tokens
+    warm_cache_weighted_tokens = non_cached_tokens + (cache_eligible_tokens * cached_input_price_ratio)
+    warm_tokens_saved = baseline_tokens - warm_cache_weighted_tokens
+    return {
+        "variant_id": variant_id,
+        "label": label,
+        "prompt_tokens": prompt_tokens,
+        "tokens_saved_vs_full_scan": tokens_saved,
+        "reduction_percent_vs_full_scan": reduction,
+        "cache_eligible_input_tokens": cache_eligible_tokens,
+        "warm_cache_weighted_input_tokens": round(warm_cache_weighted_tokens, 2),
+        "warm_cache_weighted_tokens_saved_vs_full_scan": round(warm_tokens_saved, 2),
+        "estimated_input_cost_usd": _estimated_input_cost(prompt_tokens, input_price_per_million),
+        "estimated_warm_cache_input_cost_usd": _estimated_input_cost(
+            warm_cache_weighted_tokens,
+            input_price_per_million,
+        ),
+        "notes": notes or [],
+    }
+
+
+def _format_experiment_comparison_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# AgenVantage Context Experiment",
+        "",
+        f"Task: {report['task']}",
+        f"Trace: {report['trace_id']}",
+        f"Model: {report['model']}",
+        "",
+        "| Variant | Prompt tokens | Saved vs full scan | Reduction | Cache-eligible tokens | Warm-cache weighted tokens |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for variant in report["variants"]:
+        lines.append(
+            "| "
+            f"{variant['label']} | "
+            f"{int(variant['prompt_tokens']):,} | "
+            f"{int(variant['tokens_saved_vs_full_scan']):,} | "
+            f"{variant['reduction_percent_vs_full_scan']}% | "
+            f"{int(variant['cache_eligible_input_tokens']):,} | "
+            f"{variant['warm_cache_weighted_input_tokens']:,.2f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Interpretation",
+            "",
+            "- Full scan estimates the prompt size if every eligible repository chunk were included.",
+            "- Packed text is the first-request AgenVantage context package.",
+            "- Cache-aligned uses the same packed prompt size on the first request, then estimates warm-cache weighting for stable context.",
+            "- Mixed artifact uses the local mixed-modality estimator; it is not provider-billed proof.",
+            "",
+            "## Claim Boundary",
+            "",
+            "These are local planning metrics. They prove prompt-token reduction and cache layout readiness, not live provider billing, latency, or broad answer-quality retention.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _build_experiment_comparison(args: argparse.Namespace) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    pack_args = argparse.Namespace(**vars(args))
+    pack_args.preset = "feature"
+    pack_args.multimodal = "off"
+    pack_args.modality_profile = "auto"
+    pack_args.modality_output_dir = None
+    markdown, packed_report, settings = _build_pack_artifacts(pack_args, default_preset="feature")
+
+    mixed_args = argparse.Namespace(**vars(args))
+    mixed_args.preset = "feature"
+    mixed_args.multimodal = "estimate"
+    mixed_args.modality_profile = "auto"
+    mixed_args.modality_output_dir = None
+    _, mixed_report, _ = _build_pack_artifacts(mixed_args, default_preset="feature")
+
+    accounting = packed_report.get("prompt_token_accounting") or {}
+    baseline_tokens = int(accounting.get("full_scan_prompt_tokens") or packed_report.get("candidate_context_tokens") or 0)
+    packed_tokens = int(accounting.get("packed_prompt_tokens") or packed_report.get("selected_context_tokens") or 0)
+    original_user_prompt_tokens = int(accounting.get("original_user_prompt_tokens") or 0)
+    stable_cache_tokens = max(packed_tokens - original_user_prompt_tokens, 0)
+    mixed = mixed_report.get("multimodal") or {}
+    mixed_tokens = int(mixed.get("estimated_mixed_prompt_tokens") or packed_tokens)
+    input_price = args.input_price_per_million
+    cached_ratio = args.cached_input_price_ratio
+    variants = [
+        _experiment_variant(
+            variant_id="full_scan",
+            label="Full scan text",
+            prompt_tokens=baseline_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=["Local full-corpus counterfactual from eligible repository context."],
+        ),
+        _experiment_variant(
+            variant_id="packed_text",
+            label="Packed text",
+            prompt_tokens=packed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=["First-request AgenVantage selected context."],
+        ),
+        _experiment_variant(
+            variant_id="packed_cache_aligned",
+            label="Packed cache-aligned",
+            prompt_tokens=packed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            cache_eligible_tokens=stable_cache_tokens,
+            cached_input_price_ratio=cached_ratio,
+            notes=["First request has the same input tokens as packed text; warm-cache weighting is estimated."],
+        ),
+        _experiment_variant(
+            variant_id="packed_mixed_artifact",
+            label="Packed mixed artifact",
+            prompt_tokens=mixed_tokens,
+            baseline_tokens=baseline_tokens,
+            input_price_per_million=input_price,
+            notes=[str(item) for item in mixed.get("measurement_notes", [])]
+            or ["Local mixed-modality estimate; no provider call was made."],
+        ),
+    ]
+    report = {
+        "project": "AgenVantage",
+        "workflow": "experiments.compare",
+        "task": args.task,
+        "model": settings["model"],
+        "repos": [str(Path(repo).resolve()) for repo in settings["repos"]],
+        "budget": settings["budget"],
+        "trace_id": args.trace_id or "",
+        "input_price_per_million": input_price,
+        "cached_input_price_ratio": cached_ratio,
+        "baseline_variant": "full_scan",
+        "variants": variants,
+        "selected_files": sorted(
+            {
+                str(chunk.get("path"))
+                for chunk in packed_report.get("selected_chunks", [])
+                if isinstance(chunk, dict) and chunk.get("path")
+            }
+        ),
+        "change_surface": packed_report.get("change_surface", {}),
+        "claim_boundary": [
+            "Local token counts are measured with the configured tokenizer.",
+            "Estimated costs use caller-provided input price when available.",
+            "Warm-cache numbers model cache pricing and do not prove provider-billed savings.",
+            "Mixed artifact numbers use local provider-profile estimates and do not prove live image-token billing.",
+        ],
+        "packed_report": packed_report,
+        "mixed_modality": mixed,
+    }
+    return report, markdown, settings
+
+
+def _run_experiments(args: argparse.Namespace) -> None:
+    if args.experiments_command != "compare":
+        raise SystemExit(f"Unknown experiments command: {args.experiments_command}")
+
+    report, markdown, settings = _build_experiment_comparison(args)
+    repo = Path(settings["repos"][0])
+    db_path = _observability_db_from_args(args, repo)
+    if args.trace_id:
+        load_trace(db_path, args.trace_id)
+        trace_id = args.trace_id
+    else:
+        trace = record_pack_trace(
+            db_path,
+            markdown=markdown,
+            report=report["packed_report"],
+            repo_path=repo,
+            workflow="experiments.compare",
+        )
+        trace_id = trace.trace_id
+    report["trace_id"] = trace_id
+
+    markdown_report = _format_experiment_comparison_markdown(report)
+    if args.output is not None:
+        _write_report(report, args.output)
+    if args.markdown_output is not None:
+        args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown_output.write_text(markdown_report, encoding="utf-8")
+
+    record_trace_artifact(
+        db_path,
+        trace_id,
+        kind="experiment_comparison",
+        content=json.dumps(report, indent=2),
+        path=args.output,
+        metadata={"workflow": "experiments.compare", "format": "json"},
+    )
+    record_trace_artifact(
+        db_path,
+        trace_id,
+        kind="experiment_comparison_markdown",
+        content=markdown_report,
+        path=args.markdown_output,
+        metadata={"workflow": "experiments.compare", "format": "markdown"},
+    )
+    packed_variant = next(item for item in report["variants"] if item["variant_id"] == "packed_text")
+    record_trace_span(
+        db_path,
+        trace_id,
+        name="Experiment comparison",
+        kind="experiment.compare",
+        input_tokens=int(packed_variant["prompt_tokens"]),
+        metadata={
+            "variant_count": len(report["variants"]),
+            "best_reduction_percent": max(
+                float(item["reduction_percent_vs_full_scan"]) for item in report["variants"]
+            ),
+        },
+    )
+
+    if args.summary:
+        print(markdown_report)
+    else:
+        print(json.dumps(report, indent=2))
+    print(f"Experiment comparison attached to trace {trace_id}", file=sys.stderr)
+
+
+def _run_provider(args: argparse.Namespace) -> None:
+    if args.provider_command != "import":
+        raise SystemExit(f"Unknown provider command: {args.provider_command}")
+    raw_payload = json.loads(args.records.read_text(encoding="utf-8"))
+    pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
+    try:
+        records = normalize_provider_records_payload(raw_payload, pricing)
+    except ValueError:
+        if isinstance(raw_payload, dict) and any(
+            key in raw_payload
+            for key in ("input_tokens", "prompt_tokens", "usage", "request_cost_usd")
+        ):
+            records = normalize_provider_records_payload([raw_payload], pricing)
+        else:
+            raise
+    db_path = _observability_db_from_args(args, args.repo)
+    try:
+        summary = import_provider_usage_records(
+            db_path,
+            records,
+            trace_id=args.trace_id,
+            provider=args.provider,
+            reconciliation_status=args.reconciliation_status,
+        )
+    except KeyError as exc:
+        raise SystemExit(f"Trace not found: {exc.args[0]}") from exc
+    if args.as_json:
+        print(json.dumps(summary, indent=2))
+        return
+    lines = [
+        "AgenVantage provider usage imported.",
+        "",
+        f"Records: {summary['imported_count']}",
+        f"Traces:  {', '.join(summary['trace_ids']) if summary['trace_ids'] else 'none'}",
+        f"Input tokens:  {summary['total_input_tokens']:,}",
+        f"Cached tokens: {summary['total_cached_input_tokens']:,}",
+        f"Output tokens: {summary['total_output_tokens']:,}",
+        f"Reported/estimated request cost: ${summary['total_request_cost_usd']:.8f}",
+        f"Reconciliation: {summary['reconciliation_status']}",
+        "",
+        "Claim boundary:",
+        "  Imported provider usage is stored separately from local estimates.",
+        "  Treat cost as billed proof only when reconciliation status reflects provider billing evidence.",
+    ]
+    print("\n".join(lines))
+
+
+def _normalize_agent_command(command: list[str]) -> list[str]:
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise SystemExit('Agent run requires a command after "--".')
+    return command
+
+
+def _run_agent(args: argparse.Namespace) -> None:
+    if args.agent_command != "run":
+        raise SystemExit(f"Unknown agent command: {args.agent_command}")
+    command = _normalize_agent_command(list(args.external_command))
+    markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
+    repo = Path(settings["repos"][0])
+    db_path = _observability_db_from_args(args, repo)
+    trace = record_pack_trace(
+        db_path,
+        markdown=markdown,
+        report=report,
+        repo_path=repo,
+        workflow="agent.run",
+        artifact_paths={"markdown": args.handoff_file, "manifest": None},
+    )
+    if args.handoff_file is not None:
+        args.handoff_file.parent.mkdir(parents=True, exist_ok=True)
+        args.handoff_file.write_text(markdown, encoding="utf-8")
+
+    started = time.time()
+    completed = subprocess.run(
+        command,
+        cwd=repo,
+        input=None if args.no_stdin else markdown,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    duration_ms = max((time.time() - started) * 1000, 0.0)
+    record_trace_span(
+        db_path,
+        trace.trace_id,
+        name="External agent command",
+        kind="agent.external",
+        duration_ms=duration_ms,
+        input_tokens=trace.packed_prompt_tokens,
+        metadata={
+            "command": command,
+            "exit_code": completed.returncode,
+            "stdin_handoff": not args.no_stdin,
+        },
+    )
+    record_trace_artifact(
+        db_path,
+        trace.trace_id,
+        kind="agent_stdout",
+        content=completed.stdout,
+        metadata={"command": command, "exit_code": completed.returncode},
+    )
+    record_trace_artifact(
+        db_path,
+        trace.trace_id,
+        kind="agent_stderr",
+        content=completed.stderr,
+        metadata={"command": command, "exit_code": completed.returncode},
+    )
+    if completed.returncode == 0:
+        annotate_trace(
+            db_path,
+            trace.trace_id,
+            label="agent_succeeded",
+            note="External command exited with status 0.",
+        )
+    else:
+        annotate_trace(
+            db_path,
+            trace.trace_id,
+            label="agent_failed",
+            note=f"External command exited with status {completed.returncode}.",
+        )
+
+    print(
+        "\n".join(
+            [
+                "AgenVantage agent run recorded.",
+                "",
+                f"Trace: {trace.trace_id}",
+                f"Command: {' '.join(command)}",
+                f"Exit code: {completed.returncode}",
+                f"Duration: {duration_ms:.2f} ms",
+                f"Context: {trace.packed_prompt_tokens:,} packed tokens; "
+                f"{trace.tokens_saved:,} saved vs full scan",
+                f"Next: agenvantage traces show {trace.trace_id}",
+            ]
+        )
+    )
+    if completed.stdout:
+        print("\n--- stdout ---")
+        print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n")
+    if completed.stderr:
+        print("\n--- stderr ---", file=sys.stderr)
+        print(completed.stderr, end="" if completed.stderr.endswith("\n") else "\n", file=sys.stderr)
+    if completed.returncode != 0 and not args.allow_failure:
+        raise SystemExit(completed.returncode)
+
+
+def _format_session_init_summary(session: dict[str, Any], output: Path) -> str:
+    cache = session.get("cache", {})
+    prompt_accounting = session.get("prompt_token_accounting", {})
+    lines = [
+        "AgenVantage feature session",
+        "",
+        f"Session: {session['session_id']}",
+        f"Output:  {output.resolve()}",
+        f"Repos:   {len(session.get('repo_paths', []))}",
+        f"Stable prefix: {cache.get('stable_prefix_tokens', 0)} tokens",
+        f"Initial dynamic packet: {cache.get('initial_dynamic_packet_tokens', 0)} tokens",
+        f"Initial prompt: {cache.get('initial_prompt_tokens', 0)} tokens",
+        (
+            "Cache eligible: "
+            f"{cache.get('cache_eligible')} "
+            f"(minimum {cache.get('minimum_cacheable_prefix_tokens', 0)} stable-prefix tokens)"
+        ),
+        f"Reusable prefix share: {cache.get('initial_reusable_prefix_percent', 0.0)}%",
+    ]
+    if prompt_accounting:
+        lines.append(
+            "Packed vs full scan: "
+            f"{prompt_accounting.get('packed_prompt_tokens', 0)} / "
+            f"{prompt_accounting.get('full_scan_prompt_tokens', 0)} tokens "
+            f"({prompt_accounting.get('prompt_reduction_percent_vs_full_scan', 0.0)}% saved)"
+        )
+    safety = session.get("safety", {})
+    if safety.get("selected_secret_redaction_count"):
+        lines.append(
+            "Safety: "
+            f"redacted {safety['selected_secret_redaction_count']} secret-looking value(s)"
+        )
+    return "\n".join(lines)
+
+
+def _format_session_task_summary(task_artifact: dict[str, Any]) -> str:
+    cache = task_artifact["cache"]
+    return "\n".join(
+        [
+            "AgenVantage feature session task",
+            "",
+            f"Session: {task_artifact.get('session_id')}",
+            f"Stable prefix: {cache['stable_prefix_tokens']} tokens",
+            f"Dynamic packet: {cache['dynamic_packet_tokens']} tokens",
+            f"Prompt: {cache['prompt_tokens']} tokens",
+            (
+                "Cache eligible: "
+                f"{cache['cache_eligible']} "
+                f"(minimum {cache['minimum_cacheable_prefix_tokens']} stable-prefix tokens)"
+            ),
+            f"Reusable prefix share: {cache['reusable_prefix_percent']}%",
+            (
+                "Estimated warm-call uncached input: "
+                f"{cache['estimated_uncached_tokens_after_cache_hit']} tokens "
+                "(provider cache hit still must be verified live)"
+            ),
+        ]
+    )
+
+
+def _run_session(args: argparse.Namespace) -> None:
+    if args.session_command == "init":
+        settings = _resolve_pack_settings(args, default_preset="feature")
+        preset = settings["preset"]
+        repos = settings["repos"]
+        counter = TokenCounter(settings["model"])
+        session = create_feature_session(
+            repos,
+            args.task,
+            settings["budget"],
+            counter,
+            top_k=settings["top_k"],
+            instructions=preset.instructions,
+            include_diff=settings["include_diff"],
+            include_log=settings["include_log"],
+            include_globs=settings["include_globs"],
+            exclude_globs=settings["exclude_globs"],
+            session_id=args.session_id,
+        )
+        output = args.output or default_session_path(repos[0], str(session["session_id"]))
+        save_session_artifact(session, output)
+        if args.as_json:
+            print(json.dumps(session, indent=2))
+            print(f"Session written to {output.resolve()}", file=sys.stderr)
+        else:
+            print(_format_session_init_summary(session, output))
+        return
+
+    if args.session_command == "task":
+        session = load_session_artifact(args.session)
+        model = args.model or (session.get("settings") or {}).get("model") or _DEFAULT_PACK_MODEL
+        task_artifact = build_session_task(session, args.task, TokenCounter(model))
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(task_artifact["prompt_markdown"], encoding="utf-8")
+        if args.manifest is not None:
+            _write_report(task_artifact, args.manifest)
+
+        if args.stdout:
+            print(task_artifact["prompt_markdown"])
+        elif args.as_json:
+            print(json.dumps(task_artifact, indent=2))
+        else:
+            print(_format_session_task_summary(task_artifact))
+
+        notices: list[str] = []
+        if args.copy:
+            if _copy_to_clipboard(task_artifact["prompt_markdown"]):
+                notices.append("Session prompt copied to clipboard.")
+            else:
+                notices.append("Could not access a clipboard tool; use --stdout or --output instead.")
+        if args.output is not None:
+            notices.append(f"Session prompt written to {args.output.resolve()}")
+        if args.manifest is not None:
+            notices.append(f"Session task manifest written to {args.manifest.resolve()}")
+        if notices:
+            if args.stdout or args.as_json:
+                for notice in notices:
+                    print(notice, file=sys.stderr)
+            else:
+                print()
+                for notice in notices:
+                    print(notice)
+        return
+
+    raise SystemExit(f"Unknown session command: {args.session_command}")
+
+
+def _format_recoverable_block_list(blocks: list[dict[str, Any]]) -> str:
+    if not blocks:
+        return "No recoverable blocks were recorded in this manifest."
+    lines = ["Recoverable blocks:"]
+    for block in blocks:
+        line = f"  {block.get('id', '<missing-id>')}"
+        path = block.get("path")
+        if path:
+            line += f"  {path}"
+            start = block.get("start_line")
+            end = block.get("end_line")
+            if start and end:
+                line += f"#L{start}-L{end}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _format_artifact_verification(summary: dict[str, Any]) -> str:
+    status = "passed" if summary["ok"] else "failed"
+    lines = [
+        f"Artifact verification {status}",
+        f"Recoverable blocks: {summary['recoverable_block_count']}",
+        f"Image attachments: {summary['image_attachment_count']}",
+        f"Factsheets: {summary.get('factsheet_count', 0)}",
+        f"Errors: {summary['error_count']}",
+    ]
+    if summary.get("artifact_bundle_expected_sha256"):
+        bundle_status = "verified" if summary.get("artifact_bundle_verified") else "failed"
+        lines.append(f"Artifact bundle: {bundle_status}")
+    for error in summary["errors"]:
+        lines.append(f"- {error}")
+    return "\n".join(lines)
+
+
+def _run_rehydrate(args: argparse.Namespace) -> None:
+    try:
+        blocks = recoverable_blocks_from_manifest(args.manifest)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    if args.verify:
+        try:
+            summary = verify_mixed_modality_manifest(args.manifest)
+        except (FileNotFoundError, ValueError) as exc:
+            raise SystemExit(str(exc)) from exc
+        print(_format_artifact_verification(summary))
+        if not summary["ok"]:
+            raise SystemExit(1)
+        if not args.recoverable_id and not args.list:
+            return
+    if args.list:
+        print(_format_recoverable_block_list(blocks))
+        return
+    if not args.recoverable_id:
+        raise SystemExit("Rehydrate requires --id unless --list is used.")
+    block = next((item for item in blocks if item.get("id") == args.recoverable_id), None)
+    if block is None:
+        available = ", ".join(str(item.get("id")) for item in blocks[:8] if item.get("id"))
+        hint = f" Available ids: {available}" if available else ""
+        raise SystemExit(f"Recoverable block not found: {args.recoverable_id}.{hint}")
+    try:
+        text_path = resolve_recoverable_text_path(args.manifest, block)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if not text_path.is_file():
+        raise SystemExit(f"Recoverable source file not found: {text_path}")
+    errors = verify_recoverable_block(args.manifest, block)
+    if errors:
+        raise SystemExit(errors[0])
+    text = text_path.read_text(encoding="utf-8")
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text, encoding="utf-8")
+        print(f"Recovered source written to {args.output.resolve()}")
+    else:
+        print(text, end="" if text.endswith("\n") else "\n")
 
 
 def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
@@ -921,6 +2991,89 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _run_feature_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
+    if args.trace_console:
+        configure_console_tracing()
+
+    counter = TokenCounter(args.model)
+    pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
+
+    if args.replay is not None:
+        if not args.replay.is_file():
+            raise SystemExit(f"Replay report not found: {args.replay}")
+        replay_report = json.loads(args.replay.read_text(encoding="utf-8"))
+        report = summarize_saved_feature_provider_validation_report(
+            replay_report,
+            pricing=pricing,
+            environment_scope=args.environment_scope,
+        )
+    elif args.normalize is not None:
+        if not args.normalize.is_file():
+            raise SystemExit(f"Normalization input not found: {args.normalize}")
+        raw_payload = json.loads(args.normalize.read_text(encoding="utf-8"))
+        report = summarize_normalized_provider_validation_payload(
+            raw_payload,
+            pricing=pricing,
+            environment_scope=args.environment_scope,
+        )
+        report["workflow"] = "feature_provider_validation"
+    else:
+        if not args.fixture.is_file():
+            raise SystemExit(f"Feature-provider fixture not found: {args.fixture}")
+        dataset = load_feature_provider_dataset(args.fixture)
+        if args.dry_run:
+            report = feature_provider_fixture_readiness_report(
+                dataset,
+                args.repos_root,
+                counter,
+                max_cases=args.max_cases,
+                pricing=pricing,
+            )
+        else:
+            if pricing is None:
+                raise SystemExit("Live feature-provider validation requires --pricing.")
+            api_key = os.getenv(args.api_key_env)
+            if not api_key:
+                raise SystemExit(
+                    f"Live feature-provider validation requires {args.api_key_env} to be set."
+                )
+            report = run_feature_provider_validation(
+                dataset,
+                args.repos_root,
+                counter,
+                OpenAIResponsesTransport(api_key=api_key, base_url=args.base_url),
+                args.model,
+                pricing,
+                repeats=args.repeats,
+                max_cases=args.max_cases,
+                environment_scope=args.environment_scope,
+            )
+
+    if args.reconcile_costs is not None:
+        if not args.reconcile_costs.is_file():
+            raise SystemExit(f"Costs reconciliation input not found: {args.reconcile_costs}")
+        costs_payload = json.loads(args.reconcile_costs.read_text(encoding="utf-8"))
+        report["cost_reconciliation"] = reconcile_provider_costs(report, costs_payload)
+
+    if args.summary:
+        if args.dry_run and args.replay is None and args.normalize is None:
+            print(_format_feature_provider_fixture_summary(report))
+        else:
+            print(_format_feature_provider_validation_summary(report))
+    else:
+        print(json.dumps(report, indent=2))
+
+    if args.records is not None:
+        _write_report(report, args.records)
+        print(f"\nReport written to {args.records.resolve()}")
+    if args.otel_export is not None:
+        _write_report(provider_validation_report_to_otel_export(report), args.otel_export)
+        print(f"OTLP-style export written to {args.otel_export.resolve()}")
+
+    flush_tracing()
+    return report
+
+
 def main() -> None:
     load_dotenv()
     args = _parser().parse_args()
@@ -942,8 +3095,38 @@ def main() -> None:
     if args.command == "pack":
         _run_pack(args)
         return
+    if args.command == "observe":
+        _run_observe(args)
+        return
+    if args.command == "traces":
+        _run_traces(args)
+        return
+    if args.command == "dashboard":
+        _run_observability_dashboard(args)
+        return
+    if args.command == "checkup":
+        _run_checkup(args)
+        return
+    if args.command == "experiments":
+        _run_experiments(args)
+        return
+    if args.command == "provider":
+        _run_provider(args)
+        return
+    if args.command == "agent":
+        _run_agent(args)
+        return
+    if args.command == "session":
+        _run_session(args)
+        return
+    if args.command == "rehydrate":
+        _run_rehydrate(args)
+        return
     if args.command == "validate-provider":
         _run_provider_validation(args)
+        return
+    if args.command == "validate-feature-provider":
+        _run_feature_provider_validation(args)
         return
 
     _run_experiment(

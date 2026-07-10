@@ -1,0 +1,90 @@
+{
+  "project": "AgenVantage",
+  "scenario_id": "mock-code-review-context",
+  "scenario_description": "Mock report for testing the policy explorer dashboard. A coding assistant asks to review an API rate limiter; context is assembled from instructions, tools, source chunks, and docs.",
+  "tokenizer": {
+    "model": "gpt-4o-mini",
+    "encoding": "o200k_base"
+  },
+  "measurement_notes": [
+    "This is sample data for manual dashboard testing.",
+    "Token counts are illustrative, not from a real repository scan.",
+    "Upload this file via the dashboard file picker after running agenvantage view."
+  ],
+  "policies": [
+    {
+      "policy": "full",
+      "input_tokens": 2140,
+      "stable_prefix_tokens": 420,
+      "budget": null,
+      "included_components": [
+        "system-instructions",
+        "tool-schemas",
+        "user-question",
+        "auth-middleware",
+        "rate-limiter-core",
+        "rate-limiter-tests",
+        "redis-client-wrapper",
+        "readme-docs",
+        "unrelated-legacy-module"
+      ],
+      "excluded_components": [],
+      "metadata": {},
+      "tokens_saved_vs_full": 0,
+      "token_reduction_percent_vs_full": 0.0
+    },
+    {
+      "policy": "cache_aligned",
+      "input_tokens": 2140,
+      "stable_prefix_tokens": 610,
+      "budget": null,
+      "included_components": [
+        "system-instructions",
+        "tool-schemas",
+        "auth-middleware",
+        "rate-limiter-core",
+        "rate-limiter-tests",
+        "redis-client-wrapper",
+        "user-question",
+        "readme-docs",
+        "unrelated-legacy-module"
+      ],
+      "excluded_components": [],
+      "metadata": {
+        "ordering": "stable components first, dynamic components last"
+      },
+      "tokens_saved_vs_full": 0,
+      "token_reduction_percent_vs_full": 0.0
+    },
+    {
+      "policy": "budgeted",
+      "input_tokens": 1685,
+      "stable_prefix_tokens": 610,
+      "budget": 1800,
+      "included_components": [
+        "system-instructions",
+        "tool-schemas",
+        "auth-middleware",
+        "rate-limiter-core",
+        "rate-limiter-tests",
+        "redis-client-wrapper",
+        "user-question"
+      ],
+      "excluded_components": [
+        {
+          "id": "readme-docs",
+          "reason": "exceeds token budget"
+        },
+        {
+          "id": "unrelated-legacy-module",
+          "reason": "low relevance to rate limiter review"
+        }
+      ],
+      "metadata": {
+        "selection": "required then priority, relevance, and stability"
+      },
+      "tokens_saved_vs_full": 455,
+      "token_reduction_percent_vs_full": 21.26
+    }
+  ]
+}

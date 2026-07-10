@@ -4,6 +4,7 @@ import argparse
 import json
 import re
 import statistics
+import time
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +121,7 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
     if not repo_path.is_dir():
         raise FileNotFoundError(f"Required benchmark repository is missing: {repo_path}")
 
+    started = time.perf_counter()
     _, report = build_context_package(
         repo_path,
         str(case["task"]),
@@ -128,6 +130,7 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
         top_k=int(case.get("top_k", 28)),
         workflow="feature",
     )
+    pack_runtime_ms = round((time.perf_counter() - started) * 1000, 2)
 
     change_surface = report.get("change_surface") or {}
     selected_paths = _selected_paths(report)
@@ -189,6 +192,7 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
         "prompt_tokens_saved_vs_full_scan": report["prompt_token_accounting"][
             "prompt_tokens_saved_vs_full_scan"
         ],
+        "pack_runtime_ms": pack_runtime_ms,
         "token_reduction_percent": report["local_reduction_percent_vs_candidate_context"],
         "edit_target_recall": round(edit_recall, 4),
         "test_target_recall": round(test_recall, 4),
@@ -214,6 +218,7 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
     prompt_tokens_saved = [case["prompt_tokens_saved_vs_full_scan"] for case in cases]
     packed_prompt_tokens = [case["packed_prompt_tokens"] for case in cases]
     full_scan_prompt_tokens = [case["full_scan_prompt_tokens"] for case in cases]
+    pack_runtimes = [case["pack_runtime_ms"] for case in cases]
     summary = {
         "case_count": len(cases),
         "repositories": sorted({case["repository"] for case in cases}),
@@ -250,6 +255,12 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
         "mean_selected_chunk_count": round(
             _mean([case["selected_chunk_count"] for case in cases]), 2
         ),
+        "median_pack_runtime_ms": round(
+            statistics.median(pack_runtimes) if pack_runtimes else 0.0,
+            2,
+        ),
+        "mean_pack_runtime_ms": round(_mean(pack_runtimes), 2),
+        "total_pack_runtime_ms": round(sum(pack_runtimes), 2),
         "missing_signal_warning_rate": round(
             _mean([1.0 if case["has_missing_signal_warning"] else 0.0 for case in cases]), 4
         ),
@@ -293,6 +304,8 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Median prompt tokens saved: `{summary['median_prompt_tokens_saved_vs_full_scan']}`",
         f"- Total prompt tokens saved: `{summary['total_prompt_tokens_saved_vs_full_scan']}`",
         f"- Mean selected chunks: `{summary['mean_selected_chunk_count']}`",
+        f"- Median pack runtime: `{summary['median_pack_runtime_ms']}` ms",
+        f"- Total pack runtime: `{summary['total_pack_runtime_ms']}` ms",
         f"- Missing-signal warning rate: `{summary['missing_signal_warning_rate']}`",
         f"- Acceptance pass: `{summary['acceptance']['overall_pass']}`",
         "",
@@ -312,6 +325,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Token reduction: `{case['token_reduction_percent']}%`",
                 f"- Prompt tokens: user `{case['original_user_prompt_tokens']}`, full-scan `{case['full_scan_prompt_tokens']}`, packed `{case['packed_prompt_tokens']}`",
                 f"- Prompt tokens saved: `{case['prompt_tokens_saved_vs_full_scan']}`",
+                f"- Pack runtime: `{case['pack_runtime_ms']}` ms",
                 f"- Surface edit targets: `{case['surface_edit_targets']}`",
                 f"- Surface test targets: `{case['surface_test_targets']}`",
                 f"- Selected files: `{case['selected_unique_paths'][:8]}`",

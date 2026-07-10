@@ -76,6 +76,49 @@ The current strong-cost claim is most credible when:
 
 ## Recommended Run Sequence
 
+### 0. Dry-Run Feature-Work Prompt Savings
+
+Before spending API quota, verify the feature-work prompt variants locally:
+
+```bash
+.venv/bin/python -m agenvantage validate-feature-provider \
+  --pricing artifacts/openai-pricing.json \
+  --dry-run \
+  --summary
+```
+
+This compares the same annotated feature tasks under:
+
+- `full_unaligned`: full scanned repository prompt;
+- `full_cache_aligned`: full scanned repository prompt with reusable content before the task;
+- `budgeted_unaligned`: AgenVantage-packed prompt; and
+- `budgeted_cache_aligned`: AgenVantage-packed prompt with reusable content before the task.
+
+With `--pricing`, the dry run also estimates cold and warm input-only costs from
+the exact prompt variants. Those are useful for planning the experiment, but
+they are still not provider-billed cost savings, cache hits, latency, or answer
+quality.
+
+For repeated feature work, verify that a stable prefix can be reused before
+running live calls:
+
+```bash
+.venv/bin/python -m agenvantage session init \
+  --repo . \
+  --task "Add memory search diagnostics and test coverage." \
+  --output .agenvantage/sessions/memory-search.json
+
+.venv/bin/python -m agenvantage session task \
+  --session .agenvantage/sessions/memory-search.json \
+  --task "Add an empty-result diagnostic counter." \
+  --json
+```
+
+The session task report shows the reusable stable-prefix token count and the
+estimated uncached dynamic-packet tokens for a warm provider call. Treat those
+as layout readiness metrics until provider response usage confirms actual
+cached input tokens.
+
 ### 1. Prepare Pricing
 
 ```bash
@@ -107,6 +150,27 @@ This does four important things at once:
 - saves raw request records with token usage and deterministic grades;
 - emits live OpenTelemetry request spans to the console; and
 - writes an OTLP-style export that can be replayed later.
+
+For the production-path feature-work proof, run the feature-provider harness:
+
+```bash
+export OPENAI_API_KEY=...
+
+.venv/bin/python -m agenvantage validate-feature-provider \
+  --pricing artifacts/openai-pricing.json \
+  --records artifacts/feature-provider-validation.json \
+  --otel-export artifacts/feature-provider-validation-otel.json \
+  --trace-console \
+  --summary
+```
+
+This sends the full-scan and AgenVantage-packed feature prompts through the same
+provider response schema, stores provider-reported usage, grades whether the
+model identified the right edit/test files and required observations, and keeps
+the records compatible with the existing claim-status gate.
+
+To limit spend while debugging the harness, add `--max-cases 1` or `--max-cases
+3`. Do not use a limited smoke run as resume evidence.
 
 ### 3. Export Organization Costs
 
@@ -207,5 +271,9 @@ these exist:
 - `artifacts/openai-pricing.json`
 - `artifacts/provider-validation.json`
 - `artifacts/provider-validation-otel.json`
+- `artifacts/feature-provider-validation.json` when proving feature-work cost
+  savings
+- `artifacts/feature-provider-validation-otel.json` when proving feature-work
+  cost savings
 - `artifacts/openai-costs.json`
 - `docs/claim-status.md` showing `proved_real_api_cost_savings = True`

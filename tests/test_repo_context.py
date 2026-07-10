@@ -31,6 +31,11 @@ def create_sample_repo(root: Path) -> None:
     (root / "node_modules" / "library.ts").write_text(
         "rateLimiter secret dependency noise\n", encoding="utf-8"
     )
+    (root / "artifacts").mkdir()
+    (root / "artifacts" / "feature-work-validation.json").write_text(
+        '{"generated": "benchmark output should not become context"}\n',
+        encoding="utf-8",
+    )
 
 
 def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> None:
@@ -39,6 +44,7 @@ def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> 
     assert "src/rateLimiter.ts" in files
     assert ".env" not in files
     assert "node_modules/library.ts" not in files
+    assert "artifacts/feature-work-validation.json" not in files
 
 
 def test_source_files_include_shell_scripts(tmp_path: Path) -> None:
@@ -418,6 +424,59 @@ def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:
         "local_tokens_omitted_vs_candidate_context"
     ]
     assert "redis" in report["covered_query_terms"]
+
+
+def test_full_scan_token_accounting_matches_rendered_prompt(tmp_path: Path) -> None:
+    create_sample_repo(tmp_path)
+    counter = TokenCounter()
+
+    _, report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=220,
+        counter=counter,
+        include_full_scan_prompt=True,
+    )
+
+    assert (
+        counter.count(report["full_scan_prompt_markdown"])
+        == report["prompt_token_accounting"]["full_scan_prompt_tokens"]
+    )
+
+
+def test_context_package_redacts_secret_values_before_rendering(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    raw_secret = "sk-prod1234567890abcdef"
+    raw_bearer = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    (tmp_path / "src" / "payment.ts").write_text(
+        "export const paymentConfig = {\n"
+        f"  OPENAI_API_KEY: \"{raw_secret}\",\n"
+        f"  Authorization: \"Bearer {raw_bearer}\",\n"
+        "  endpoint: \"https://api.example.test/payments\"\n"
+        "};\n",
+        encoding="utf-8",
+    )
+
+    markdown, report = build_context_package(
+        tmp_path,
+        "Explain payment config api key handling",
+        budget=700,
+        counter=TokenCounter(),
+        include_full_scan_prompt=True,
+    )
+
+    selected_chunk = report["selected_chunks"][0]
+    assert raw_secret not in markdown
+    assert raw_bearer not in markdown
+    assert raw_secret not in report["full_scan_prompt_markdown"]
+    assert raw_bearer not in report["full_scan_prompt_markdown"]
+    assert "OPENAI_API_KEY" in markdown
+    assert "[REDACTED_OPENAI_KEY]" in markdown
+    assert "Bearer [REDACTED_BEARER_TOKEN]" in markdown
+    assert selected_chunk["redaction_count"] == 2
+    assert selected_chunk["redaction_types"] == ["bearer_token", "openai_api_key"]
+    assert report["safety"]["selected_secret_redaction_count"] == 2
+    assert report["safety"]["candidate_secret_redaction_count"] == 2
 
 
 def test_context_package_excludes_weak_single_term_noise(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import re
 import subprocess
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -59,6 +60,7 @@ _IGNORED_PARTS = {
     ".git",
     ".venv",
     "__pycache__",
+    "artifacts",
     "build",
     "coverage",
     "dist",
@@ -163,6 +165,82 @@ _FEATURE_RESERVED_COUNTS = {
     "config_targets": 1,
     "supporting_targets": 1,
 }
+# Feature packs should stop after high-signal edit/test/config coverage instead
+# of spending the caller's whole budget on low-marginal repository context.
+_FEATURE_TARGET_CONTEXT_BUDGET = 1_800
+_FEATURE_CHUNK_OVERLAP_LINES = 4
+_PRIVATE_KEY_BLOCK_PATTERN = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+    re.IGNORECASE | re.DOTALL,
+)
+_SECRET_VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    (
+        "openai_api_key",
+        re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+        "[REDACTED_OPENAI_KEY]",
+    ),
+    (
+        "github_token",
+        re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b"),
+        "[REDACTED_GITHUB_TOKEN]",
+    ),
+    (
+        "github_fine_grained_token",
+        re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
+        "[REDACTED_GITHUB_TOKEN]",
+    ),
+    (
+        "aws_access_key",
+        re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+        "[REDACTED_AWS_ACCESS_KEY]",
+    ),
+    (
+        "bearer_token",
+        re.compile(r"(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}\b"),
+        r"\1[REDACTED_BEARER_TOKEN]",
+    ),
+)
+_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"""(?im)
+    \b
+    (?P<key>[A-Z0-9_.-]*
+        (?:
+            API[_-]?KEY
+            |SECRET
+            |TOKEN
+            |PASSWORD
+            |PASSWD
+            |PRIVATE[_-]?KEY
+            |CLIENT[_-]?SECRET
+            |DATABASE[_-]?URL
+            |AUTHORIZATION
+        )
+        [A-Z0-9_.-]*
+    )
+    (?P<sep>\s*[:=]\s*)
+    (?P<quote>['"]?)
+    (?P<value>[^'"\s#,\]}]+)
+    (?P=quote)
+    """,
+    re.VERBOSE,
+)
+_CAMEL_BOUNDARY_PATTERN = re.compile(r"([a-z0-9])([A-Z])")
+_TERM_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,}")
+_SECRET_ASSIGNMENT_MARKERS = (
+    "api_key",
+    "apikey",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "private_key",
+    "private-key",
+    "client_secret",
+    "client-secret",
+    "database_url",
+    "database-url",
+    "authorization",
+)
 
 
 @dataclass(frozen=True)
@@ -175,14 +253,18 @@ class CodeChunk:
     start_line: int
     end_line: int
     text: str
+    # Token count for the separator-wrapped block as inserted into prompts.
     tokens: int
     chunk_symbols: tuple[str, ...] = ()
     file_symbols: tuple[str, ...] = ()
     file_imports: tuple[str, ...] = ()
     file_local_import_paths: tuple[str, ...] = ()
     file_imported_by_paths: tuple[str, ...] = ()
+    redaction_count: int = 0
+    redaction_types: tuple[str, ...] = ()
     score: float = 0.0
     matched_terms: tuple[str, ...] = ()
+    addition_tokens: int = 0
 
     def render(self) -> str:
         return (
@@ -200,6 +282,8 @@ class CodeChunk:
             "start_line": self.start_line,
             "end_line": self.end_line,
             "tokens": self.tokens,
+            "redaction_count": self.redaction_count,
+            "redaction_types": list(self.redaction_types),
             "score": round(self.score, 3),
             "matched_terms": list(self.matched_terms),
         }
@@ -218,6 +302,7 @@ def _language_for_path(relative_path: str) -> str:
     )
 
 
+@lru_cache(maxsize=16_384)
 def _term_variants(term: str) -> tuple[str, ...]:
     variants = {term, *(piece for piece in term.split("-") if piece and piece != term)}
     for candidate in tuple(variants):
@@ -237,18 +322,18 @@ def _term_variants(term: str) -> tuple[str, ...]:
 
 
 def _terms(value: str) -> list[str]:
-    split_camel = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value).replace("_", " ")
+    split_camel = _CAMEL_BOUNDARY_PATTERN.sub(r"\1 \2", value).replace("_", " ")
     terms: list[str] = []
-    for raw_term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", split_camel):
+    for raw_term in _TERM_PATTERN.findall(split_camel):
         term = raw_term.lower()
         terms.extend(_term_variants(term))
     return terms
 
 
 def _query_concepts(value: str) -> tuple[tuple[str, set[str]], ...]:
-    split_camel = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value).replace("_", " ")
+    split_camel = _CAMEL_BOUNDARY_PATTERN.sub(r"\1 \2", value).replace("_", " ")
     concepts: list[tuple[str, set[str]]] = []
-    for raw_term in re.findall(r"[A-Za-z][A-Za-z0-9_-]{1,}", split_camel):
+    for raw_term in _TERM_PATTERN.findall(split_camel):
         label = raw_term.lower()
         if len(label) <= 1 or label in _STOP_WORDS:
             continue
@@ -268,6 +353,52 @@ def _ordered_unique(values: Iterable[str], limit: int) -> tuple[str, ...]:
         if len(ordered) >= limit:
             break
     return tuple(ordered)
+
+
+def _redact_sensitive_text(text: str) -> tuple[str, dict[str, int]]:
+    redaction_counts: Counter[str] = Counter()
+
+    def _replace_private_key(match: re.Match[str]) -> str:
+        redaction_counts["private_key_block"] += 1
+        line_count = match.group(0).count("\n") + 1
+        return "\n".join(
+            ["[REDACTED_PRIVATE_KEY]"]
+            + ["[REDACTED_PRIVATE_KEY_CONTINUED]"] * (line_count - 1)
+        )
+
+    def _replace_assignment(match: re.Match[str]) -> str:
+        value = match.group("value")
+        if value.startswith("[REDACTED_"):
+            return match.group(0)
+        redaction_counts["secret_assignment"] += 1
+        quote = match.group("quote")
+        return f"{match.group('key')}{match.group('sep')}{quote}[REDACTED_SECRET]{quote}"
+
+    redacted = text
+    lowered = text.lower()
+    if "private key" in lowered:
+        redacted = _PRIVATE_KEY_BLOCK_PATTERN.sub(_replace_private_key, redacted)
+    for label, pattern, replacement in _SECRET_VALUE_PATTERNS:
+        if (
+            (label == "openai_api_key" and "sk-" not in redacted)
+            or (
+                label == "github_token"
+                and not any(
+                    marker in redacted
+                    for marker in ("ghp_", "gho_", "ghu_", "ghs_", "ghr_")
+                )
+            )
+            or (label == "github_fine_grained_token" and "github_pat_" not in redacted)
+            or (label == "aws_access_key" and "AKIA" not in redacted)
+            or (label == "bearer_token" and "bearer" not in redacted.lower())
+        ):
+            continue
+        redacted, count = pattern.subn(replacement, redacted)
+        if count:
+            redaction_counts[label] += count
+    if any(marker in lowered for marker in _SECRET_ASSIGNMENT_MARKERS):
+        redacted = _SECRET_ASSIGNMENT_PATTERN.sub(_replace_assignment, redacted)
+    return redacted, dict(redaction_counts)
 
 
 def _chunk_local_symbols(
@@ -372,25 +503,23 @@ def source_files(
     if not repo.is_dir():
         raise ValueError(f"Repository path does not exist: {repo}")
 
-    tracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "-z"],
+    git_files = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
         capture_output=True,
         check=False,
         text=True,
     )
-    untracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard", "-z"],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if tracked.returncode == 0 and untracked.returncode == 0:
-        git_paths = {
-            repo / item
-            for output in (tracked.stdout, untracked.stdout)
-            for item in output.split("\0")
-            if item
-        }
+    if git_files.returncode == 0:
+        git_paths = {repo / item for item in git_files.stdout.split("\0") if item}
         candidates = iter(git_paths)
     else:
         candidates = (path for path in repo.rglob("*") if path.is_file())
@@ -427,9 +556,14 @@ def chunks_for_repo(
     repo = repo.resolve()
     for path in files or source_files(repo):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            raw_text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
+        redacted_text, file_redactions = _redact_sensitive_text(raw_text)
+        original_lines = raw_text.splitlines()
+        lines = redacted_text.splitlines()
+        if len(original_lines) != len(lines):
+            original_lines = lines
         relative = path.relative_to(repo).as_posix()
         display_path = f"{repo_label}/{relative}" if repo_label else relative
         indexed_entry = file_index.get(relative) if file_index is not None else None
@@ -444,11 +578,16 @@ def chunks_for_repo(
                 continue
             end_line = start + len(content_lines)
             text = "\n".join(content_lines)
+            original_text = "\n".join(original_lines[start:end_line])
+            chunk_redactions = (
+                _redact_sensitive_text(original_text)[1] if file_redactions else {}
+            )
             chunk_id = f"{display_path}#L{start + 1}-L{end_line}"
             rendered = (
                 f"[SOURCE:{chunk_id}]\n"
                 f"```{_language_for_path(display_path)}\n{text.rstrip()}\n```"
             )
+            addition_tokens = counter.count(rendered + "\n\n")
             chunks.append(
                 CodeChunk(
                     chunk_id,
@@ -459,7 +598,7 @@ def chunks_for_repo(
                     start + 1,
                     end_line,
                     text,
-                    counter.count(rendered),
+                    addition_tokens,
                     _chunk_local_symbols(
                         symbol_occurrences,
                         start_line=start + 1,
@@ -469,6 +608,9 @@ def chunks_for_repo(
                     indexed_entry.imports if indexed_entry is not None else (),
                     indexed_entry.local_import_paths if indexed_entry is not None else (),
                     indexed_entry.imported_by_paths if indexed_entry is not None else (),
+                    sum(chunk_redactions.values()),
+                    tuple(sorted(chunk_redactions)),
+                    addition_tokens=addition_tokens,
                 )
             )
             if end_line == len(lines):
@@ -540,8 +682,11 @@ def rank_chunks(chunks: Iterable[CodeChunk], task: str) -> tuple[CodeChunk, ...]
                 chunk.file_imports,
                 chunk.file_local_import_paths,
                 chunk.file_imported_by_paths,
+                chunk.redaction_count,
+                chunk.redaction_types,
                 score,
                 matches,
+                chunk.addition_tokens,
             )
         )
     return tuple(
@@ -748,6 +893,7 @@ def build_multi_repo_context_package(
     include_globs: tuple[str, ...] = (),
     exclude_globs: tuple[str, ...] = (),
     workflow: str = "generic",
+    include_full_scan_prompt: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     if budget <= 0:
         raise ValueError("Token budget must be positive.")
@@ -786,6 +932,7 @@ def build_multi_repo_context_package(
         chunks = chunks_for_repo(
             repo_input.root,
             counter,
+            overlap_lines=_FEATURE_CHUNK_OVERLAP_LINES if workflow == "feature" else 8,
             files=files,
             repo_label=repo_input.label if len(repo_inputs) > 1 else None,
             file_index=index_result.entries,
@@ -834,6 +981,9 @@ def build_multi_repo_context_package(
         raise ValueError(
             f"Instructions and task use {required_tokens} tokens, exceeding budget {budget}."
         )
+    effective_budget = budget
+    if workflow == "feature" and budget > _FEATURE_TARGET_CONTEXT_BUDGET:
+        effective_budget = min(budget, max(_FEATURE_TARGET_CONTEXT_BUDGET, required_tokens))
 
     selected: list[CodeChunk] = []
     excluded: list[dict[str, Any]] = []
@@ -849,14 +999,32 @@ def build_multi_repo_context_package(
     selected_terms: set[str] = set()
     selected_dependency_targets: Counter[tuple[str, str]] = Counter()
     multiple_repos = len(repo_inputs) > 1
+    selected_budget_tokens = required_tokens
+    addition_token_cache: dict[str, tuple[str, int]] = {}
+
+    def _addition_for(chunk: CodeChunk) -> tuple[str, int]:
+        cached = addition_token_cache.get(chunk.chunk_id)
+        if cached is not None:
+            return cached
+        addition = chunk.render() + "\n\n"
+        # Budget checks use cached per-chunk additions instead of repeatedly
+        # tokenizing the full growing prompt. Final accounting below remains exact.
+        cached = (addition, chunk.addition_tokens or counter.count(addition))
+        addition_token_cache[chunk.chunk_id] = cached
+        return cached
+
+    def _fits_budget(addition_tokens: int, limit: int) -> bool:
+        return selected_budget_tokens + addition_tokens <= limit
+
     if change_surface is not None:
         for chunk in _select_feature_reserved_chunks(ranked, change_surface):
-            addition = chunk.render() + "\n\n"
-            if counter.count(rendered + addition) > budget:
+            addition, addition_tokens = _addition_for(chunk)
+            if not _fits_budget(addition_tokens, budget):
                 excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
                 continue
             selected.append(chunk)
             rendered += addition
+            selected_budget_tokens += addition_tokens
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
             selected_terms.update(chunk.matched_terms)
@@ -912,8 +1080,8 @@ def build_multi_repo_context_package(
         if chunk.score < _MIN_RELEVANCE_SCORE:
             excluded.append({"id": chunk.chunk_id, "reason": "below relevance threshold"})
             continue
-        addition = chunk.render() + "\n\n"
-        if counter.count(rendered + addition) <= budget:
+        addition, addition_tokens = _addition_for(chunk)
+        if _fits_budget(addition_tokens, effective_budget):
             selected.append(chunk)
             selected_paths[chunk.display_path] += 1
             selected_repos[chunk.repo_label] += 1
@@ -921,12 +1089,17 @@ def build_multi_repo_context_package(
             for local_import_path in chunk.file_local_import_paths:
                 selected_dependency_targets[(chunk.repo_label, local_import_path)] += 1
             rendered += addition
+            selected_budget_tokens += addition_tokens
         else:
-            excluded.append({"id": chunk.chunk_id, "reason": "exceeds token budget"})
+            excluded.append({"id": chunk.chunk_id, "reason": "exceeds effective token budget"})
 
     selected_tokens = counter.count(rendered)
-    full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
-    candidate_corpus_tokens = counter.count(full_rendered)
+    # The full-scan prompt is prefix + the same separator-wrapped chunk blocks.
+    # Counting those blocks additively avoids building and tokenizing a huge
+    # counterfactual prompt on normal runs while preserving the same accounting.
+    candidate_corpus_tokens = required_tokens + sum(
+        _addition_for(chunk)[1] for chunk in candidate_chunks
+    )
     user_prompt_tokens = counter.count(task)
     savings = candidate_corpus_tokens - selected_tokens
     packed_context_plus_instructions_tokens = max(selected_tokens - user_prompt_tokens, 0)
@@ -941,6 +1114,11 @@ def build_multi_repo_context_package(
     uncovered_terms = sorted(
         label for label, variants in query_concepts if not variants & matched_selected_terms
     )
+    candidate_redaction_count = sum(chunk.redaction_count for chunk in candidate_chunks)
+    selected_redaction_count = sum(chunk.redaction_count for chunk in selected)
+    selected_redaction_types = sorted(
+        {label for chunk in selected for label in chunk.redaction_types}
+    )
     report = {
         "project": "AgenVantage",
         "workflow": "repository_context_package",
@@ -948,6 +1126,7 @@ def build_multi_repo_context_package(
         "task": task,
         "tokenizer": {"model": counter.model, "encoding": counter.encoding_name},
         "budget": budget,
+        "effective_budget": effective_budget,
         "path_filters": {
             "include_globs": list(include_globs),
             "exclude_globs": list(exclude_globs),
@@ -956,6 +1135,7 @@ def build_multi_repo_context_package(
         "repos": repo_summaries,
         "scanned_files": sum(repo["scanned_files"] for repo in repo_summaries),
         "candidate_chunks": len(candidate_chunks),
+        "candidate_paths": sorted({chunk.display_path for chunk in candidate_chunks}),
         "candidate_context_tokens": candidate_corpus_tokens,
         "selected_context_tokens": selected_tokens,
         "local_tokens_omitted_vs_candidate_context": savings,
@@ -985,6 +1165,12 @@ def build_multi_repo_context_package(
         "selected_repo_labels": sorted(selected_repos),
         "selected_chunks": [chunk.to_dict() for chunk in selected],
         "excluded_ranked_chunks": excluded,
+        "safety": {
+            "secret_redaction_enabled": True,
+            "candidate_secret_redaction_count": candidate_redaction_count,
+            "selected_secret_redaction_count": selected_redaction_count,
+            "selected_secret_redaction_types": selected_redaction_types,
+        },
         "change_surface": change_surface,
         "index": index_totals,
         "provenance": {
@@ -1010,8 +1196,12 @@ def build_multi_repo_context_package(
             "It does not measure provider API tokens, cache hits, response quality, or cost savings.",
             "Tracked files plus untracked, non-ignored worktree files are scanned when the target is a Git repository.",
             "Optional git provenance sections are counted inside the packaged context budget when enabled.",
+            "Secret-looking values inside otherwise eligible files are redacted before ranking and rendering.",
         ],
     }
+    if include_full_scan_prompt:
+        full_rendered = prefix + "".join(f"{chunk.render()}\n\n" for chunk in candidate_chunks)
+        report["full_scan_prompt_markdown"] = full_rendered.rstrip() + "\n"
     if len(repo_inputs) == 1:
         report["repo"] = str(repo_inputs[0].root)
     return rendered.rstrip() + "\n", report
@@ -1029,6 +1219,7 @@ def build_context_package(
     include_globs: tuple[str, ...] = (),
     exclude_globs: tuple[str, ...] = (),
     workflow: str = "generic",
+    include_full_scan_prompt: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     return build_multi_repo_context_package(
         [repo],
@@ -1042,6 +1233,7 @@ def build_context_package(
         include_globs=include_globs,
         exclude_globs=exclude_globs,
         workflow=workflow,
+        include_full_scan_prompt=include_full_scan_prompt,
     )
 
 

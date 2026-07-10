@@ -75,17 +75,17 @@ Run it with:
   --summary
 ```
 
-Current local result from July 2, 2026:
+Current local result from July 7, 2026:
 
 - edit-target recall: `1.0`
 - test-target recall: `0.8333`
-- required-observation recall: `1.0`
+- required-observation recall: `0.9167`
 - answer-plan pass rate: `0.8333`
-- median token reduction: `90.91%`
-- median full-scan prompt: `80,648.5` tokens
-- median packed prompt: `5,938.5` tokens
-- median prompt tokens saved: `74,760.0`
-- total prompt tokens saved across 12 cases: `1,067,887`
+- median token reduction: `96.73%`
+- median full-scan prompt: `80,921.5` tokens
+- median packed prompt: `1,993.0` tokens
+- median prompt tokens saved: `78,813.0`
+- total prompt tokens saved across 12 cases: `1,318,563`
 - acceptance pass: `true`
 
 ## Provider Validation
@@ -199,6 +199,84 @@ For the concrete billed-cost proof sequence, including how to reconcile the
 saved report against an OpenAI Costs API export, see
 [docs/provider-cost-proof-playbook.md](../docs/provider-cost-proof-playbook.md).
 
+## Modality Tradeoff Validation
+
+`modality_tradeoff_validation.py` validates the local pxpipe-style artifact
+pipeline after AgenVantage has already selected the relevant repository
+context. It can write PNG context pages, factsheets, and recoverable source
+manifests. It still does not send images to a provider, so the token deltas are
+estimated rather than provider-billed savings. The benchmark verifies every
+generated artifact manifest for recoverable-source hashes, factsheet hashes,
+image hashes, and PNG signatures.
+
+The estimator is intentionally conservative:
+
+- exact edit, test, config, supporting, line-referenced, identifier-dense,
+  secret-like, hash, and UUID-bearing chunks stay text;
+- gist-level background chunks are rendered into deterministic dense PNG pages
+  only when the provider-profile estimate beats text after factsheet overhead;
+- each imaged group gets deterministic factsheet sidecar text and each imaged
+  block gets a recoverable source file keyed by a stable `rec_...` identifier.
+- generated manifests include a path-independent artifact bundle fingerprint
+  over image, factsheet, and recoverable-source hashes.
+- CLI runs default to `--modality-profile auto`; unsupported forced
+  model/profile pairs stay text-only.
+
+Run it with:
+
+```bash
+.venv/bin/python benchmarks/modality_tradeoff_validation.py \
+  --output-json artifacts/modality-tradeoff-validation.json \
+  --output-md artifacts/modality-tradeoff-validation.md \
+  --summary
+```
+
+Recover exact text for an imaged block with:
+
+```bash
+.venv/bin/python -m agenvantage rehydrate \
+  --manifest artifacts/modality-context-images/<case-id>/manifest.json \
+  --verify
+
+.venv/bin/python -m agenvantage rehydrate \
+  --manifest artifacts/modality-context-images/<case-id>/manifest.json \
+  --list
+
+.venv/bin/python -m agenvantage rehydrate \
+  --manifest artifacts/modality-context-images/<case-id>/manifest.json \
+  --id rec_...
+```
+
+Current local result from July 7, 2026:
+
+- cases: `12`
+- full-scan median text prompt: `80,968.5` tokens
+- full-scan median theoretical image prompt: `19,044.0` tokens
+- full-scan theoretical modality reduction before safety gate: `76.57%`
+- full-scan image-candidate rate after safety gate: `0.0`
+- packed median text prompt: `2,040.0` tokens
+- packed median theoretical image prompt: `4,761.0` tokens
+- packed theoretical modality reduction before safety gate: `-133.38%`
+- packed image-candidate rate after safety gate: `0.0`
+- median retrieval tokens saved before modality: `78,813.0`
+- total retrieval tokens saved across 12 cases: `1,318,563`
+- total rough-estimator incremental modality tokens saved after packing: `0`
+- artifact image case rate: `0.25`
+- total artifact images written: `3`
+- total recoverable blocks: `5`
+- total factsheets: `3`
+- total artifact incremental tokens saved after packing: `527`
+- artifact manifests verified: `3/3`
+- artifact bundles verified: `3/3`
+- artifact manifest verification errors: `0`
+- median end-to-end safe candidate reduction: `96.66%`
+
+Interpretation: retrieval still does nearly all of the work. The implemented
+artifact layer adds selective upside on background/gist chunks even when the
+whole-prompt estimator refuses image mode because the packed prompt contains
+exact identifiers. Exact coding evidence stays text and every imaged block is
+recoverable.
+
 ## Claim Status
 
 To collapse the current evidence into one durable, human-readable answer about
@@ -217,3 +295,43 @@ currently unsupported claims, see
 [docs/proof-resource-pack.md](../docs/proof-resource-pack.md) and the
 machine-readable manifest
 [examples/proof_resources.json](../examples/proof_resources.json).
+
+## Session Cache Validation
+
+`session_cache_validation.py` checks the repeated feature-work cache layout
+before any provider spend. It reuses the feature-work fixture, creates one
+cache-aware feature session per case, emits one follow-up task packet, and
+reports:
+
+- `cache_eligible_rate`: whether stable prefixes meet the configured cache
+  threshold.
+- `median_stable_prefix_tokens`: reusable prefix size.
+- `median_dynamic_packet_tokens`: per-turn task packet size after the prefix is
+  frozen.
+- `median_reusable_prefix_percent`: proportion of the follow-up prompt that can
+  remain stable.
+- `median_estimated_warm_reduction_percent_vs_full_scan`: theoretical warm-call
+  input-token reduction versus a full-scan prompt.
+
+Run it with:
+
+```bash
+.venv/bin/python benchmarks/session_cache_validation.py \
+  --output-json artifacts/session-cache-validation.json \
+  --output-md artifacts/session-cache-validation.md \
+  --summary
+```
+
+Current local result from the production-path implementation:
+
+- cases: `12`
+- cache-eligible rate: `1.0`
+- median stable prefix: `2,003.0` tokens
+- median dynamic packet: `89.5` tokens
+- median reusable prefix: `95.59%`
+- median estimated warm reduction versus full scan: `99.86%`
+- total estimated warm tokens saved versus full scan: `1,342,244`
+- acceptance pass: `true`
+
+These are cache-layout readiness metrics. Actual cache hits and billed savings
+still require live provider usage records.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -261,6 +262,7 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
         "candidate_chunks": 9,
         "uncovered_query_terms": ["retry"],
         "provenance": {"enabled": True, "include_diff": True, "include_log": False, "selected_provenance_tokens": 40},
+        "safety": {"selected_secret_redaction_count": 2},
         "selected_chunks": [
             {"path": "src/rate_limiter.py", "tokens": 300},
             {"path": "src/rate_limiter.py", "tokens": 100},
@@ -275,6 +277,7 @@ def test_format_pack_summary_reports_budget_and_files() -> None:
     assert "75.0%" in summary
     assert "Prompt tokens: user=5 full-scan=2048 packed=512" in summary
     assert "Prompt savings: 1536 tokens (75.0%)" in summary
+    assert "Safety: redacted 2 secret-looking value(s)" in summary
     assert "Uncovered concepts: retry" in summary
     assert "src/rate_limiter.py" in summary
 
@@ -403,6 +406,914 @@ def test_pack_feature_handoff_json_emits_agent_ready_payload(tmp_path: Path) -> 
     assert payload["selected_chunks"]
     assert "src/rate_limiter.py" in payload["change_surface"]["edit_targets"]
     assert "tests/test_rate_limiter.py" in payload["change_surface"]["test_targets"]
+
+
+def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "pack",
+            "--preset",
+            "feature",
+            "--task",
+            "Add diagnostics for rate limiter Redis fail open behavior",
+            "--multimodal",
+            "estimate",
+            "--handoff-json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["modality_plan"]["mode"] == "estimate"
+    assert payload["modality_plan"]["profile"]["profile_id"] == "openai_estimate"
+    assert "image_attachments" in payload
+    assert "factsheets" in payload
+    assert "recoverable_blocks" in payload
+
+
+def test_observe_pack_records_trace_and_trace_commands_show_it(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    init_completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "init",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage observability initialized" in init_completed.stdout
+    assert (tmp_path / ".agenvantage" / "observability.db").is_file()
+
+    observed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage observed context pack" in observed.stdout
+    assert "Full scan:" in observed.stdout
+    assert "Packed:" in observed.stdout
+    trace_line = next(line for line in observed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+
+    listed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert trace_id in listed.stdout
+    assert "saved=" in listed.stdout
+    assert "quality=" in listed.stdout
+    assert "workflow=feature" in listed.stdout
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage trace" in shown.stdout
+    assert "Health:" in shown.stdout
+    assert "Next actions:" in shown.stdout
+    assert "Quality:" in shown.stdout
+    assert "Token accounting:" in shown.stdout
+    assert "src/rate_limiter.py" in shown.stdout
+
+    annotated = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "annotate",
+            trace_id,
+            "--label",
+            "agent_failed",
+            "--note",
+            "Saved tokens, but missed the right behavior.",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage trace annotated" in annotated.stdout
+    assert "Status: failed" in annotated.stdout
+
+    failed_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--quality-status",
+            "failed",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Filters: quality_status=failed" in failed_list.stdout
+    assert trace_id in failed_list.stdout
+    assert "quality=failed" in failed_list.stdout
+
+    attention_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--attention",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Filters: attention=True" in attention_list.stdout
+    assert trace_id in attention_list.stdout
+
+    json_list = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "list",
+            "--quality-status",
+            "failed",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    trace_payload = json.loads(json_list.stdout)
+    assert trace_payload["workflow"] == "trace_list"
+    assert trace_payload["filters"] == {"quality_status": "failed"}
+    assert trace_payload["trace_count"] == 1
+    assert trace_payload["traces"][0]["trace_id"] == trace_id
+    assert trace_payload["traces"][0]["quality_status"] == "failed"
+    assert trace_payload["traces"][0]["workflow"] == "feature"
+
+    shown_after_annotation = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "User quality labels:" in shown_after_annotation.stdout
+    assert "agent_failed" in shown_after_annotation.stdout
+    assert "Saved tokens, but missed the right behavior." in shown_after_annotation.stdout
+
+    exported = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "export",
+            trace_id,
+            "--kind",
+            "context_markdown",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert exported.stdout.startswith("# AgenVantage Context Package")
+
+    output = tmp_path / "exported-context.md"
+    export_file = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "export",
+            trace_id,
+            "--kind",
+            "context_markdown",
+            "--output",
+            str(output),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "AgenVantage trace artifact exported" in export_file.stdout
+    assert output.read_text(encoding="utf-8").startswith("# AgenVantage Context Package")
+
+
+def test_checkup_reports_repo_hygiene_and_observability_state(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "artifacts").mkdir()
+    (tmp_path / "artifacts" / "local-report.txt").write_text(
+        "generated report\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage checkup" in completed.stdout
+    assert "Observability database" in completed.stdout
+    assert "Generated artifacts" in completed.stdout
+    assert "Status:  warn" in completed.stdout
+    assert "agenvantage observe init" in completed.stdout
+
+    json_completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(json_completed.stdout)
+    assert payload["workflow"] == "checkup"
+    assert payload["overall_status"] == "warn"
+    assert payload["metrics"]["untracked_path_count"] >= 1
+    assert any(finding["id"] == "observability_db" for finding in payload["findings"])
+
+
+def test_checkup_counts_observed_traces(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "demo",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "checkup",
+            "--json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["metrics"]["trace_count"] == 1
+    assert payload["summary"]["pass"] >= 1
+    assert any(
+        finding["id"] == "observability_db" and finding["status"] == "pass"
+        for finding in payload["findings"]
+    )
+
+
+def test_dashboard_command_writes_observability_html(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "dashboard",
+            "--no-browser",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    dashboard_path = tmp_path / ".agenvantage" / "observability-dashboard.html"
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert "AgenVantage observability dashboard written to" in completed.stdout
+    assert dashboard_path.as_uri() in completed.stdout
+    assert "Agent Observability" in dashboard_html
+    assert "Add tests for rate limiter Redis fail open behavior" in dashboard_html
+    assert "src/rate_limiter.py" in dashboard_html
+
+
+def test_observe_demo_and_dashboard_demo_seed_teaching_trace(tmp_path: Path) -> None:
+    demo = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "demo",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage demo trace created" in demo.stdout
+    assert "without calling an API" in demo.stdout
+
+    dashboard = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "dashboard",
+            "--demo",
+            "--no-browser",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    dashboard_path = tmp_path / ".agenvantage" / "observability-dashboard.html"
+    dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    assert "AgenVantage observability dashboard written to" in dashboard.stdout
+    assert "Demo: add upload limit smoke-test coverage" in dashboard_html
+    assert "provider usage records" in dashboard_html
+    assert "agent succeeded" in dashboard_html
+
+
+def test_experiments_compare_records_variants_and_trace_artifacts(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_rate_limiter.py").write_text(
+        "def test_rate_limiter_fail_open():\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "background.md").write_text(
+        "\n".join(f"Historical deployment note {index}: unrelated checkout prose." for index in range(400)),
+        encoding="utf-8",
+    )
+    output = tmp_path / "comparison.json"
+    markdown_output = tmp_path / "comparison.md"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "experiments",
+            "compare",
+            "--task",
+            "Add tests for rate limiter Redis fail open behavior",
+            "--input-price-per-million",
+            "1.25",
+            "--output",
+            str(output),
+            "--markdown-output",
+            str(markdown_output),
+            "--summary",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    markdown = markdown_output.read_text(encoding="utf-8")
+    assert "AgenVantage Context Experiment" in completed.stdout
+    assert "Experiment comparison attached to trace" in completed.stderr
+    assert report["workflow"] == "experiments.compare"
+    assert {variant["variant_id"] for variant in report["variants"]} == {
+        "full_scan",
+        "packed_text",
+        "packed_cache_aligned",
+        "packed_mixed_artifact",
+    }
+    packed = next(variant for variant in report["variants"] if variant["variant_id"] == "packed_text")
+    assert packed["tokens_saved_vs_full_scan"] > 0
+    assert packed["estimated_input_cost_usd"] is not None
+    assert "Packed cache-aligned" in markdown
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            report["trace_id"],
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "experiment.compare" in shown.stdout
+    assert "experiment_comparison" in shown.stdout
+
+
+def test_provider_import_attaches_usage_to_trace(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    observed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "observe",
+            "pack",
+            "--task",
+            "Explain the rate limiter fail open behavior",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    trace_line = next(line for line in observed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+    records = tmp_path / "provider-records.json"
+    records.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "request_id": "resp_cli_123",
+                        "model": "gpt-test",
+                        "input_tokens": 640,
+                        "cached_input_tokens": 256,
+                        "output_tokens": 80,
+                        "request_cost_usd": 0.00072,
+                        "latency_ms": 910,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "provider",
+            "import",
+            "--records",
+            str(records),
+            "--trace-id",
+            trace_id,
+            "--provider",
+            "openai",
+            "--reconciliation-status",
+            "provider_reported",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage provider usage imported" in imported.stdout
+    assert "Records: 1" in imported.stdout
+    assert "provider_reported" in imported.stdout
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Provider-reported usage:" in shown.stdout
+    assert "Cache hit rate: 40.00%" in shown.stdout
+    assert "Reported latency: 910.00 ms" in shown.stdout
+    assert "resp_cli_123" in shown.stdout
+    assert "cached=256" in shown.stdout
+    assert "reconciliation=provider_reported" in shown.stdout
+
+
+def test_agent_run_passes_context_and_records_external_command(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    handoff = tmp_path / "handoff.md"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "agent",
+            "run",
+            "--task",
+            "Explain the rate limiter fail open behavior",
+            "--handoff-file",
+            str(handoff),
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "text = sys.stdin.read(); "
+                "print('saw_context=' + str('# AgenVantage Context Package' in text))"
+            ),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "AgenVantage agent run recorded" in completed.stdout
+    assert "saw_context=True" in completed.stdout
+    assert handoff.read_text(encoding="utf-8").startswith("# AgenVantage Context Package")
+    trace_line = next(line for line in completed.stdout.splitlines() if line.startswith("Trace: "))
+    trace_id = trace_line.split("Trace: ", 1)[1].strip()
+
+    shown = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "traces",
+            "show",
+            trace_id,
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "agent.external" in shown.stdout
+    assert "agent_stdout" in shown.stdout
+    assert "agent_succeeded" in shown.stdout
+
+
+def test_rehydrate_lists_and_recovers_source_blocks(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifact"
+    recoverable_dir = artifact_root / "recoverable"
+    recoverable_dir.mkdir(parents=True)
+    source_text = "[SOURCE:docs/notes.md#L1-L2]\n```markdown\nexact recovered text\n```\n"
+    source_path = recoverable_dir / "rec_abc123.txt"
+    source_path.write_text(source_text, encoding="utf-8")
+    manifest = artifact_root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_abc123",
+                        "path": "docs/notes.md",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "text_path": str(source_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    listed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--list",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    recovered = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_abc123",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "rec_abc123" in listed.stdout
+    assert "docs/notes.md#L1-L2" in listed.stdout
+    assert recovered.stdout == source_text
+
+
+def test_rehydrate_writes_recovered_source_to_output(tmp_path: Path) -> None:
+    recoverable_dir = tmp_path / "recoverable"
+    recoverable_dir.mkdir()
+    source_path = recoverable_dir / "rec_def456.txt"
+    source_path.write_text("exact recovered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_def456",
+                        "path": "docs/notes.md",
+                        "text_path": str(source_path),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_def456",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert output.read_text(encoding="utf-8") == "exact recovered text\n"
+    assert "Recovered source written" in completed.stdout
+
+
+def test_rehydrate_verifies_artifact_manifest_integrity(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifact"
+    recoverable_dir = artifact_root / "recoverable"
+    image_dir = artifact_root / "images"
+    recoverable_dir.mkdir(parents=True)
+    image_dir.mkdir()
+    source_text = "exact recovered text\n"
+    source_path = recoverable_dir / "rec_ok.txt"
+    source_path.write_text(source_text, encoding="utf-8")
+    image_path = image_dir / "page.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nminimal")
+    manifest = artifact_root / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "image_attachments": [{"path": str(image_path)}],
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_ok",
+                        "path": "docs/notes.md",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--verify",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "Artifact verification passed" in completed.stdout
+    assert "Recoverable blocks: 1" in completed.stdout
+    assert "Image attachments: 1" in completed.stdout
+    assert "Factsheets: 0" in completed.stdout
+
+
+def test_rehydrate_verify_fails_on_hash_mismatch(tmp_path: Path) -> None:
+    source_path = tmp_path / "rec_bad.txt"
+    source_path.write_text("tampered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_bad",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(b"original text\n").hexdigest(),
+                    }
+                ],
+                "image_attachments": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--verify",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "Artifact verification failed" in completed.stdout
+    assert "hash mismatch" in completed.stdout
+
+
+def test_rehydrate_refuses_to_print_tampered_recoverable_source(tmp_path: Path) -> None:
+    source_path = tmp_path / "rec_bad.txt"
+    source_path.write_text("tampered text\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "recoverable_blocks": [
+                    {
+                        "id": "rec_bad",
+                        "text_path": str(source_path),
+                        "text_sha256": hashlib.sha256(b"original text\n").hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_bad",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "hash mismatch" in completed.stderr
+
+
+def test_rehydrate_errors_on_unknown_block_id(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"recoverable_blocks": [{"id": "rec_known", "text_path": "missing.txt"}]}),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "rehydrate",
+            "--manifest",
+            str(manifest),
+            "--id",
+            "rec_missing",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "Recoverable block not found" in completed.stderr
 
 
 def test_pack_preset_debug_enables_provenance_in_manifest(tmp_path: Path) -> None:
