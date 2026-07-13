@@ -80,6 +80,7 @@ def test_mcp_cli_serves_initialize_and_tools_list() -> None:
     assert responses[0]["result"]["serverInfo"]["name"] == "agenvantage"
     assert {tool["name"] for tool in responses[1]["result"]["tools"]} == {
         "prepare_context",
+        "expand_context",
         "search_graph",
         "context_status",
     }

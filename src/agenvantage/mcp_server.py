@@ -14,9 +14,15 @@ from typing import Any, TextIO
 from agenvantage.graph_backend import GRAPHIFY_EXPECTED_VERSION, GraphCandidate
 from agenvantage.graphify_adapter import GraphifyAdapter
 from agenvantage.graphify_runner import run_graphify
+from agenvantage.observability import default_observability_db, load_trace
 from agenvantage.presets import DEFAULT_PRESET, PRESETS, get_preset
-from agenvantage.repo_context import build_context_package, source_files
-from agenvantage.repo_index import repository_index_path
+from agenvantage.repo_context import (
+    build_context_package,
+    chunks_for_repo,
+    rank_chunks,
+    source_files,
+)
+from agenvantage.repo_index import build_repository_index, repository_index_path
 from agenvantage.tokenizer import TokenCounter
 
 JSONRPC_VERSION = "2.0"
@@ -63,6 +69,23 @@ TOOLS: tuple[dict[str, Any], ...] = (
             },
             ("repo", "task"),
         ),
+    },
+    {
+        "name": "expand_context",
+        "description": "Return the next-ranked source chunks after an insufficient context handoff.",
+        "inputSchema": {
+            **_object_schema(
+                {
+                    "manifest_path": {"type": "string", "description": "Decision-manifest JSON path."},
+                    "trace_id": {"type": "string", "description": "Observed context-pack trace ID."},
+                    "repo": {"type": "string", "description": "Repository path; required with trace_id."},
+                    "reason": {"type": "string", "description": "Why more evidence is required."},
+                    "expand_budget": {"type": "integer", "minimum": 1, "maximum": 6000, "default": 1500},
+                },
+                ("reason",),
+            ),
+            "anyOf": [{"required": ["manifest_path"]}, {"required": ["trace_id", "repo"]}],
+        },
     },
     {
         "name": "search_graph",
@@ -300,6 +323,134 @@ def prepare_context(arguments: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _expansion_manifest(arguments: dict[str, Any]) -> tuple[dict[str, Any], Path | None, Path]:
+    manifest_path = _file_path(arguments, "manifest_path")
+    if manifest_path is not None:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ToolError(f"manifest_path is not valid JSON: {exc}") from exc
+        if not isinstance(manifest, dict):
+            raise ToolError("manifest_path must contain a JSON object.")
+        repo_value = manifest.get("repo")
+        if repo_value is None:
+            repos = manifest.get("repos") or []
+            repo_value = repos[0].get("path") if repos and isinstance(repos[0], dict) else None
+        if not isinstance(repo_value, str):
+            raise ToolError("Decision manifest does not identify a repository.")
+        repo = Path(repo_value).expanduser().resolve()
+        return manifest, manifest_path, repo
+
+    trace_id = _text(arguments, "trace_id")
+    if trace_id is None:
+        raise ToolError("Provide manifest_path or trace_id with repo.")
+    repo = _repo_path(arguments)
+    try:
+        trace = load_trace(default_observability_db(repo), trace_id, include_artifact_content=True)
+    except KeyError as exc:
+        raise ToolError(f"Trace not found: {trace_id}") from exc
+    artifact = next(
+        (item for item in trace.get("artifacts", []) if item.get("kind") == "decision_manifest"),
+        None,
+    )
+    if not artifact or not isinstance(artifact.get("content"), str):
+        raise ToolError(f"Trace {trace_id} has no decision manifest artifact.")
+    try:
+        manifest = json.loads(artifact["content"])
+    except json.JSONDecodeError as exc:
+        raise ToolError(f"Trace {trace_id} contains an invalid decision manifest.") from exc
+    return manifest, None, repo
+
+
+def expand_context(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return unseen ranked chunks under a strict incremental token budget."""
+    arguments = _require_object(arguments, "arguments")
+    _reject_unknown(arguments, {"manifest_path", "trace_id", "repo", "reason", "expand_budget"})
+    reason = _text(arguments, "reason", required=True)
+    assert reason is not None
+    expand_budget = _integer(arguments, "expand_budget", 1500, minimum=1, maximum=6000)
+    manifest, manifest_path, repo = _expansion_manifest(arguments)
+    if not repo.is_dir():
+        raise ToolError(f"Repository directory does not exist: {repo}")
+    task = str(manifest.get("task") or "").strip()
+    if not task:
+        raise ToolError("Decision manifest does not contain a task.")
+
+    state_path = (
+        manifest_path.with_suffix(manifest_path.suffix + ".expansions.json")
+        if manifest_path is not None
+        else repo / ".agenvantage" / "expansions" / f"{arguments['trace_id']}.json"
+    )
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        state = {"rounds": []}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ToolError(f"Expansion state is invalid: {exc}") from exc
+    rounds = state.get("rounds") if isinstance(state, dict) else None
+    if not isinstance(rounds, list):
+        raise ToolError("Expansion state has an invalid rounds field.")
+    if len(rounds) >= 3:
+        raise ToolError("Maximum of 3 context expansion rounds reached for this handoff.")
+
+    excluded_ids = {
+        str(chunk.get("id"))
+        for chunk in manifest.get("selected_chunks", [])
+        if isinstance(chunk, dict) and chunk.get("id")
+    }
+    for previous in rounds:
+        if isinstance(previous, dict):
+            excluded_ids.update(str(item) for item in previous.get("chunk_ids", []))
+
+    counter = TokenCounter(str((manifest.get("tokenizer") or {}).get("model") or "gpt-4o-mini"))
+    files = source_files(repo)
+    index = build_repository_index(repo, files)
+    chunks = chunks_for_repo(repo, counter, overlap_lines=4, files=files, file_index=index.entries)
+    slots = tuple(
+        str(item.get("name"))
+        for item in (manifest.get("context_plan") or {}).get("evidence_slots", [])
+        if isinstance(item, dict) and item.get("name")
+    )
+    ranked = rank_chunks(chunks, f"{task}\nExpansion reason: {reason}", evidence_slots=slots)
+    selected = []
+    used_tokens = 0
+    for chunk in ranked:
+        if chunk.chunk_id in excluded_ids or chunk.score <= 0:
+            continue
+        addition_tokens = counter.count(chunk.render() + "\n\n")
+        if addition_tokens > expand_budget - used_tokens:
+            continue
+        selected.append(chunk)
+        used_tokens += addition_tokens
+        if used_tokens >= expand_budget:
+            break
+    round_number = len(rounds) + 1
+    round_record = {
+        "round": round_number,
+        "reason": reason,
+        "budget": expand_budget,
+        "tokens": used_tokens,
+        "chunk_ids": [chunk.chunk_id for chunk in selected],
+    }
+    rounds.append(round_record)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"rounds": rounds}, indent=2) + "\n", encoding="utf-8")
+    prompt = "\n\n".join(chunk.render() for chunk in selected)
+    return {
+        "repo": str(repo),
+        "task": task,
+        "reason": reason,
+        "round": round_number,
+        "max_rounds": 3,
+        "expand_budget": expand_budget,
+        "expanded_tokens": used_tokens,
+        "remaining_rounds": 3 - round_number,
+        "selected_chunks": [chunk.to_dict() for chunk in selected],
+        "prompt_markdown": prompt + ("\n" if prompt else ""),
+        "state_path": str(state_path),
+    }
+
+
 def search_graph(arguments: dict[str, Any]) -> dict[str, Any]:
     """Search Graphify output, falling back to deterministic source scanning."""
 
@@ -460,6 +611,7 @@ def context_status(arguments: dict[str, Any]) -> dict[str, Any]:
 
 _TOOL_HANDLERS = {
     "prepare_context": prepare_context,
+    "expand_context": expand_context,
     "search_graph": search_graph,
     "context_status": context_status,
 }
@@ -517,7 +669,7 @@ def handle_request(message: Any) -> dict[str, Any] | None:
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
-                "instructions": "Use prepare_context for bounded coding context and search_graph for source-backed graph retrieval.",
+                "instructions": "Use prepare_context for bounded coding context, expand_context when signals are missing, and search_graph for source-backed graph retrieval.",
             },
         )
     if method == "ping":
@@ -575,6 +727,7 @@ __all__ = [
     "MCP_PROTOCOL_VERSION",
     "TOOLS",
     "context_status",
+    "expand_context",
     "handle_request",
     "prepare_context",
     "run_stdio_server",

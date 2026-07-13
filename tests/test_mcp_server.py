@@ -34,8 +34,8 @@ def test_protocol_initialize_ping_notifications_and_method_errors() -> None:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "agenvantage", "version": "0.1.0"},
             "instructions": (
-                "Use prepare_context for bounded coding context and search_graph "
-                "for source-backed graph retrieval."
+                "Use prepare_context for bounded coding context, expand_context "
+                "when signals are missing, and search_graph for source-backed graph retrieval."
             ),
         },
     }
@@ -54,7 +54,7 @@ def test_tools_list_exposes_closed_schemas_and_required_arguments() -> None:
     response = mcp_server.handle_request(_request("tools/list"))
     tools = {tool["name"]: tool for tool in response["result"]["tools"]}
 
-    assert set(tools) == {"prepare_context", "search_graph", "context_status"}
+    assert set(tools) == {"prepare_context", "expand_context", "search_graph", "context_status"}
     assert tools["prepare_context"]["inputSchema"]["required"] == ["repo", "task"]
     assert tools["prepare_context"]["inputSchema"]["additionalProperties"] is False
     assert tools["prepare_context"]["inputSchema"]["properties"]["graph_backend"] == {
@@ -64,6 +64,60 @@ def test_tools_list_exposes_closed_schemas_and_required_arguments() -> None:
     }
     assert tools["search_graph"]["inputSchema"]["properties"]["hops"]["enum"] == [1, 2]
     assert tools["context_status"]["inputSchema"]["required"] == ["repo"]
+    assert tools["expand_context"]["inputSchema"]["required"] == ["reason"]
+
+
+def test_expand_context_returns_unseen_chunks_within_budget(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "def feature():\n    return 'primary'\n\n"
+        "def helper():\n    return 'secondary evidence'\n",
+        encoding="utf-8",
+    )
+    manifest = repo / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "repo": str(repo),
+                "task": "Add secondary evidence to feature helper",
+                "tokenizer": {"model": "gpt-4o-mini"},
+                "selected_chunks": [],
+                "context_plan": {"evidence_slots": [{"name": "implementation"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = mcp_server.expand_context(
+        {"manifest_path": str(manifest), "reason": "helper implementation missing", "expand_budget": 300}
+    )
+
+    assert result["round"] == 1
+    assert result["expanded_tokens"] <= 300
+    assert result["selected_chunks"]
+    assert "secondary evidence" in result["prompt_markdown"]
+
+
+def test_expand_context_limits_handoff_to_three_rounds(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text("def feature():\n    return True\n", encoding="utf-8")
+    manifest = repo / "manifest.json"
+    manifest.write_text(
+        json.dumps({"repo": str(repo), "task": "Change feature", "selected_chunks": []}),
+        encoding="utf-8",
+    )
+    arguments = {"manifest_path": str(manifest), "reason": "more evidence", "expand_budget": 200}
+    for _ in range(3):
+        mcp_server.expand_context(arguments)
+
+    try:
+        mcp_server.expand_context(arguments)
+    except mcp_server.ToolError as exc:
+        assert "Maximum of 3" in str(exc)
+    else:
+        raise AssertionError("fourth expansion should fail")
 
 
 def test_prepare_context_returns_compact_report_and_optional_prompt(
