@@ -403,9 +403,39 @@ def test_pack_feature_handoff_json_emits_agent_ready_payload(tmp_path: Path) -> 
     assert "prompt_markdown" in payload
     assert payload["prompt_token_accounting"]["packed_prompt_tokens"] > 0
     assert "prompt_tokens_saved_vs_full_scan" in payload["prompt_token_accounting"]
+    assert payload["implementation_discipline"] == "full"
+    assert "IMPLEMENTATION LADDER" in payload["system_prefix"]
     assert payload["selected_chunks"]
     assert "src/rate_limiter.py" in payload["change_surface"]["edit_targets"]
     assert "tests/test_rate_limiter.py" in payload["change_surface"]["test_targets"]
+
+
+def test_pack_feature_discipline_off_removes_ladder(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "agenvantage",
+            "pack",
+            "--preset",
+            "feature",
+            "--discipline",
+            "off",
+            "--task",
+            "Add rate limiter diagnostics",
+            "--handoff-json",
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["implementation_discipline"] == "off"
+    assert "IMPLEMENTATION LADDER" not in payload["system_prefix"]
 
 
 def test_pack_multimodal_handoff_json_includes_modality_plan(tmp_path: Path) -> None:

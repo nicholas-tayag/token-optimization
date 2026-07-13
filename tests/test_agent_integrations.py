@@ -75,6 +75,9 @@ def test_rendering_embeds_exact_command_and_canonical_behavior(
     assert f"{command} pack \\" in skill
     assert "{{AGENVANTAGE_COMMAND}}" not in skill
     assert "--graph-backend auto" in skill
+    assert "--discipline full" in skill
+    assert "expand_context" in skill
+    assert "minimum change" in skill
     assert "feature`, `debug`, `review`, or `explain`" in skill
     assert "trivial one-line edits" in skill
     assert "already been generated" in skill

@@ -20,6 +20,7 @@ without asking the user to run extra setup commands.
    {{AGENVANTAGE_COMMAND}} pack \
      --repo "<repository-root>" \
      --preset "<preset>" \
+     --discipline full \
      --task "<user request verbatim>" \
      --graph-backend auto \
      --handoff-json
@@ -27,8 +28,18 @@ without asking the user to run extra setup commands.
 
 5. Use the handoff's selected chunks, change surface, context plan, graph
    provenance, and sufficiency warnings as the initial evidence for the task.
-6. Continue normal repository exploration when the handoff reports missing
-   evidence. Do not claim that the package is complete when it says otherwise.
+6. When `missing_signals` is non-empty, call the AgenVantage MCP
+   `expand_context` tool before implementing. Do not guess or claim that the
+   package is complete.
+
+## Implementation Discipline
+
+After reading the supplied context: avoid unnecessary code, reuse selected
+implementations, prefer the standard library or native framework APIs, reuse
+installed dependencies, and write the minimum change that passes the listed
+tests. Never simplify away validation, authentication, path-traversal checks,
+data-loss error handling, security-sensitive parsing, or accessibility. Run any
+selected guard or contract test before declaring completion.
 
 ## Behavior
 

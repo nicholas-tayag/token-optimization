@@ -92,7 +92,13 @@ from agenvantage.provider_validation import (
     summarize_saved_provider_validation_report,
     summarize_provider_validation_records,
 )
-from agenvantage.presets import DEFAULT_PRESET, get_preset, preset_names
+from agenvantage.presets import (
+    DEFAULT_PRESET,
+    IMPLEMENTATION_DISCIPLINES,
+    get_preset,
+    instructions_for_preset,
+    preset_names,
+)
 from agenvantage.repo_context import (
     build_context_package,
     build_multi_repo_context_package,
@@ -785,6 +791,12 @@ def _parser() -> argparse.ArgumentParser:
         help=f"Task recipe controlling instructions and provenance (default: {DEFAULT_PRESET}).",
     )
     pack.add_argument(
+        "--discipline",
+        choices=tuple(IMPLEMENTATION_DISCIPLINES),
+        default="full",
+        help="Feature implementation discipline injected into the handoff (default: full).",
+    )
+    pack.add_argument(
         "--budget",
         type=int,
         default=None,
@@ -1469,6 +1481,7 @@ def _build_handoff_payload(markdown: str, report: dict[str, Any], preset_name: s
             "missing_signals": list(change_surface.get("missing_signals", [])),
         },
         "prompt_token_accounting": report.get("prompt_token_accounting", {}),
+        "implementation_discipline": report.get("implementation_discipline", "off"),
         "modality_plan": report.get("multimodal", {}),
         "image_attachments": (report.get("multimodal") or {}).get("image_attachments", []),
         "factsheets": (report.get("multimodal") or {}).get("factsheets", []),
@@ -1905,6 +1918,8 @@ def _build_pack_artifacts(
     preset = settings["preset"]
     repos = settings["repos"]
     counter = TokenCounter(settings["model"])
+    discipline = getattr(args, "discipline", "full")
+    instructions = instructions_for_preset(settings["preset_name"], discipline)
 
     if len(repos) == 1:
         markdown, report = build_context_package(
@@ -1913,7 +1928,7 @@ def _build_pack_artifacts(
             settings["budget"],
             counter,
             settings["top_k"],
-            instructions=preset.instructions,
+            instructions=instructions,
             include_diff=settings["include_diff"],
             include_log=settings["include_log"],
             include_globs=settings["include_globs"],
@@ -1932,7 +1947,7 @@ def _build_pack_artifacts(
             settings["budget"],
             counter,
             settings["top_k"],
-            instructions=preset.instructions,
+            instructions=instructions,
             include_diff=settings["include_diff"],
             include_log=settings["include_log"],
             include_globs=settings["include_globs"],
@@ -1946,6 +1961,9 @@ def _build_pack_artifacts(
         )
 
     report["preset"] = settings["preset_name"]
+    report["implementation_discipline"] = (
+        discipline if settings["preset_name"] == "feature" else "off"
+    )
     markdown, report = apply_multimodal_pack(
         markdown,
         report,
