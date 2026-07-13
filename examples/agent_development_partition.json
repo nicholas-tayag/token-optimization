@@ -94,6 +94,30 @@
       "parallel": false,
       "depends_on": ["W1"],
       "packages": ["W5.1", "W5.2", "W5.3"]
+    },
+    {
+      "wave_id": "T1",
+      "name": "three_layer_output_discipline",
+      "parallel": false,
+      "packages": ["T1.1", "T1.2", "T1.3", "T1.4"]
+    },
+    {
+      "wave_id": "T2",
+      "name": "three_layer_context_confidence",
+      "parallel": false,
+      "packages": ["T2.1", "T2.2", "T2.3"]
+    },
+    {
+      "wave_id": "T3",
+      "name": "three_layer_model_routing",
+      "parallel": false,
+      "packages": ["T3.1", "T3.2", "T3.3", "T3.4"]
+    },
+    {
+      "wave_id": "T4",
+      "name": "three_layer_integration",
+      "parallel": false,
+      "packages": ["T4.1", "T4.2", "T4.3", "T4.4"]
     }
   ],
   "packages": [
@@ -212,6 +236,126 @@
       "depends_on": ["W1"],
       "task_prompt": "Implement orchestrate plan/run/review commands using pack handoffs and agent run dispatch.",
       "acceptance": ["Can dispatch one package JSON to agent run", "tests pass"]
+    },
+    {
+      "package_id": "T1.1",
+      "role": "worker",
+      "title": "Feature implementation discipline",
+      "allowed_paths": ["src/agenvantage/presets.py", "tests/test_presets.py"],
+      "task_prompt": "Add full, lite, and off implementation discipline variants to feature handoffs.",
+      "acceptance": ["Preset tests pass", "Full ladder is the default"]
+    },
+    {
+      "package_id": "T1.2",
+      "role": "worker",
+      "title": "Agent skill discipline sync",
+      "allowed_paths": ["src/agenvantage/resources/agenvantage-context/SKILL.md", "tests/test_agent_integrations.py"],
+      "task_prompt": "Synchronize output discipline and missing-signal escalation into the bundled skill.",
+      "acceptance": ["Skill install tests pass"]
+    },
+    {
+      "package_id": "T1.3",
+      "role": "worker",
+      "title": "Guard-test reservation",
+      "allowed_paths": ["src/agenvantage/repo_context.py", "tests/test_repo_context.py"],
+      "task_prompt": "Reserve matching guard and contract tests before optional feature context.",
+      "acceptance": ["Guard test remains mandatory"]
+    },
+    {
+      "package_id": "T1.4",
+      "role": "worker",
+      "title": "Discipline CLI flag",
+      "allowed_paths": ["src/agenvantage/cli.py", "tests/test_cli.py"],
+      "task_prompt": "Expose pack --discipline and record it in handoff JSON.",
+      "acceptance": ["CLI tests pass"]
+    },
+    {
+      "package_id": "T2.1",
+      "role": "worker",
+      "title": "MCP bounded context expansion",
+      "allowed_paths": ["src/agenvantage/mcp_server.py", "tests/test_mcp_server.py"],
+      "task_prompt": "Implement expand_context with incremental budgets and a three-round cap.",
+      "acceptance": ["MCP tests pass", "Expansion budget is respected"]
+    },
+    {
+      "package_id": "T2.2",
+      "role": "worker",
+      "title": "Adaptive grounding and escalation",
+      "allowed_paths": ["src/agenvantage/repo_context.py", "src/agenvantage/context_planner.py"],
+      "task_prompt": "Use adaptive feature budgets and require expansion when evidence is missing.",
+      "acceptance": ["Cold-start ready cases are 2/2"]
+    },
+    {
+      "package_id": "T2.3",
+      "role": "verifier",
+      "title": "Feature retrieval regression gate",
+      "allowed_paths": ["benchmarks/feature_work_validation.py", "docs/three-layer-stack-results.md"],
+      "task_prompt": "Run and record feature-work benchmark metrics.",
+      "acceptance": ["Recall regression stays within 3 percentage points"]
+    },
+    {
+      "package_id": "T3.1",
+      "role": "worker",
+      "title": "Agent role configuration",
+      "allowed_paths": ["examples/agent_roles.json"],
+      "task_prompt": "Define manager, worker, and verifier model defaults.",
+      "acceptance": ["Role config is valid JSON"]
+    },
+    {
+      "package_id": "T3.2",
+      "role": "worker",
+      "title": "Real worker dispatch",
+      "allowed_paths": ["src/agenvantage/orchestrator.py", "tests/test_orchestrator.py"],
+      "task_prompt": "Dispatch Codex or Claude workers with configurable models.",
+      "acceptance": ["No placeholder shell command remains"]
+    },
+    {
+      "package_id": "T3.3",
+      "role": "worker",
+      "title": "Orchestration CLI routing",
+      "allowed_paths": ["src/agenvantage/cli.py", "tests/test_orchestrator.py"],
+      "task_prompt": "Wire worker provider/model flags and verifier subcommand.",
+      "acceptance": ["CLI help exposes routing flags"]
+    },
+    {
+      "package_id": "T3.4",
+      "role": "worker",
+      "title": "Role token ledger",
+      "allowed_paths": ["src/agenvantage/observability.py", "tests/test_observability.py"],
+      "task_prompt": "Record role, model, and per-role input token totals on traces.",
+      "acceptance": ["Trace metadata includes role ledger"]
+    },
+    {
+      "package_id": "T4.1",
+      "role": "worker",
+      "title": "Three-layer results",
+      "allowed_paths": ["docs/three-layer-stack-results.md"],
+      "task_prompt": "Publish shipped features, metrics, commands, and known gaps.",
+      "acceptance": ["Claim boundaries remain conservative"]
+    },
+    {
+      "package_id": "T4.2",
+      "role": "worker",
+      "title": "Three-layer README workflow",
+      "allowed_paths": ["README.md"],
+      "task_prompt": "Add copy-paste three-layer workflow commands.",
+      "acceptance": ["README commands are current"]
+    },
+    {
+      "package_id": "T4.3",
+      "role": "worker",
+      "title": "Partition registration",
+      "allowed_paths": ["examples/agent_development_partition.json"],
+      "task_prompt": "Register all three-layer work packages.",
+      "acceptance": ["orchestrate plan succeeds"]
+    },
+    {
+      "package_id": "T4.4",
+      "role": "verifier",
+      "title": "Three-layer smoke benchmark",
+      "allowed_paths": ["benchmarks/three_layer_smoke.py"],
+      "task_prompt": "Smoke discipline, expansion, and orchestration planning without provider calls.",
+      "acceptance": ["Smoke exits zero"]
     }
   ],
   "manager_review_checklist": [

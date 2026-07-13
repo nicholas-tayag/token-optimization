@@ -99,6 +99,29 @@ The experiment harness also provides:
 It does **not** yet include checked-in provider-backed result artifacts, prove
 broad workload quality retention, or represent a production enterprise system.
 
+## Three-Layer Stack
+
+AgenVantage can now combine three independent controls in one local workflow:
+
+1. `pack` limits initial repository input and exposes missing evidence.
+2. `orchestrate` routes bounded packages to configurable Codex or Claude workers
+   and records role/model token ledgers.
+3. Feature handoffs apply a minimum-code implementation ladder after grounding.
+
+```bash
+agenvantage pack --preset feature --discipline full \
+  --task "Add guard-test reservation" --handoff-json
+agenvantage orchestrate run --package T1.1 \
+  --worker-provider codex --worker-model gpt-5.4-mini
+agenvantage orchestrate verify --package T1.1 --json
+.venv/bin/python benchmarks/three_layer_smoke.py
+```
+
+When a handoff reports `missing_signals`, an MCP client should call
+`expand_context` before implementation. See
+[the measured stack results](docs/three-layer-stack-results.md) for benchmark
+numbers and claim boundaries.
+
 ## Quick Start
 
 Try the built-in demo in three commands:
