@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import subprocess
 
@@ -8,6 +9,7 @@ from agenvantage.repo_context import (
     chunks_for_repo,
     rank_chunks,
     source_files,
+    write_package_outputs,
 )
 from agenvantage.repo_index import build_repository_index
 from agenvantage.tokenizer import TokenCounter
@@ -264,6 +266,124 @@ def test_feature_context_package_reports_change_surface_with_tests(
     assert "tests/rateLimiter.test.ts" in selected_paths
 
 
+def test_feature_cli_pack_reserves_repository_import_guard(tmp_path: Path, monkeypatch) -> None:
+    cache_root = tmp_path.parent / "agenvantage-cache-cli-guard"
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(cache_root))
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\naddopts = '-q'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "cli.py").write_text(
+        "def help_json():\n    return {'options': []}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_cli.py").write_text(
+        "def test_help_json_shape():\n    assert {'options': []}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_imports.py").write_text(
+        "import sys\n\n"
+        "def test_help_json_uses_lightweight_imports():\n"
+        "    assert 'click' not in sys.modules\n",
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Add --help-json to the CLI without eager imports",
+        budget=4_000,
+        counter=TokenCounter(),
+        workflow="feature",
+    )
+
+    guard = report["change_surface"]["guard_test_targets"]
+    validation = report["validation_requirements"]
+    assert len(guard) == 1
+    assert guard[0]["path"] == "tests/test_imports.py"
+    assert {"test_imports", "sys_modules", "lightweight_imports"} <= set(
+        guard[0]["signals"]
+    )
+    assert validation["full_suite_required"] is True
+    assert validation["full_suite_command"] == "pytest"
+    assert validation["guard_test"]["selected"] is True
+    assert report["validation"] == validation
+    selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
+    assert {"src/cli.py", "tests/test_cli.py", "tests/test_imports.py"} <= selected_paths
+    assert any(
+        chunk["path"] == "tests/test_imports.py"
+        and "sys.modules" in chunk["text"]
+        for chunk in report["selected_chunks"]
+    )
+    assert report["selected_context_tokens"] <= report["effective_budget"]
+
+    manifest_path = tmp_path / "manifest.json"
+    write_package_outputs("", report, None, manifest_path)
+    serialized = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert serialized["validation_requirements"] == {
+        "full_suite_required": True,
+        "full_suite_command": "pytest",
+        "ready": True,
+        "missing_mandatory_evidence": [],
+        "required_minimum_budget": validation["required_minimum_budget"],
+        "guard_test": {
+            "path": "tests/test_imports.py",
+            "chunk_id": validation["guard_test"]["chunk_id"],
+            "selected": True,
+        },
+    }
+
+
+def test_feature_pack_fails_closed_when_mandatory_guard_cannot_fit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv(
+        "AGENVANTAGE_INDEX_ROOT", str(tmp_path.parent / "agenvantage-cache-tight-guard")
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\naddopts = '-q'\n", encoding="utf-8"
+    )
+    (tmp_path / "src" / "cli.py").write_text(
+        "def help_json():\n    return {'options': []}\n" * 80,
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_cli.py").write_text(
+        "def test_help_json_shape():\n    assert {'options': []}\n" * 80,
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_imports.py").write_text(
+        "import sys\n\n"
+        + (
+            "def test_help_json_uses_lightweight_imports():\n"
+            "    assert 'click' not in sys.modules\n"
+        )
+        * 80,
+        encoding="utf-8",
+    )
+
+    _, report = build_context_package(
+        tmp_path,
+        "Add --help-json to the CLI without eager imports",
+        budget=350,
+        counter=TokenCounter(),
+        workflow="feature",
+    )
+
+    validation = report["validation_requirements"]
+    assert report["selected_context_tokens"] <= report["effective_budget"]
+    assert validation["full_suite_required"] is True
+    assert validation["ready"] is False
+    assert validation["missing_mandatory_evidence"]
+    assert validation["required_minimum_budget"] > report["budget"]
+    assert report["handoff_ready"] is False
+    assert report["required_minimum_budget"] == validation["required_minimum_budget"]
+    assert report["context_sufficiency"]["status"] == "insufficient_budget"
+    assert report["context_sufficiency"]["missing_mandatory_evidence"]
+
+
 def test_context_package_builds_and_reuses_repository_index(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -369,6 +489,61 @@ def test_rank_chunks_uses_chunk_local_symbol_metadata() -> None:
 
     assert ranked[0].chunk_id == "lib/form-autofill.mjs#L1-L20"
     assert "autofill" in ranked[0].matched_terms
+
+
+def test_rank_chunks_preserves_repo_command_anchor_for_stop_word() -> None:
+    shared = {
+        "relative_path": "graphify/cli.py",
+        "display_path": "graphify/cli.py",
+        "repo_label": "graphify",
+        "repo_path": "/tmp/graphify",
+        "tokens": 20,
+        "file_symbols": ("dispatch_command", "explain"),
+    }
+    chunks = (
+        CodeChunk(
+            chunk_id="graphify/cli.py#L1-L20",
+            start_line=1,
+            end_line=20,
+            text="def dispatch_command():\n    return build_graph()\n",
+            **shared,
+        ),
+        CodeChunk(
+            chunk_id="graphify/cli.py#L21-L40",
+            start_line=21,
+            end_line=40,
+            text='elif command == "explain":\n    print("explain node")\n',
+            **shared,
+        ),
+    )
+
+    ranked = rank_chunks(chunks, "Add graphify explain confidence filtering")
+
+    assert ranked[0].chunk_id == "graphify/cli.py#L21-L40"
+
+
+def test_rank_chunks_boosts_command_anchor_in_test_path() -> None:
+    chunks = tuple(
+        CodeChunk(
+            chunk_id=f"{path}#L1-L10",
+            relative_path=path,
+            display_path=path,
+            repo_label="graphify",
+            repo_path="/tmp/graphify",
+            start_line=1,
+            end_line=10,
+            text=text,
+            tokens=20,
+        )
+        for path, text in (
+            ("tests/test_confidence.py", "def test_confidence_score(): pass\n"),
+            ("tests/test_explain_cli.py", "def test_default_output(): pass\n"),
+        )
+    )
+
+    ranked = rank_chunks(chunks, "Add graphify explain --confidence regression tests")
+
+    assert ranked[0].relative_path == "tests/test_explain_cli.py"
 
 
 def test_chunks_for_repo_carries_nearby_symbol_anchors_across_large_function_bodies(
@@ -681,3 +856,41 @@ def test_multi_repo_context_package_disambiguates_same_relative_paths(tmp_path: 
     selected_paths = {chunk["path"] for chunk in report["selected_chunks"]}
     assert "frontend/src/index.ts" in selected_paths
     assert "backend/src/index.ts" in selected_paths
+
+
+def test_context_package_records_line_pruning_in_manifest(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "rateLimiter.ts").write_text(
+        "\n".join(
+            [
+                "export function rateLimiter(redis) {",
+                "  // fail open when Redis cannot be reached",
+                "  return redis.consume('ratelimit');",
+                "}",
+                "",
+                "const fillerOne = 1;",
+                "const fillerTwo = 2;",
+                "# unrelated noise line alpha",
+                "# unrelated noise line beta",
+                "# unrelated noise line gamma",
+                "# unrelated noise line delta",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    markdown, report = build_context_package(
+        tmp_path,
+        "Explain rate limiter Redis fail open behavior",
+        budget=400,
+        counter=TokenCounter(),
+    )
+
+    pruning = report["line_pruning"]
+    assert pruning["enabled"] is True
+    assert pruning["goal_hint_count"] > 0
+    assert pruning["total_dropped_lines"] >= 1
+    assert pruning["selected_block_tokens_saved"] >= 0
+    assert "unrelated noise line delta" not in markdown
+    assert "rateLimiter" in markdown

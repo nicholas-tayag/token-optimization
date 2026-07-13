@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agenvantage.studio import render_graph_policy_chip_html
+
 
 SCHEMA_VERSION = 1
 ANNOTATION_LABELS = {
@@ -197,6 +199,14 @@ def record_pack_trace(
         "uncovered_query_terms": report.get("uncovered_query_terms", []),
         "multimodal": report.get("multimodal", {}),
     }
+    graph = report.get("graph") or {}
+    if graph:
+        metadata["graph"] = {
+            "backend": graph.get("backend"),
+            "decision": graph.get("decision"),
+            "used": graph.get("used"),
+            "reasons": list(graph.get("reasons") or [])[:4],
+        }
     started = time.time()
     with _connect(db_path) as connection:
         connection.execute(
@@ -697,7 +707,20 @@ def annotate_trace(
 
 def _load_dashboard_traces(db_path: Path, *, limit: int = 100) -> list[dict[str, Any]]:
     traces = list_traces(db_path, limit=limit)
-    return [load_trace(db_path, trace.trace_id) for trace in traces]
+    loaded: list[dict[str, Any]] = []
+    for trace in traces:
+        payload = load_trace(db_path, trace.trace_id)
+        try:
+            manifest_artifact = load_trace_artifact(
+                db_path,
+                trace.trace_id,
+                kind="decision_manifest",
+            )
+            payload["manifest"] = json.loads(manifest_artifact["content"])
+        except (KeyError, json.JSONDecodeError):
+            payload["manifest"] = None
+        loaded.append(payload)
+    return loaded
 
 
 def _fmt_int(value: Any) -> str:
@@ -712,6 +735,32 @@ def _fmt_float(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "0.00"
+
+
+def _format_provider_usage_item(usage: dict[str, Any]) -> str:
+    reasoning = 0
+    raw_payload = usage.get("raw_json") or usage.get("raw")
+    if raw_payload:
+        try:
+            payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+            reasoning = int(payload.get("reasoning_output_tokens") or 0)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            reasoning = 0
+    trajectory_note = ""
+    if reasoning:
+        trajectory_note = f" / {_fmt_int(reasoning)} reasoning"
+    policy = str(usage.get("policy_id") or "")
+    policy_suffix = f" ({html.escape(policy)})" if policy else ""
+    return (
+        "<li>"
+        f"<strong>{html.escape(str(usage.get('provider', 'provider')))}{policy_suffix}</strong>"
+        f"<span>{_fmt_int(usage.get('input_tokens'))} in / "
+        f"{_fmt_int(usage.get('cached_input_tokens'))} cached / "
+        f"{_fmt_int(usage.get('output_tokens'))} out{trajectory_note}</span>"
+        f"<em>${_fmt_float(usage.get('request_cost_usd'))} "
+        f"{html.escape(str(usage.get('reconciliation_status', 'unreconciled')))}</em>"
+        "</li>"
+    )
 
 
 def _median(values: list[float]) -> float:
@@ -926,11 +975,15 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
     trace_cards = []
     for trace in traces:
         metadata = trace.get("metadata") or {}
+        manifest = trace.get("manifest") or {}
         selected_files = metadata.get("selected_files") or []
         missing = metadata.get("missing_signals") or []
+        graph = metadata.get("graph") or manifest.get("graph") or {}
+        change_surface = manifest.get("change_surface") or {}
         spans = trace.get("spans") or []
         annotations = trace.get("annotations") or []
         provider_usage = trace.get("provider_usage") or []
+        graph_chip_html = render_graph_policy_chip_html(graph if isinstance(graph, dict) else {})
         trace_text = " ".join(
             [
                 str(trace.get("task") or ""),
@@ -983,18 +1036,34 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         )
         provider_usage_html = (
             "".join(
-                "<li>"
-                f"<strong>{html.escape(str(usage.get('provider', 'provider')))}</strong>"
-                f"<span>{_fmt_int(usage.get('input_tokens'))} in / "
-                f"{_fmt_int(usage.get('cached_input_tokens'))} cached / "
-                f"{_fmt_int(usage.get('output_tokens'))} out</span>"
-                f"<em>${_fmt_float(usage.get('request_cost_usd'))} "
-                f"{html.escape(str(usage.get('reconciliation_status', 'unreconciled')))}</em>"
-                "</li>"
+                _format_provider_usage_item(usage)
                 for usage in provider_usage
             )
             if provider_usage
             else "<li class=\"muted\">No provider-reported usage imported.</li>"
+        )
+        change_surface_html = []
+        for label, key in (
+            ("Edit", "edit_targets"),
+            ("Tests", "test_targets"),
+            ("Config", "config_targets"),
+            ("Support", "supporting_targets"),
+        ):
+            items = change_surface.get(key) or []
+            paths = [
+                str(item.get("path") if isinstance(item, dict) else item)
+                for item in items
+                if (item.get("path") if isinstance(item, dict) else item)
+            ]
+            if paths:
+                change_surface_html.append(
+                    f"<li><strong>{html.escape(label)}</strong>"
+                    f"<span>{html.escape(', '.join(paths[:4]))}</span></li>"
+                )
+        change_surface_section = (
+            "".join(change_surface_html)
+            if change_surface_html
+            else "<li class=\"muted\">No structured change surface recorded.</li>"
         )
         trace_cards.append(
             f"""
@@ -1016,9 +1085,14 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
                 <div><strong>{_fmt_int(trace.get('tokens_saved'))}</strong><span>tokens saved</span></div>
                 <div><strong>{_fmt_float(trace.get('reduction_percent'))}%</strong><span>reduction</span></div>
               </div>
+              <p class="trace-graph">{graph_chip_html}</p>
               <details open>
                 <summary>Selected files</summary>
                 <ul>{selected_html}</ul>
+              </details>
+              <details>
+                <summary>Change surface</summary>
+                <ul>{change_surface_section}</ul>
               </details>
               <details>
                 <summary>Warnings</summary>
@@ -1257,6 +1331,24 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
         font-size: 0.78rem;
         white-space: nowrap;
       }}
+      .trace-graph {{
+        margin: 0.35rem 0 0.75rem;
+      }}
+      .chip {{
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        border-radius: 999px;
+        padding: 0.28rem 0.65rem;
+        font-size: 0.82rem;
+        background: #ecfeff;
+        color: #0e7490;
+        border: 1px solid #a5f3fc;
+      }}
+      .chip.positive {{ background: #ecfdf5; color: #047857; border-color: #a7f3d0; }}
+      .chip.warning {{ background: #fff7ed; color: var(--warn); border-color: #fed7aa; }}
+      .chip.neutral {{ background: #f1f5f9; color: var(--muted); border-color: var(--line); }}
+      .chip em {{ font-style: normal; opacity: 0.85; }}
       .trace-metrics {{
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -1328,6 +1420,7 @@ def render_observability_dashboard(db_path: Path, *, limit: int = 100) -> str:
       <p>Local Datadog-style visibility for AI coding-agent tasks: traces, spans,
       context selection, token savings, and missing-signal warnings.</p>
       <p><strong>Database:</strong> {html.escape(str(db_path.resolve()))}</p>
+      <p><a href="studio/index.html">Open AgenVantage Studio</a> for setup and context preview.</p>
     </header>
     <main>
       <section class="stats">

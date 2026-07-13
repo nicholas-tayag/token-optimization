@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "prd": "docs/prd-hierarchical-agent-development.md",
+  "generated_at": "2026-07-12",
+  "north_star_metric": "total input-equivalent tokens per successfully completed task",
+  "roles": {
+    "manager": {
+      "responsibilities": [
+        "Read PRD and benchmark baselines",
+        "Slice and assign work packages",
+        "Review worker diffs and handoff JSON",
+        "Resolve architecture conflicts",
+        "Run acceptance benchmarks before merge"
+      ],
+      "model_tier": "strong-reasoning",
+      "recommended_models": [
+        "claude-opus-4",
+        "claude-sonnet-4-20250514",
+        "gpt-5.x-high"
+      ],
+      "forbidden": [
+        "bulk_implementation",
+        "unscoped_refactors",
+        "direct_merge_to_main"
+      ]
+    },
+    "worker": {
+      "responsibilities": [
+        "Implement single bounded package",
+        "Write and run scoped tests",
+        "Return structured handoff JSON",
+        "Follow allowed_paths only"
+      ],
+      "model_tier": "fast-code",
+      "recommended_models": [
+        "composer-2.5",
+        "gpt-4o-mini",
+        "gpt-5.4-mini",
+        "claude-haiku-4"
+      ],
+      "forbidden": [
+        "cross_package_changes",
+        "dependency_additions_without_manager_approval",
+        "prd_edits"
+      ]
+    },
+    "verifier": {
+      "responsibilities": [
+        "Run full or wave-level pytest",
+        "Run compare smoke on external fixture",
+        "Report pass/fail JSON only"
+      ],
+      "model_tier": "fast-code",
+      "recommended_models": ["composer-2.5", "gpt-4o-mini"]
+    }
+  },
+  "waves": [
+    {
+      "wave_id": "W0",
+      "name": "foundation",
+      "owner": "manager",
+      "packages": ["M0.1", "M0.2"]
+    },
+    {
+      "wave_id": "W1",
+      "name": "p0_productize",
+      "parallel": true,
+      "packages": ["W1.1", "W1.2", "W1.3"]
+    },
+    {
+      "wave_id": "W2",
+      "name": "p1_context_quality",
+      "parallel": true,
+      "depends_on": ["W0"],
+      "packages": ["W2.1", "W2.2", "W2.3", "W2.4"]
+    },
+    {
+      "wave_id": "W3",
+      "name": "p2_hybrid_retrieval",
+      "parallel": true,
+      "depends_on": ["W2"],
+      "packages": ["W3.1", "W3.2", "W3.3"]
+    },
+    {
+      "wave_id": "W4",
+      "name": "p3_dynamic_context",
+      "parallel": true,
+      "depends_on": ["W2"],
+      "packages": ["W4.1", "W4.2", "W4.3"]
+    },
+    {
+      "wave_id": "W5",
+      "name": "p4_orchestration",
+      "parallel": false,
+      "depends_on": ["W1"],
+      "packages": ["W5.1", "W5.2", "W5.3"]
+    }
+  ],
+  "packages": [
+    {
+      "package_id": "M0.1",
+      "role": "manager",
+      "title": "Finalize package specs and claim gates",
+      "acceptance": ["PRD reviewed", "Wave 1 tasks unblocked"]
+    },
+    {
+      "package_id": "M0.2",
+      "role": "manager",
+      "title": "Baseline benchmark snapshot",
+      "acceptance": ["feature_work_validation summary recorded", "compare smoke on Click documented"]
+    },
+    {
+      "package_id": "W1.1",
+      "role": "worker",
+      "title": "Copilot and generic agent integration docs",
+      "allowed_paths": ["docs/plug-and-play-agent-integrations.md", "README.md"],
+      "task_prompt": "Document Copilot and generic stdin piping using agenvantage pack and agent run. Add copy-paste examples.",
+      "acceptance": ["Docs section exists", "No code changes outside allowed paths"]
+    },
+    {
+      "package_id": "W1.2",
+      "role": "worker",
+      "title": "compare --live runner script",
+      "allowed_paths": [
+        "benchmarks/paired_codex_validation.py",
+        "src/agenvantage/paired_codex_validation.py",
+        "tests/test_paired_codex_validation.py"
+      ],
+      "task_prompt": "Add a shell/Python runner that executes control and treatment Codex JSONL capture and feeds compare import mode.",
+      "acceptance": ["Script documented", "Import mode tested", "pytest green"]
+    },
+    {
+      "package_id": "W1.3",
+      "role": "worker",
+      "title": "Codex JSONL trace import in dashboard",
+      "allowed_paths": [
+        "src/agenvantage/observability.py",
+        "tests/test_observability.py"
+      ],
+      "task_prompt": "Surface imported Codex trajectory tokens on observability trace cards when provider import is used.",
+      "acceptance": ["Dashboard shows trajectory totals", "tests pass"]
+    },
+    {
+      "package_id": "W2.1",
+      "role": "worker",
+      "title": "Goal-conditioned line pruner module",
+      "allowed_paths": ["src/agenvantage/pruning.py", "tests/test_pruning.py"],
+      "task_prompt": "Implement SWE-Pruner-inspired line scoring using task goal hints from preset and change_surface. Pure heuristic v1.",
+      "acceptance": ["Unit tests for line retention", "No repo_context wiring yet"]
+    },
+    {
+      "package_id": "W2.2",
+      "role": "worker",
+      "title": "Wire pruner into render path",
+      "allowed_paths": ["src/agenvantage/repo_context.py", "src/agenvantage/pruning.py", "tests/"],
+      "depends_on": ["W2.1"],
+      "task_prompt": "Apply line pruner to selected chunks before markdown render; record pruned lines in manifest.",
+      "acceptance": ["Benchmark token reduction or no regression on recall", "pytest green"]
+    },
+    {
+      "package_id": "W2.3",
+      "role": "worker",
+      "title": "PageRank repo map section",
+      "allowed_paths": ["src/agenvantage/repo_map.py", "tests/test_repo_map.py"],
+      "task_prompt": "Add PageRank over import/symbol graph; emit compact ranked map block capped at 1500 tokens.",
+      "acceptance": ["Map renders in pack output", "tests pass"]
+    },
+    {
+      "package_id": "W2.4",
+      "role": "worker",
+      "title": "Adaptive evidence-slot budgets",
+      "allowed_paths": ["src/agenvantage/context_planner.py", "benchmarks/cold_start_sufficiency.py", "tests/"],
+      "task_prompt": "Scale budget allocation per evidence slot based on grounding status and missing signals.",
+      "acceptance": ["cold_start_sufficiency metrics improve or hold", "pytest green"]
+    },
+    {
+      "package_id": "W3.1",
+      "role": "worker",
+      "title": "BM25F chunk index",
+      "allowed_paths": ["src/agenvantage/repo_index.py", "tests/test_repo_index.py"],
+      "depends_on": ["W2"],
+      "task_prompt": "Add local BM25F scoring over path, symbol, and body fields for ranked chunks.",
+      "acceptance": ["Index builds on warm run", "tests pass"]
+    },
+    {
+      "package_id": "W3.2",
+      "role": "worker",
+      "title": "Rank fusion and ablation",
+      "allowed_paths": ["src/agenvantage/repo_context.py", "benchmarks/graphify_ablation.py"],
+      "depends_on": ["W3.1"],
+      "task_prompt": "Fuse lexical, structural, and graph channels with configurable weights; report ablation JSON.",
+      "acceptance": ["Ablation runner documents channel deltas"]
+    },
+    {
+      "package_id": "W4.1",
+      "role": "worker",
+      "title": "MCP expand_context tool",
+      "allowed_paths": ["src/agenvantage/mcp_server.py", "tests/test_mcp_server.py"],
+      "depends_on": ["W2"],
+      "task_prompt": "Add MCP tool to fetch next-ranked chunks within token budget for a trace/session id.",
+      "acceptance": ["tools/list includes expand_context", "integration test passes"]
+    },
+    {
+      "package_id": "W5.2",
+      "role": "worker",
+      "title": "Orchestrator CLI MVP",
+      "allowed_paths": [
+        "src/agenvantage/orchestrator.py",
+        "src/agenvantage/cli.py",
+        "tests/test_orchestrator.py"
+      ],
+      "depends_on": ["W1"],
+      "task_prompt": "Implement orchestrate plan/run/review commands using pack handoffs and agent run dispatch.",
+      "acceptance": ["Can dispatch one package JSON to agent run", "tests pass"]
+    }
+  ],
+  "manager_review_checklist": [
+    "Diff touches only allowed_paths",
+    "Handoff JSON present with tests_passed true",
+    "No new dependencies without approval",
+    "Benchmark regression within 3pp success / no recall drop",
+    "Claim boundary language unchanged unless evidence supports it"
+  ]
+}

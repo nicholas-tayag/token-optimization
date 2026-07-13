@@ -16,12 +16,17 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+graphify = ["graphifyy==0.9.13"]
 
 [project.scripts]
 agenvantage = "agenvantage.cli:main"
+agenvantage-mcp = "agenvantage.mcp_server:run_stdio_server"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agenvantage = ["resources/**/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

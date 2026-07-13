@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Paired Codex control-vs-AgenVantage validation cases.",
+  "default_runner": {
+    "provider": "codex",
+    "model": "gpt-5.4-mini",
+    "ephemeral": true,
+    "sandbox": "workspace-write"
+  },
+  "cases": [
+    {
+      "case_id": "click-progressbar-update-min-steps",
+      "repository": "https://github.com/pallets/click.git",
+      "repo_path": "external/click-realistic-3571",
+      "commit": "b67832c2167e5b0ff6764a8c04a0a9087e697b5a",
+      "feature": "Fix the Click progress bar so that when show_pos=True and update_min_steps is greater than 1, the rendered final position shows the completed total (for example 20/20) instead of stopping early (for example 14/20). Add or update regression coverage in the termui tests and run the repository test suite before finishing.",
+      "expected_edit_paths": ["src/click/_termui_impl.py"],
+      "expected_test_paths": ["tests/test_termui.py"],
+      "acceptance_command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/test_termui.py::test_progress_bar_update_min_steps_renders_final_position",
+        "-q"
+      ],
+      "repository_test_command": ["python", "-m", "pytest", "-q", "--tb=no"],
+      "budget": 6000,
+      "tokenizer_model": "gpt-4o-mini",
+      "graph_backend": "auto"
+    }
+  ]
+}

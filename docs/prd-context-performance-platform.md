@@ -46,8 +46,9 @@ minimize total realized task cost
 subject to task success and grounding quality remaining acceptable
 ```
 
-This distinction is required by the current evidence. AgenVantage's 12-case
-feature benchmark reports a `96.73%` median full-scan-to-pack reduction, but a
+This distinction is required by the current evidence. AgenVantage's current
+12-case feature benchmark reports a `93.22%` median additive-corpus-to-pack reduction,
+with stronger coverage than the earlier snapshot, but a
 cold run on the previously unseen `gameFit` repository reduced `157,858` tokens
 to `2,242` (`98.58%`) while omitting dashboard and styling context needed to
 start the requested feature confidently. Compression worked; minimum-sufficient
@@ -96,21 +97,24 @@ The current repository implements:
 - local SQLite traces and provider-record normalization; and
 - deterministic feature and use-case benchmarks.
 
-Current 12-task feature benchmark across four owned repositories:
+Current 12-task feature benchmark across four owned repositories (July 11,
+2026; rerun with `benchmarks/feature_work_validation.py`):
 
 | Metric | Current result |
 | --- | ---: |
-| Edit-target recall | `1.0000` |
-| Test-target recall | `0.8333` |
-| Required-observation recall | `0.9167` |
-| Answer-plan pass rate | `0.8333` |
-| Median full-scan prompt | `80,921.5` tokens |
-| Median packed prompt | `1,993.0` tokens |
-| Median reduction | `96.73%` |
-| Total full-scan counterfactual tokens omitted | `1,318,563` |
+| Edit-target recall | `0.9583` |
+| Test-target recall | `1.0000` |
+| Required-observation recall | `0.9722` |
+| Context-plan readiness rate | `0.9167` |
+| Median full-scan prompt | `74,941` tokens |
+| Median packed prompt | `3,919` tokens |
+| Median reduction | `93.22%` |
 
-These results verify local context reduction against a rendered full-scan
-counterfactual. They do not prove that a real coding agent would otherwise send
+These results verify local context reduction against an additive full-scan
+counterfactual and measure deterministic retrieval coverage. The
+counterfactual is summed from independently tokenized blocks, not rendered or
+sent to a model. These results do not prove
+that a real coding agent would otherwise send
 the full scan, that the provider billed fewer tokens, or that completed patches
 retain quality.
 
@@ -739,7 +743,7 @@ Targets are release gates, not current claims.
 - line/region recall under 6K packed tokens `>= 0.85`;
 - test/validation target recall `>= 0.80` when such targets exist;
 - evidence-slot coverage `>= 0.85`;
-- answer-plan sufficiency `>= 0.85`;
+- context-plan readiness `>= 0.85`;
 - insufficient-context false-confidence rate `<= 0.05`;
 - median candidate-context reduction `>= 0.85`; and
 - warm deterministic retrieval p95 `< 750 ms` on repositories up to 10K files.

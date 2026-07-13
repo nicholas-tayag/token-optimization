@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "graphify": {
+    "package": "graphifyy",
+    "version": "0.9.13",
+    "commit": "eec7a0183847cbdc8a87d92b233759a5204b89fe",
+    "mode": "code-only"
+  },
+  "repositories": {
+    "click": {
+      "url": "https://github.com/pallets/click.git",
+      "path": "click",
+      "commit": "b67832c2167e5b0ff6764a8c04a0a9087e697b5a",
+      "graph": "click-graph-pinned/graphify-out/graph.json"
+    },
+    "fastapi": {
+      "url": "https://github.com/fastapi/fastapi.git",
+      "path": "fastapi",
+      "commit": "7cb06f360dd44efac059848df1a9beee7643b018",
+      "graph": "fastapi-graph-pinned/graphify-out/graph.json"
+    }
+  },
+  "cases": [
+    {
+      "case_id": "click-completion-argument-default-source",
+      "repository": "click",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Shell completion wrongly treats arguments with default values as complete even when the user never typed them on the command line. Fix completion across the parser so defaulted arguments can still receive value suggestions, using the same ParameterSource semantics as parsing.",
+      "expected_edit_targets": ["src/click/shell_completion.py", "src/click/core.py"],
+      "expected_test_targets": ["tests/test_shell_completion.py"],
+      "evidence_slots": {
+        "incomplete-check": {"path": "src/click/shell_completion.py", "line_range": [550, 561], "all_anchor_tokens": ["isinstance", "Argument", "ParameterSource", "COMMANDLINE"]},
+        "parameter-source-enum": {"path": "src/click/core.py", "line_range": [169, 183], "all_anchor_tokens": ["ParameterSource", "get_parameter_source", "DEFAULT_MAP"]},
+        "completion-dispatch": {"path": "src/click/shell_completion.py", "line_range": [660, 704], "all_anchor_tokens": ["_resolve_incomplete", "_is_incomplete_argument", "_is_incomplete_option"]},
+        "regression-test": {"path": "tests/test_shell_completion.py", "line_range": [130, 142], "all_anchor_tokens": ["test_argument_default", "Argument", "Choice", "_get_words"]}
+      }
+    },
+    {
+      "case_id": "click-parser-split-arg-string-deprecation",
+      "repository": "click",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Review and update the deprecated click.parser.split_arg_string compatibility shim across modules so legacy imports still work, emit the Click 9.0 migration warning, and delegate to the canonical shell completion implementation.",
+      "expected_edit_targets": ["src/click/parser.py", "src/click/shell_completion.py"],
+      "expected_test_targets": ["tests/test_parser.py"],
+      "evidence_slots": {
+        "deprecation-shim": {"path": "src/click/parser.py", "line_range": [522, 531], "all_anchor_tokens": ["split_arg_string", "shell_completion", "DeprecationWarning"]},
+        "canonical-impl": {"path": "src/click/shell_completion.py", "line_range": [506, 523], "all_anchor_tokens": ["split_arg_string", "shlex", "incomplete"]},
+        "behavior-test": {"path": "tests/test_parser.py", "line_range": [5, 19], "all_anchor_tokens": ["split_arg_string", "test_split_arg_string"]}
+      }
+    },
+    {
+      "case_id": "click-clirunner-isolation-ansi-strip",
+      "repository": "click",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "CliRunner.isolation(color=False) should make captured stdout and stderr strip ANSI across the testing and compatibility modules. Fix isolation so it patches the shared should_strip_ansi hook used by utils and _compat.",
+      "expected_edit_targets": ["src/click/testing.py", "src/click/_compat.py"],
+      "expected_test_targets": ["tests/test_compat.py", "tests/test_testing.py"],
+      "evidence_slots": {
+        "isolation-entry": {"path": "src/click/testing.py", "line_range": [399, 409], "all_anchor_tokens": ["isolation", "color", "prompt", "functionality"]},
+        "patch-site": {"path": "src/click/testing.py", "line_range": [516, 523], "all_anchor_tokens": ["should_strip_ansi", "_compat", "utils"]},
+        "ansi-policy": {"path": "src/click/_compat.py", "line_range": [502, 513], "all_anchor_tokens": ["should_strip_ansi", "isatty", "_is_jupyter_kernel_output", "color"]},
+        "compat-test": {"path": "tests/test_compat.py", "line_range": [105, 121], "all_anchor_tokens": ["test_should_strip_ansi", "should_strip_ansi"]}
+      }
+    },
+    {
+      "case_id": "click-progressbar-lazy-impl-delegation",
+      "repository": "click",
+      "budget": 6000,
+      "top_k": 32,
+      "task": "Fix a progress-bar rendering regression across the public progressbar wrapper and the lazily imported ProgressBar implementation kept out of the main import path for startup performance.",
+      "expected_edit_targets": ["src/click/termui.py", "src/click/_termui_impl.py"],
+      "expected_test_targets": ["tests/test_termui.py"],
+      "evidence_slots": {
+        "lazy-import-facade": {"path": "src/click/termui.py", "line_range": [535, 555], "all_anchor_tokens": ["ProgressBar", "_termui_impl", "update_min_steps"]},
+        "impl-class": {"path": "src/click/_termui_impl.py", "line_range": [57, 76], "all_anchor_tokens": ["ProgressBar", "fill_char", "update_min_steps"]},
+        "module-rationale": {"path": "src/click/_termui_impl.py", "line_range": [1, 4], "all_anchor_tokens": ["termui", "import", "time", "infrequently"]},
+        "regression-test": {"path": "tests/test_termui.py", "line_range": [41, 50], "all_anchor_tokens": ["test_progressbar_strip_regression", "progressbar", "_termui_impl"]}
+      }
+    },
+    {
+      "case_id": "click-prompt-show-choices-formatting",
+      "repository": "click",
+      "budget": 6000,
+      "top_k": 28,
+      "task": "Prompts for click.Choice options should list available choices when show_choices is true and omit them when false. Fix the formatting flow across prompt, _build_prompt, Choice, and option regression tests.",
+      "expected_edit_targets": ["src/click/termui.py", "src/click/types.py"],
+      "expected_test_targets": ["tests/test_termui.py"],
+      "evidence_slots": {
+        "prompt-calls-builder": {"path": "src/click/termui.py", "line_range": [209, 211], "all_anchor_tokens": ["_build_prompt", "show_choices", "type"]},
+        "choice-list-rendering": {"path": "src/click/termui.py", "line_range": [107, 117], "all_anchor_tokens": ["_build_prompt", "Choice", "show_choices", "choices"]},
+        "choice-type-def": {"path": "src/click/types.py", "line_range": [284, 296], "all_anchor_tokens": ["Choice", "case_sensitive", "normalize_choice"]},
+        "regression-test": {"path": "tests/test_termui.py", "line_range": [223, 245], "all_anchor_tokens": ["test_choices_list_in_prompt", "show_choices", "day", "week", "month"]}
+      }
+    },
+    {
+      "case_id": "fastapi-validation-error-pipeline",
+      "repository": "fastapi",
+      "budget": 8000,
+      "top_k": 36,
+      "task": "A route returns 422 for invalid input but the detail payload is wrong. Trace and fix the cross-file flow from dependency body error collection through RequestValidationError, default handler registration, and JSON encoding.",
+      "expected_edit_targets": ["fastapi/routing.py", "fastapi/dependencies/utils.py", "fastapi/applications.py", "fastapi/exception_handlers.py"],
+      "expected_test_targets": ["tests/test_multi_body_errors.py", "tests/test_exception_handlers.py"],
+      "evidence_slots": {
+        "route-solve": {"path": "fastapi/routing.py", "line_range": [2189, 2197], "all_anchor_tokens": ["solve_dependencies", "errors", "RequestValidationError"]},
+        "body-error-collect": {"path": "fastapi/dependencies/utils.py", "line_range": [702, 712], "all_anchor_tokens": ["request_body_to_args", "body_errors", "embed_body_fields", "errors"]},
+        "handler-register": {"path": "fastapi/applications.py", "line_range": [1003, 1006], "all_anchor_tokens": ["exception_handlers", "RequestValidationError", "request_validation_exception_handler"]},
+        "handler-encode": {"path": "fastapi/exception_handlers.py", "line_range": [20, 26], "all_anchor_tokens": ["request_validation_exception_handler", "jsonable_encoder", "errors", "422"]}
+      }
+    },
+    {
+      "case_id": "fastapi-openapi-header-alias",
+      "repository": "fastapi",
+      "budget": 8000,
+      "top_k": 32,
+      "task": "OpenAPI schema generation emits the wrong header and query names for fields with underscores or validation_alias. Fix the cross-file alias resolution and underscore-to-hyphen flow in the OpenAPI builder.",
+      "expected_edit_targets": ["fastapi/openapi/utils.py", "fastapi/dependencies/utils.py"],
+      "expected_test_targets": ["tests/test_query_cookie_header_model_extra_params.py"],
+      "evidence_slots": {
+        "openapi-flatten": {"path": "fastapi/openapi/utils.py", "line_range": [117, 122], "all_anchor_tokens": ["get_flat_dependant", "_get_flat_fields_from_params", "path_params", "query_params"]},
+        "openapi-alias": {"path": "fastapi/openapi/utils.py", "line_range": [147, 162], "all_anchor_tokens": ["get_validation_alias", "convert_underscores", "header", "replace"]},
+        "alias-helper": {"path": "fastapi/dependencies/utils.py", "line_range": [1059, 1061], "all_anchor_tokens": ["get_validation_alias", "validation_alias", "alias"]},
+        "header-test": {"path": "tests/test_query_cookie_header_model_extra_params.py", "line_range": [118, 126], "all_anchor_tokens": ["convert_underscores", "x_user_id", "422", "header"]}
+      }
+    },
+    {
+      "case_id": "fastapi-multi-body-embed",
+      "repository": "fastapi",
+      "budget": 8000,
+      "top_k": 32,
+      "task": "Endpoints with multiple Body parameters return 422 or parse the wrong JSON shape. Review and fix the cross-file flow where embed_body_fields is computed at route registration and consumed during request body parsing.",
+      "expected_edit_targets": ["fastapi/routing.py", "fastapi/dependencies/utils.py"],
+      "expected_test_targets": ["tests/test_modules_same_name_body/test_main.py", "tests/test_request_body_parameters_media_type.py"],
+      "evidence_slots": {
+        "route-embed-flag": {"path": "fastapi/routing.py", "line_range": [845, 853], "all_anchor_tokens": ["get_dependant", "get_flat_dependant", "_should_embed_body_fields", "embed_body_fields"]},
+        "embed-logic": {"path": "fastapi/dependencies/utils.py", "line_range": [892, 913], "all_anchor_tokens": ["_should_embed_body_fields", "body_param_names_set", "Form", "embed"]},
+        "body-parse": {"path": "fastapi/dependencies/utils.py", "line_range": [955, 962], "all_anchor_tokens": ["request_body_to_args", "body_fields", "embed_body_fields"]},
+        "multi-body-route": {"path": "tests/test_modules_same_name_body/app/a.py", "line_range": [6, 8], "all_anchor_tokens": ["Body", "compute", "int", "str"]}
+      }
+    },
+    {
+      "case_id": "fastapi-annotated-param-analysis",
+      "repository": "fastapi",
+      "budget": 8000,
+      "top_k": 36,
+      "task": "Annotated Query signatures validate incorrectly or pick the wrong FieldInfo. Fix the cross-file dependency construction in get_dependant and analyze_param plus the Param and Query hierarchy they depend on.",
+      "expected_edit_targets": ["fastapi/dependencies/utils.py", "fastapi/params.py"],
+      "expected_test_targets": ["tests/test_annotated.py"],
+      "evidence_slots": {
+        "dependant-loop": {"path": "fastapi/dependencies/utils.py", "line_range": [309, 316], "all_anchor_tokens": ["analyze_param", "param_details", "is_path_param", "signature_params"]},
+        "annotated-dispatch": {"path": "fastapi/dependencies/utils.py", "line_range": [411, 430], "all_anchor_tokens": ["Annotated", "Param", "Body", "Depends"]},
+        "param-base": {"path": "fastapi/params.py", "line_range": [26, 27], "all_anchor_tokens": ["Param", "FieldInfo", "in_"]},
+        "query-subclass": {"path": "fastapi/params.py", "line_range": [221, 223], "all_anchor_tokens": ["Query", "Param", "query"]}
+      }
+    },
+    {
+      "case_id": "fastapi-response-serialization-fallback",
+      "repository": "fastapi",
+      "budget": 7500,
+      "top_k": 28,
+      "task": "A route with response_model raises ResponseValidationError on bad data while routes without a model should serialize through jsonable_encoder. Debug and fix the cross-file response serialization flow.",
+      "expected_edit_targets": ["fastapi/routing.py", "fastapi/encoders.py"],
+      "expected_test_targets": ["tests/test_validate_response.py", "tests/test_jsonable_encoder.py"],
+      "evidence_slots": {
+        "response-validate": {"path": "fastapi/routing.py", "line_range": [293, 320], "all_anchor_tokens": ["serialize_response", "validate", "ResponseValidationError", "errors"]},
+        "encoder-fallback": {"path": "fastapi/routing.py", "line_range": [332, 333], "all_anchor_tokens": ["jsonable_encoder", "response_content"]},
+        "encoder-impl": {"path": "fastapi/encoders.py", "line_range": [334, 335], "all_anchor_tokens": ["ENCODERS_BY_TYPE", "type", "obj"]},
+        "validation-test": {"path": "tests/test_validate_response.py", "line_range": [16, 53], "all_anchor_tokens": ["response_model", "ResponseValidationError", "invalid", "price"]}
+      }
+    }
+  ]
+}

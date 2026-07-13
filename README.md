@@ -13,6 +13,18 @@ what was selected, what was omitted, and why. A secondary experiment harness
 compares synthetic context policies as a foundation for future API-backed
 latency, caching, cost, and quality measurements.
 
+The implementation and open-source release contract is documented in
+[the open-source repository intelligence PRD](docs/prd-open-source-repository-intelligence.md).
+The broader technical north star remains in
+[the context performance platform PRD](docs/prd-context-performance-platform.md).
+The first clean control-versus-treatment feature runs are documented in
+[paired feature implementation validation](docs/paired-feature-implementation-validation.md).
+The optional repository-graph experiment is documented in
+[Graphify integration and ablation](docs/graphify-ablation-results.md).
+Competitive improvements and hierarchical agent development (manager + worker
+model routing) are specified in
+[PRD: Hierarchical Agent Development](docs/prd-hierarchical-agent-development.md).
+
 ## Current Scope
 
 The current local workflow provides:
@@ -30,6 +42,12 @@ The current local workflow provides:
 - a persistent local repository-metadata index that caches per-file symbols,
   line-addressed symbol occurrences, local imports, and reverse import edges
   outside the worktree for reuse across runs;
+- an optional Graphify `graph.json` candidate backend with explicit and
+  automatic policy modes, pinned out-of-process extraction, bounded
+  confidence-weighted traversal, source/revision validation, deterministic
+  fallback, and manifest telemetry;
+- one-command Cursor, Codex, and Claude Code skill installation, direct
+  context-first agent wrappers, and a dependency-light MCP server;
 - optional git diff and recent commit-log provenance sections for changed-
   behavior and review-style tasks;
 - optional include and exclude path globs for narrowing eligible repository
@@ -57,7 +75,7 @@ The current local workflow provides:
   reconciliation;
 - an experimental `agenvantage validate-feature-provider` workflow that compares
   full-scan, AgenVantage-packed, and cache-aligned feature-work prompts against
-  provider usage and deterministic answer-plan grading; and
+  provider usage and deterministic context-plan readiness grading; and
 - a cache-aware `agenvantage session` workflow that freezes stable feature
   context once and emits smaller dynamic task packets for repeated prompts; and
 - a pxpipe-inspired mixed-modality pack mode that can estimate or write local
@@ -90,6 +108,54 @@ make setup
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 agenvantage demo
 ```
+
+Graphify is not installed by `make setup`. To enable the optional pinned
+out-of-process backend, install the extra with
+`python -m pip install -e ".[graphify]"` or use
+`uv tool install 'graphifyy==0.9.13'`.
+
+### Automatic agent integrations
+
+Install personal Cursor, Codex, and Claude Code skills once:
+
+```bash
+.venv/bin/agenvantage init
+.venv/bin/agenvantage doctor
+```
+
+After that, each agent automatically invokes AgenVantage before substantive
+feature, debug, review, explanation, and cross-file tasks. Automatic mode uses
+Graphify only when repository scale, task shape, and baseline grounding justify
+it; failures fall back to normal retrieval.
+
+Use a repository-shared skill, force context preparation before an external
+agent call, or expose the same retrieval through MCP:
+
+```bash
+agenvantage init --project
+agenvantage codex "Implement the requested cross-file feature"
+agenvantage claude "Debug the failing request flow"
+agenvantage mcp
+```
+
+### Plug into any repository
+
+From any cloned project — no fixture, config, or AgenVantage source tree required:
+
+```bash
+cd /path/to/your-repo
+agenvantage compare --task "Fix the bug and add a regression test"
+agenvantage codex "Fix the bug and add a regression test"
+```
+
+`compare` writes artifacts only under `<repo>/.agenvantage/compare/` and prints
+first-request token savings versus a full-scan counterfactual. Add `--live` when
+Codex is installed to run a paired control-vs-treatment trajectory. Use
+`--json` for machine-readable output.
+
+See [Plug-and-Play Agent Integrations](docs/plug-and-play-agent-integrations.md)
+for lifecycle, wrapper, auto-policy, and MCP details. The legacy
+`agenvantage cursor install|status|uninstall` commands remain supported.
 
 For live provider validation, you can store local keys in
 [`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env).
@@ -127,6 +193,17 @@ If `python` is not available, install Python 3.10+ or use
 
 ```bash
 agenvantage demo                              # built-in on-call walkthrough
+agenvantage init                              # install Cursor/Codex/Claude skills
+agenvantage doctor                            # verify first-install readiness
+agenvantage studio                            # open local setup + preview hub
+agenvantage studio demo                       # one-click pack, preview, and trace demo
+agenvantage compare --task "..."              # measure token savings in any repo
+agenvantage orchestrate plan                  # manager development plan
+agenvantage orchestrate run --package W2.1    # worker handoff for one package
+agenvantage pack --task "..." --preview        # write HTML context preview page
+agenvantage codex "..."                       # context-first Codex run
+agenvantage claude "..."                      # context-first Claude run
+agenvantage mcp                               # stdio MCP context server
 agenvantage run --summary                     # default scenario, readable output
 agenvantage observe init                      # create local trace storage
 agenvantage observe demo                      # seed a no-API demo trace
@@ -138,6 +215,8 @@ agenvantage traces annotate <trace-id> --label agent_succeeded
 agenvantage dashboard                         # open the local observability dashboard
 agenvantage dashboard --demo                  # one-command seeded dashboard
 agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
+agenvantage pack --preset feature --task "..." --graph-backend graphify
+.venv/bin/python benchmarks/graphify_ablation.py --summary
 agenvantage provider import --records provider-usage.json --trace-id <trace-id>
 agenvantage agent run --task "..." -- <command>
 agenvantage validate-provider --dry-run --summary
@@ -321,6 +400,10 @@ preset = "explain"
 top_k = 20
 include_glob = ["src/*"]
 exclude_glob = ["docs/*", "**/*.min.js"]
+graph_backend = "off" # set to "graphify" to opt in
+graph_json = "graphify-out/graph.json" # optional existing artifact
+graph_hops = 2
+graph_timeout = 120
 ```
 
 ### Multi-repo packages

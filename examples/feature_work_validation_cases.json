@@ -36,7 +36,7 @@
       "repository": "token-optimization",
       "budget": 6000,
       "top_k": 32,
-      "task": "Add a feature-work benchmark that reports edit target recall, test target recall, required observation recall, answer-plan pass rate, token reduction, and missing-signal warnings.",
+      "task": "Add a feature-work benchmark that reports edit target recall, test target recall, required observation recall, context-plan readiness rate, token reduction, and missing-signal warnings.",
       "expected_edit_targets": ["benchmarks/feature_work_validation.py"],
       "expected_test_targets": ["tests/test_feature_work_validation.py"],
       "expected_config_targets": ["examples/feature_work_validation_cases.json"],
@@ -56,7 +56,7 @@
       ],
       "answer_plan_rubric": [
         "Uses the existing benchmark style instead of a provider call.",
-        "Keeps retrieval sufficiency and answer-plan sufficiency separate.",
+        "Keeps retrieval sufficiency and context-plan readiness separate.",
         "Persists machine-readable metrics."
       ]
     },
@@ -355,7 +355,7 @@
     "minimum_edit_target_recall": 0.9,
     "minimum_test_target_recall": 0.8,
     "minimum_required_observation_recall": 0.8,
-    "minimum_answer_plan_pass_rate": 0.8,
+    "minimum_context_plan_readiness_rate": 0.85,
     "minimum_median_token_reduction_percent": 85.0
   },
   "provider_validation": {

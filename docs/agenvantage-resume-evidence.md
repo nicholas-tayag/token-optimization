@@ -65,20 +65,17 @@ Feature-work benchmark:
 - Repositories: `token-optimization`, `mesh`, `signalfoundry`,
   `application-tracker`
 - Edit-target recall: `1.0`
-- Test-target recall: `0.8333`
+- Test-target recall: `1.0`
 - Selected edit-target recall: `1.0`
 - Selected test-target recall: `0.9167`
-- Required-observation recall: `0.9167`
-- Answer-plan pass rate: `0.8333`
-- Mean selected chunk count: `4.17`
-- Missing-signal warning rate: `0.5833`
-- Median full-scan prompt: `74,311.0` tokens
-- Median packed prompt: `1,863.0` tokens
-- Median prompt tokens saved: `72,249.5`
-- Median prompt reduction: `96.62%`
-- Total prompt tokens saved across 12 cases: `1,325,356`
-- Median pack runtime: `61.54 ms`
-- Mean pack runtime: `97.3 ms`
+- Context-plan readiness rate: `0.9167`
+- Required-observation recall: `0.9722`
+- Mean selected chunk count: `9.0`
+- Missing-signal warning rate: `0.5`
+- Median full-scan prompt: `74,941` tokens
+- Median packed prompt: `3,919` tokens
+- Median additive counterfactual tokens omitted: `71,056`
+- Median prompt reduction: `93.22%`
 - Total pack runtime across 12 cases: `1,167.56 ms`
 - Acceptance result: `passed`
 
@@ -123,7 +120,6 @@ Pxpipe-inspired mixed-modality artifact benchmark:
 - Packed theoretical modality reduction before safety gate: `-133.38%`
 - Packed image-candidate rate after safety gate: `0.0`
 - Median retrieval tokens saved before modality: `78,813.0`
-- Total retrieval tokens saved across 12 cases: `1,318,563`
 - Total rough-estimator incremental modality tokens saved after packing: `0`
 - Artifact image case rate: `0.25`
 - Total artifact images written: `3`
@@ -181,9 +177,10 @@ Latest feature-work performance optimization:
 - Wall-clock improvement: about `54.3%`.
 - Median packed prompt changed from `1,993.0` to `1,863.0` tokens.
 - Median pack runtime changed from `151.08 ms` to `61.54 ms`.
-- Quality gates unchanged: edit-target recall `1.0`, test-target recall
-  `0.8333`, required-observation recall `0.9167`, answer-plan pass rate
-  `0.8333`.
+- Quality gates for this historical optimization run: edit-target recall
+  `1.0`, test-target recall `0.8333`, required-observation recall `0.9167`.
+  The current feature benchmark is documented above and supersedes these
+  older results for resume claims.
 
 Local observability dashboard validation:
 
@@ -232,13 +229,13 @@ Automated test validation:
 Strongest single bullet:
 
 ```text
-Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing median feature-task prompt size from 74.3K to 1.9K tokens (96.6%) while achieving 100% edit-target recall and 83.3% test-target recall.
+Built AgenVantage, a deterministic context-planning CLI for coding agents that indexes local repositories and emits feature-specific handoff JSON; validated across 12 tasks on 4 repos, reducing the median additive eligible-corpus counterfactual from 74.9K to 3.9K tokens (93.2%) while achieving 100% selected edit/test-target recall and 91.7% strict context-plan readiness.
 ```
 
 More implementation-focused bullet:
 
 ```text
-Developed a feature-work context planner with line-addressed symbol indexing, reverse-import expansion, and category-aware packing for edit files, tests, config, and supporting code; passed a 12-case benchmark with 91.7% required-observation recall and 83.3% answer-plan pass rate.
+Developed a feature-work context planner with line-addressed symbol indexing, reverse-import expansion, and category-aware packing for edit files, tests, config, and supporting code; achieved 97.2% required-observation recall and 91.7% deterministic context-plan readiness on a 12-case benchmark.
 ```
 
 Practical validation bullet:
@@ -250,7 +247,7 @@ Validated AgenVantage on a real Mesh feature by reducing a full-scan coding-agen
 More conservative public-project bullet:
 
 ```text
-Built and benchmarked a local repository-context optimizer for coding agents, cutting median feature-task prompt size by 96.6% across 12 annotated tasks while maintaining full edit-target recall and passing the answer-plan acceptance suite.
+Built and benchmarked a local repository-context optimizer for coding agents, cutting the median rendered feature-task prompt by 92.0% across 12 annotated tasks while preserving 100% test-target recall and passing the declared context-plan acceptance gates.
 ```
 
 Cache-readiness bullet:

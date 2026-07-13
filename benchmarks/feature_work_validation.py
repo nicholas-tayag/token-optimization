@@ -76,7 +76,19 @@ def _evaluate_observations(
     case: dict[str, Any],
     report: dict[str, Any],
 ) -> tuple[list[str], list[str], dict[str, list[str]]]:
-    selected_texts = _selected_file_texts(report)
+    # Score the exact rendered chunk snapshots that were handed off. Reading
+    # source files again would allow post-pack edits or unselected lines to
+    # inflate the apparent evidence coverage.
+    selected_texts: dict[str, dict[str, Any]] = {}
+    for chunk in report["selected_chunks"]:
+        payload = selected_texts.setdefault(
+            chunk["path"], {"text_parts": [], "chunk_ids": []}
+        )
+        payload["text_parts"].append(str(chunk.get("text", "")))
+        payload["chunk_ids"].append(chunk["id"])
+    for payload in selected_texts.values():
+        payload["text"] = "\n".join(payload.pop("text_parts"))
+        payload["normalized_text"] = _normalize_for_match(payload["text"])
     observed: list[str] = []
     missing: list[str] = []
     citations: dict[str, list[str]] = {}
@@ -100,19 +112,33 @@ def _evaluate_observations(
     return observed, missing, citations
 
 
-def _answer_plan_passes(
+def _context_plan_readiness(
     *,
-    edit_recall: float,
-    test_recall: float,
+    selected_edit_recall: float,
+    selected_test_recall: float,
+    selected_config_recall: float,
     observation_recall: float,
     expected_test_targets: list[str],
+    expected_config_targets: list[str],
     missing_signals: list[str],
+    guard_ready: bool,
+    sufficiency_status: str,
+    handoff_ready: bool,
 ) -> bool:
-    has_test_signal = test_recall == 1.0 or (
+    has_test_signal = selected_test_recall == 1.0 or (
         not expected_test_targets
         and any("test target" in signal.lower() for signal in missing_signals)
     )
-    return edit_recall == 1.0 and has_test_signal and observation_recall >= 0.8
+    has_config_signal = selected_config_recall == 1.0 or not expected_config_targets
+    return (
+        selected_edit_recall == 1.0
+        and has_test_signal
+        and has_config_signal
+        and guard_ready
+        and observation_recall >= 0.8
+        and sufficiency_status == "sufficient"
+        and handoff_ready
+    )
 
 
 def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> dict[str, Any]:
@@ -153,15 +179,23 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
     config_recall = _recall(expected_config_targets, surface_config_targets)
     selected_edit_recall = _recall(expected_edit_targets, selected_paths)
     selected_test_recall = _recall(expected_test_targets, selected_paths)
+    selected_config_recall = _recall(expected_config_targets, selected_paths)
     observation_recall = (
         len(observed_observations) / observation_count if observation_count else 1.0
     )
-    answer_plan_pass = _answer_plan_passes(
-        edit_recall=edit_recall,
-        test_recall=test_recall,
+    context_plan_readiness = _context_plan_readiness(
+        selected_edit_recall=selected_edit_recall,
+        selected_test_recall=selected_test_recall,
+        selected_config_recall=selected_config_recall,
         observation_recall=observation_recall,
         expected_test_targets=expected_test_targets,
+        expected_config_targets=expected_config_targets,
         missing_signals=missing_signals,
+        guard_ready=bool(report.get("validation_requirements", {}).get("ready", True)),
+        sufficiency_status=str(
+            (report.get("context_sufficiency") or {}).get("status", "sufficient")
+        ),
+        handoff_ready=bool(report.get("handoff_ready", True)),
     )
 
     return {
@@ -199,13 +233,17 @@ def _run_case(case: dict[str, Any], repos_root: Path, counter: TokenCounter) -> 
         "config_target_recall": round(config_recall, 4),
         "selected_edit_target_recall": round(selected_edit_recall, 4),
         "selected_test_target_recall": round(selected_test_recall, 4),
+        "selected_config_target_recall": round(selected_config_recall, 4),
         "required_observation_recall": round(observation_recall, 4),
         "observed_observations": observed_observations,
         "missing_required_observations": missing_observations,
         "observation_citations": observation_citations,
         "missing_signals": missing_signals,
         "has_missing_signal_warning": bool(missing_signals),
-        "answer_plan_pass": answer_plan_pass,
+        "context_sufficiency": report.get("context_sufficiency"),
+        "handoff_ready": report.get("handoff_ready"),
+        "validation_requirements": report.get("validation_requirements"),
+        "context_plan_readiness": context_plan_readiness,
     }
 
 
@@ -233,12 +271,13 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
         "required_observation_recall": round(
             _mean([case["required_observation_recall"] for case in cases]), 4
         ),
-        "answer_plan_pass_rate": round(
-            _mean([1.0 if case["answer_plan_pass"] else 0.0 for case in cases]), 4
+        "context_plan_readiness_rate": round(
+            _mean([1.0 if case["context_plan_readiness"] else 0.0 for case in cases]), 4
         ),
         "median_token_reduction_percent": round(
             statistics.median(token_reductions) if token_reductions else 0.0, 2
         ),
+        "measurement_method": "additive_independently_tokenized_blocks",
         "median_full_scan_prompt_tokens": round(
             statistics.median(full_scan_prompt_tokens) if full_scan_prompt_tokens else 0.0,
             2,
@@ -252,6 +291,11 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
             2,
         ),
         "total_prompt_tokens_saved_vs_full_scan": sum(prompt_tokens_saved),
+        "median_tokens_omitted_vs_additive_eligible_corpus": round(
+            statistics.median(prompt_tokens_saved) if prompt_tokens_saved else 0.0,
+            2,
+        ),
+        "total_tokens_omitted_vs_additive_eligible_corpus": sum(prompt_tokens_saved),
         "mean_selected_chunk_count": round(
             _mean([case["selected_chunk_count"] for case in cases]), 2
         ),
@@ -274,8 +318,8 @@ def _summarize(cases: list[dict[str, Any]], acceptance: dict[str, Any]) -> dict[
             >= float(acceptance["minimum_test_target_recall"]),
             "required_observation_recall": summary["required_observation_recall"]
             >= float(acceptance["minimum_required_observation_recall"]),
-            "answer_plan_pass_rate": summary["answer_plan_pass_rate"]
-            >= float(acceptance["minimum_answer_plan_pass_rate"]),
+            "context_plan_readiness_rate": summary["context_plan_readiness_rate"]
+            >= float(acceptance["minimum_context_plan_readiness_rate"]),
             "median_token_reduction_percent": summary["median_token_reduction_percent"]
             >= float(acceptance["minimum_median_token_reduction_percent"]),
         },
@@ -297,7 +341,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
         f"- Edit-target recall: `{summary['edit_target_recall']}`",
         f"- Test-target recall: `{summary['test_target_recall']}`",
         f"- Required-observation recall: `{summary['required_observation_recall']}`",
-        f"- Answer-plan pass rate: `{summary['answer_plan_pass_rate']}`",
+        f"- Context-plan readiness rate: `{summary['context_plan_readiness_rate']}`",
         f"- Median token reduction: `{summary['median_token_reduction_percent']}%`",
         f"- Median full-scan prompt: `{summary['median_full_scan_prompt_tokens']}` tokens",
         f"- Median packed prompt: `{summary['median_packed_prompt_tokens']}` tokens",
@@ -321,7 +365,7 @@ def _render_markdown(summary: dict[str, Any], cases: list[dict[str, Any]]) -> st
                 f"- Edit-target recall: `{case['edit_target_recall']}`",
                 f"- Test-target recall: `{case['test_target_recall']}`",
                 f"- Observation recall: `{case['required_observation_recall']}`",
-                f"- Answer-plan pass: `{case['answer_plan_pass']}`",
+                f"- Context-plan readiness: `{case['context_plan_readiness']}`",
                 f"- Token reduction: `{case['token_reduction_percent']}%`",
                 f"- Prompt tokens: user `{case['original_user_prompt_tokens']}`, full-scan `{case['full_scan_prompt_tokens']}`, packed `{case['packed_prompt_tokens']}`",
                 f"- Prompt tokens saved: `{case['prompt_tokens_saved_vs_full_scan']}`",

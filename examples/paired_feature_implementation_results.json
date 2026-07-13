@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-12",
+  "runner": {
+    "name": "Codex CLI",
+    "model": "gpt-5.4-mini",
+    "ephemeral": true,
+    "user_config_loaded": false,
+    "project_rules_loaded": false
+  },
+  "cases": [
+    {
+      "case_id": "click-help-json",
+      "repository": "https://github.com/pallets/click.git",
+      "commit": "b67832c2167e5b0ff6764a8c04a0a9087e697b5a",
+      "feature": "Add opt-in --help-json output backed by Context.to_info_dict, including nested commands and option defaults.",
+      "agenvantage_handoff_tokens": 3807,
+      "agenvantage_full_scan_counterfactual_tokens": 326827,
+      "control": {
+        "wall_time_seconds": 377.89,
+        "input_tokens": 2617815,
+        "cached_input_tokens": 2537600,
+        "uncached_input_tokens": 80215,
+        "output_tokens": 22513,
+        "reasoning_output_tokens": 15407,
+        "external_acceptance": {"passed": 5, "failed": 0},
+        "repository_tests": {"passed": 1903, "failed": 0, "skipped": 25, "xfailed": 1},
+        "task_success": true,
+        "diff_sha256": "130bf39a13672003a6c13115aee66e7300bc11fc34fd705d79142a7eb068c353"
+      },
+      "initial_treatment_before_guard_reservation": {
+        "input_tokens": 1462424,
+        "cached_input_tokens": 1401984,
+        "uncached_input_tokens": 60440,
+        "output_tokens": 17777,
+        "reasoning_output_tokens": 10317,
+        "external_acceptance": {"passed": 5, "failed": 0},
+        "repository_tests": {"passed": 1902, "failed": 1, "skipped": 25, "xfailed": 1},
+        "task_success": false,
+        "failure": "Eager json import violated Click's lightweight-import contract.",
+        "diff_sha256": "2730736ac9642c81b066807337475a8ab52e83a8397618a602f2868ced97544f"
+      },
+      "treatment": {
+        "wall_time_seconds": 300.68,
+        "input_tokens": 1393951,
+        "cached_input_tokens": 1337216,
+        "uncached_input_tokens": 56735,
+        "output_tokens": 18553,
+        "reasoning_output_tokens": 11427,
+        "external_acceptance": {"passed": 5, "failed": 0},
+        "repository_tests": {"passed": 1906, "failed": 0, "skipped": 25, "xfailed": 1},
+        "task_success": true,
+        "guard_test_selected": "tests/test_imports.py#L47-L80",
+        "diff_sha256_tracked_files": "7f7f13ca0475d63ef0493b4b178efddb3d300ed5e39db3b4de365b78baf261a5"
+      },
+      "treatment_delta_percent": {
+        "wall_time_seconds": -20.43,
+        "input_tokens": -46.75,
+        "cached_input_tokens": -47.3,
+        "uncached_input_tokens": -29.27,
+        "output_tokens": -17.59,
+        "reasoning_output_tokens": -25.83
+      }
+    },
+    {
+      "case_id": "p-limit-on-idle",
+      "repository": "https://github.com/sindresorhus/p-limit.git",
+      "commit": "42599ebbbb1228a5bdab381fcf8f4ac20eb8d551",
+      "feature": "Add onIdle() to the runtime and TypeScript API with queue, waiter, documentation, and regression coverage.",
+      "agenvantage_handoff_tokens": 4000,
+      "agenvantage_full_scan_counterfactual_tokens": 13225,
+      "control": {
+        "wall_time_seconds": 356.91,
+        "input_tokens": 1028249,
+        "cached_input_tokens": 993920,
+        "uncached_input_tokens": 34329,
+        "output_tokens": 16506,
+        "reasoning_output_tokens": 10562,
+        "external_acceptance": {"passed": 1, "failed": 0},
+        "repository_tests": {"passed": 25, "failed": 0},
+        "task_success": true,
+        "independent_quality_score": 9.5,
+        "diff_sha256": "db4b5a49d91ed72141f828ea9d13e6d4da5849a7230bb53bc7a5d09ab92b8a72"
+      },
+      "treatment": {
+        "wall_time_seconds": 308.24,
+        "input_tokens": 772131,
+        "cached_input_tokens": 717824,
+        "uncached_input_tokens": 54307,
+        "output_tokens": 13105,
+        "reasoning_output_tokens": 8522,
+        "external_acceptance": {"passed": 1, "failed": 0},
+        "repository_tests": {"passed": 23, "failed": 0},
+        "task_success": true,
+        "independent_quality_score": 9.1,
+        "diff_sha256": "85db58f844e5787b9c47fb4f4b6b202018353d8faeac034364f04639840d83bc"
+      },
+      "treatment_delta_percent": {
+        "wall_time_seconds": -13.64,
+        "input_tokens": -24.91,
+        "cached_input_tokens": -27.78,
+        "uncached_input_tokens": 58.2,
+        "output_tokens": -20.6,
+        "reasoning_output_tokens": -19.31
+      }
+    }
+  ],
+  "aggregate": {
+    "case_count": 2,
+    "control_successes": 2,
+    "treatment_successes": 2,
+    "control_success_rate": 1.0,
+    "treatment_success_rate": 1.0,
+    "control_input_tokens": 3646064,
+    "treatment_input_tokens": 2166082,
+    "raw_input_reduction_percent": 40.59,
+    "control_cached_input_tokens": 3531520,
+    "treatment_cached_input_tokens": 2055040,
+    "cached_input_reduction_percent": 41.81,
+    "control_uncached_input_tokens": 114544,
+    "treatment_uncached_input_tokens": 111042,
+    "uncached_input_reduction_percent": 3.06,
+    "control_output_tokens": 39019,
+    "treatment_output_tokens": 31658,
+    "output_reduction_percent": 18.87,
+    "control_reasoning_output_tokens": 25969,
+    "treatment_reasoning_output_tokens": 19949,
+    "reasoning_output_reduction_percent": 23.18,
+    "control_wall_time_seconds": 734.8,
+    "treatment_wall_time_seconds": 608.92,
+    "wall_time_reduction_percent": 17.13,
+    "control_input_tokens_per_success": 1823032,
+    "treatment_input_tokens_per_success": 1083041,
+    "treatment_tokens_per_success_reduction_percent": 40.59,
+    "handoff_tokens_as_percent_of_treatment_input": 0.36
+  },
+  "claim_boundary": {
+    "proves_general_token_savings": false,
+    "proves_quality_retention": false,
+    "proves_provider_cost_savings": false,
+    "reason": "Both final treatments succeeded, but two cases are insufficient for generalization or a provider-cost claim."
+  },
+  "graphify_validation": {
+    "generated_at": "2026-07-12",
+    "comparison": "AgenVantage baseline versus Graphify-enabled AgenVantage",
+    "deterministic_retrieval_gate": {
+      "status": "passed",
+      "case_count": 10,
+      "repository_count": 2,
+      "evidence_recall_delta_percentage_points": 0.0,
+      "missing_expansion_reduction_percent": 38.1,
+      "edit_target_recall_regression": false,
+      "test_target_recall_regression": false,
+      "artifact": "artifacts/graphify-ablation.json"
+    },
+    "paired_agent_gate": {
+      "status": "blocked",
+      "required_case_count": 6,
+      "executed_case_count": 0,
+      "runner": "Codex CLI 0.144.1",
+      "model": "gpt-5.4-mini",
+      "reason_code": "runner_usage_limit",
+      "reason": "The authenticated runner rejected the preflight turn because its usage quota was exhausted. No paired implementation requests were executed and no task-level usefulness claim is made.",
+      "acceptance_evaluated": false
+    }
+  }
+}
