@@ -31,9 +31,11 @@ from agenvantage.experiment import load_scenario, run_experiment
 from agenvantage.orchestrator import (
     build_development_plan,
     dispatch_worker_run,
+    load_agent_roles,
     load_development_partition,
     orchestration_root,
     review_worker_handoff,
+    verify_worker_package,
 )
 from agenvantage.paired_codex_validation import (
     build_adhoc_paired_case,
@@ -746,6 +748,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     orchestrate_run.add_argument("--repo", type=Path, default=Path("."))
     orchestrate_run.add_argument(
+        "--roles",
+        type=Path,
+        default=_PACKAGE_ROOT / "examples" / "agent_roles.json",
+    )
+    orchestrate_run.add_argument("--worker-provider", choices=("codex", "claude"))
+    orchestrate_run.add_argument("--worker-model")
+    orchestrate_run.add_argument("--worker-executable")
+    orchestrate_run.add_argument(
         "--execute",
         action="store_true",
         help="Execute the worker agent command instead of printing the dispatch plan.",
@@ -757,6 +767,18 @@ def _parser() -> argparse.ArgumentParser:
     orchestrate_review.add_argument("--repo", type=Path, default=Path("."))
     orchestrate_review.add_argument("--handoff-json", type=Path)
     orchestrate_review.add_argument("--json", dest="as_json", action="store_true")
+
+    orchestrate_verify = orchestrate_sub.add_parser(
+        "verify", help="Run scoped package verification and emit JSON."
+    )
+    orchestrate_verify.add_argument("--package", required=True)
+    orchestrate_verify.add_argument(
+        "--partition",
+        type=Path,
+        default=_PACKAGE_ROOT / "examples" / "agent_development_partition.json",
+    )
+    orchestrate_verify.add_argument("--repo", type=Path, default=Path("."))
+    orchestrate_verify.add_argument("--json", dest="as_json", action="store_true")
 
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
     view.add_argument(
@@ -1179,6 +1201,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     agent_run.add_argument("--budget", type=int, default=None)
     agent_run.add_argument("--model", default=None, help="Tokenizer model identifier.")
+    agent_run.add_argument(
+        "--role", choices=("manager", "worker", "verifier"), default="worker"
+    )
+    agent_run.add_argument("--agent-model", help="External agent model recorded in traces.")
     agent_run.add_argument("--top-k", type=int, default=None)
     agent_run.add_argument("--include-diff", action="store_true")
     agent_run.add_argument("--include-log", action="store_true")
@@ -3076,6 +3102,8 @@ def _run_agent(args: argparse.Namespace) -> None:
         raise SystemExit(f"Unknown agent command: {args.agent_command}")
     command = _normalize_agent_command(list(args.external_command))
     markdown, report, settings = _build_pack_artifacts(args, default_preset="feature")
+    report["agent_role"] = args.role
+    report["agent_model"] = args.agent_model
     repo = Path(settings["repos"][0])
     db_path = _observability_db_from_args(args, repo)
     trace = record_pack_trace(
@@ -3111,6 +3139,11 @@ def _run_agent(args: argparse.Namespace) -> None:
             "command": command,
             "exit_code": completed.returncode,
             "stdin_handoff": not args.no_stdin,
+            "role": args.role,
+            "model": args.agent_model,
+            "manager_input_tokens": trace.packed_prompt_tokens if args.role == "manager" else 0,
+            "worker_input_tokens": trace.packed_prompt_tokens if args.role == "worker" else 0,
+            "verifier_input_tokens": trace.packed_prompt_tokens if args.role == "verifier" else 0,
         },
     )
     record_trace_artifact(
@@ -3563,7 +3596,16 @@ def _run_orchestrate(args: argparse.Namespace) -> None:
     if package is None:
         raise SystemExit(f"Unknown package id: {package_id}")
     if args.orchestrate_command == "run":
-        result = dispatch_worker_run(repo, package, execute=args.execute)
+        roles = load_agent_roles(args.roles)
+        worker_role = roles["roles"].get("worker", {})
+        result = dispatch_worker_run(
+            repo,
+            package,
+            execute=args.execute,
+            worker_provider=args.worker_provider or worker_role.get("provider") or "codex",
+            worker_model=args.worker_model or worker_role.get("default_model"),
+            worker_executable=args.worker_executable,
+        )
         if args.as_json:
             print(json.dumps(result, indent=2))
             return
@@ -3572,6 +3614,14 @@ def _run_orchestrate(args: argparse.Namespace) -> None:
         print(f"Command: {' '.join(result['command'])}")
         if result.get("executed"):
             print(f"Exit code: {result.get('exit_code')}")
+        return
+    if args.orchestrate_command == "verify":
+        result = verify_worker_package(repo, package)
+        if args.as_json:
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Verification: {result['status']}")
+            print(f"Report: {result['output_path']}")
         return
     if args.orchestrate_command == "review":
         payload = None

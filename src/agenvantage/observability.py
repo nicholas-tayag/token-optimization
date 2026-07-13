@@ -198,6 +198,11 @@ def record_pack_trace(
         "covered_query_terms": report.get("covered_query_terms", []),
         "uncovered_query_terms": report.get("uncovered_query_terms", []),
         "multimodal": report.get("multimodal", {}),
+        "role": report.get("agent_role"),
+        "model": report.get("agent_model"),
+        "manager_input_tokens": packed_tokens if report.get("agent_role") == "manager" else 0,
+        "worker_input_tokens": packed_tokens if report.get("agent_role") == "worker" else 0,
+        "verifier_input_tokens": packed_tokens if report.get("agent_role") == "verifier" else 0,
     }
     graph = report.get("graph") or {}
     if graph:
@@ -249,7 +254,17 @@ def record_pack_trace(
                 time.time(),
                 max((time.time() - started) * 1000, 0.0),
                 packed_tokens,
-                json.dumps({"selected_chunk_count": len(selected_chunks)}, sort_keys=True),
+                json.dumps(
+                    {
+                        "selected_chunk_count": len(selected_chunks),
+                        "role": report.get("agent_role"),
+                        "model": report.get("agent_model"),
+                        "manager_input_tokens": packed_tokens if report.get("agent_role") == "manager" else 0,
+                        "worker_input_tokens": packed_tokens if report.get("agent_role") == "worker" else 0,
+                        "verifier_input_tokens": packed_tokens if report.get("agent_role") == "verifier" else 0,
+                    },
+                    sort_keys=True,
+                ),
             ),
         )
         connection.execute(

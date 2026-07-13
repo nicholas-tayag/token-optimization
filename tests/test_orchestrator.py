@@ -6,11 +6,14 @@ import sys
 from pathlib import Path
 
 from agenvantage.orchestrator import (
+    build_worker_agent_command,
     build_development_plan,
     dispatch_worker_run,
+    load_agent_roles,
     load_development_partition,
     prepare_worker_handoff,
     review_worker_handoff,
+    verify_worker_package,
 )
 
 
@@ -125,6 +128,38 @@ def test_dispatch_worker_run_dry_run(tmp_path: Path) -> None:
         "task_prompt": "Explain run()",
         "allowed_paths": ["app.py"],
     }
-    result = dispatch_worker_run(repo, package, execute=False)
+    result = dispatch_worker_run(
+        repo,
+        package,
+        execute=False,
+        worker_model="gpt-test-mini",
+        worker_executable=sys.executable,
+    )
     assert result["executed"] is False
     assert "agenvantage" in " ".join(result["command"])
+    assert "worker placeholder" not in " ".join(result["command"])
+    assert "--model gpt-test-mini" in " ".join(result["command"])
+    assert result["worker_model"] == "gpt-test-mini"
+
+
+def test_agent_roles_config_has_all_routing_roles() -> None:
+    roles = load_agent_roles()["roles"]
+
+    assert set(roles) == {"manager", "worker", "verifier"}
+    assert roles["worker"]["default_model"] == "gpt-5.4-mini"
+
+
+def test_verify_worker_package_runs_configured_command(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    package = {
+        "package_id": "W-verify",
+        "verification_command": f'{sys.executable} -c "print(123)"',
+    }
+
+    result = verify_worker_package(repo, package)
+
+    assert result["tests_passed"] is True
+    assert result["role"] == "verifier"
+    assert "123" in result["stdout"]
+    assert Path(result["output_path"]).is_file()

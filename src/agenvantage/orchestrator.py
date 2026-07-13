@@ -3,21 +3,31 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from agenvantage.agent_launcher import resolve_agent_command
 from agenvantage.repo_context import build_context_package
 from agenvantage.presets import get_preset
 from agenvantage.tokenizer import TokenCounter
 
 DEFAULT_PARTITION = Path(__file__).resolve().parents[2] / "examples" / "agent_development_partition.json"
+DEFAULT_ROLES = Path(__file__).resolve().parents[2] / "examples" / "agent_roles.json"
 
 
 def load_development_partition(path: Path | None = None) -> dict[str, Any]:
     partition_path = Path(path or DEFAULT_PARTITION)
     return json.loads(partition_path.read_text(encoding="utf-8"))
+
+
+def load_agent_roles(path: Path | None = None) -> dict[str, Any]:
+    payload = json.loads(Path(path or DEFAULT_ROLES).read_text(encoding="utf-8"))
+    if not isinstance(payload.get("roles"), dict):
+        raise ValueError("Agent role config requires a roles object.")
+    return payload
 
 
 def _package_map(partition: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -131,9 +141,18 @@ def build_worker_agent_command(
     *,
     worker_task: dict[str, Any],
     execute: bool = False,
+    worker_provider: str = "codex",
+    worker_model: str | None = None,
+    worker_executable: str | None = None,
 ) -> list[str]:
     _ = execute
     task = str(package.get("task_prompt") or package.get("title"))
+    agent_command = resolve_agent_command(
+        worker_provider,
+        repo=repo,
+        executable=worker_executable,
+        agent_model=worker_model,
+    )
     return [
         sys.executable,
         "-m",
@@ -146,11 +165,11 @@ def build_worker_agent_command(
         str(Path(repo).resolve()),
         "--handoff-file",
         worker_task["handoff_markdown_path"],
+        "--role",
+        "worker",
+        *(["--agent-model", worker_model] if worker_model else []),
         "--",
-        "sh",
-        "-c",
-        "printf 'worker placeholder; implement package %s\\n' "
-        f"{package['package_id']} && exit 0",
+        *agent_command,
     ]
 
 
@@ -200,9 +219,21 @@ def dispatch_worker_run(
     *,
     execute: bool = False,
     python_executable: str | None = None,
+    worker_provider: str = "codex",
+    worker_model: str | None = None,
+    worker_executable: str | None = None,
 ) -> dict[str, Any]:
+    _ = python_executable
     worker_task = prepare_worker_handoff(repo, package)
-    command = build_worker_agent_command(repo, package, worker_task=worker_task, execute=execute)
+    command = build_worker_agent_command(
+        repo,
+        package,
+        worker_task=worker_task,
+        execute=execute,
+        worker_provider=worker_provider,
+        worker_model=worker_model,
+        worker_executable=worker_executable,
+    )
     result: dict[str, Any] = {
         "package_id": package["package_id"],
         "worker_task_path": str((orchestration_root(repo) / "packages" / package["package_id"] / "worker-task.json").resolve()),
@@ -211,6 +242,8 @@ def dispatch_worker_run(
         "exit_code": None,
         "stdout": "",
         "stderr": "",
+        "worker_provider": worker_provider,
+        "worker_model": worker_model,
     }
     if not execute:
         return result
@@ -244,12 +277,46 @@ def dispatch_worker_run(
     return result
 
 
+def verify_worker_package(repo: Path, package: dict[str, Any]) -> dict[str, Any]:
+    repo = Path(repo).resolve()
+    package_id = str(package["package_id"])
+    configured = package.get("verification_command")
+    if configured:
+        command = shlex.split(str(configured))
+    else:
+        test_paths = [
+            str(path)
+            for path in package.get("allowed_paths", [])
+            if str(path).startswith("tests/")
+        ]
+        local_pytest = repo / ".venv" / "bin" / "pytest"
+        command = [str(local_pytest) if local_pytest.is_file() else "pytest", "-q", *test_paths]
+    completed = subprocess.run(command, cwd=repo, capture_output=True, text=True, check=False)
+    result = {
+        "package_id": package_id,
+        "role": "verifier",
+        "status": "passed" if completed.returncode == 0 else "failed",
+        "tests_passed": completed.returncode == 0,
+        "command": command,
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+    output = orchestration_root(repo) / "packages" / package_id / "verifier.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    result["output_path"] = str(output.resolve())
+    return result
+
+
 __all__ = [
     "build_development_plan",
     "build_worker_agent_command",
     "dispatch_worker_run",
+    "load_agent_roles",
     "load_development_partition",
     "orchestration_root",
     "prepare_worker_handoff",
     "review_worker_handoff",
+    "verify_worker_package",
 ]

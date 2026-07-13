@@ -41,6 +41,8 @@ def test_record_pack_trace_persists_metrics_and_artifacts(tmp_path: Path) -> Non
             "test_targets": [],
             "missing_signals": ["No likely test target was identified."],
         },
+        "agent_role": "worker",
+        "agent_model": "gpt-test-mini",
     }
 
     trace = record_pack_trace(
@@ -60,6 +62,11 @@ def test_record_pack_trace_persists_metrics_and_artifacts(tmp_path: Path) -> Non
     assert loaded["task"] == "Add diagnostics."
     assert loaded["metadata"]["selected_files"] == ["src/server.py"]
     assert loaded["metadata"]["missing_signals"] == ["No likely test target was identified."]
+    assert loaded["metadata"]["role"] == "worker"
+    assert loaded["metadata"]["model"] == "gpt-test-mini"
+    assert loaded["metadata"]["worker_input_tokens"] == 120
+    assert loaded["metadata"]["manager_input_tokens"] == 0
+    assert loaded["spans"][0]["metadata"]["worker_input_tokens"] == 120
     assert loaded["spans"][0]["kind"] == "context.pack"
     assert {artifact["kind"] for artifact in loaded["artifacts"]} == {
         "context_markdown",
