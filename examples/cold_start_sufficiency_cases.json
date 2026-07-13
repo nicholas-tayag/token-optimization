@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "case_id": "gamefit-weekly-streak-dashboard",
+      "repository": "gamefit-weekly-streak",
+      "task": "The gameFit weekly workout streak dashboard is failing. Diagnose the dashboard entry point and identify what should change.",
+      "budget": 6000,
+      "top_k": 28,
+      "corpus_expansion": {
+        "distractor_file_count": 24,
+        "distractor_lines_per_file": 24,
+        "oracle_style_padding_lines": 48
+      },
+      "fixture": {
+        "src/main.jsx": "import { StrictMode } from 'react';\nimport { createRoot } from 'react-dom/client';\nimport App from './App';\nimport './styles.css';\n\ncreateRoot(document.getElementById('root')).render(<StrictMode><App /></StrictMode>);\n",
+        "src/App.jsx": "import { useState } from 'react';\nimport WeeklyStreakPanel from './components/WeeklyStreakPanel';\nimport { selectWeeklyStreak } from './state/workoutSelectors';\nimport './styles.css';\n\nexport default function App() {\n  const [week, setWeek] = useState('current');\n  const streak = selectWeeklyStreak(week);\n  return (\n    <main className=\"dashboard\" data-week={week}>\n      <header className=\"dashboard__header\"><h1>Weekly workout streak</h1>\n        <button type=\"button\" onClick={() => setWeek('current')}>Current week</button>\n      </header>\n      <WeeklyStreakPanel streak={streak} week={week} />\n    </main>\n  );\n}\n",
+        "src/components/WeeklyStreakPanel.jsx": "import PropTypes from 'prop-types';\n\nexport default function WeeklyStreakPanel({ streak, week }) {\n  return (\n    <section className=\"streak-panel\" aria-label=\"Weekly workout streak\">\n      <div className=\"streak-panel__value\">{streak} workouts</div>\n      <div className=\"streak-panel__period\">{week}</div>\n    </section>\n  );\n}\nWeeklyStreakPanel.propTypes = { streak: PropTypes.number.isRequired, week: PropTypes.string.isRequired };\n",
+        "src/state/workouts.js": "export const workoutTypes = ['run', 'lift', 'cycle', 'swim'];\nexport const defaultWorkoutState = { selectedWeek: 'current', workouts: [] };\nexport function completedWorkouts(workouts) {\n  return workouts.filter((workout) => workout.completed);\n}\nexport function weeklyWorkoutStreak(workouts, week = 'current') {\n  return completedWorkouts(workouts).filter((workout) => workout.week === week).length;\n}\nexport function replaceWorkout(state, workout) {\n  return { ...state, workouts: [...state.workouts.filter((item) => item.id !== workout.id), workout] };\n}\n",
+        "src/state/workoutSelectors.js": "import { weeklyWorkoutStreak } from './workouts';\nimport { workoutStore } from './workoutStore';\nexport function selectWeeklyStreak(week) {\n  return weeklyWorkoutStreak(workoutStore.workouts, week);\n}\nexport function selectWeekLabel(week) { return week === 'current' ? 'Current week' : week; }\n",
+        "src/state/workoutStore.js": "export const workoutStore = {\n  workouts: [\n    { id: 'w1', week: 'current', type: 'run', completed: true },\n    { id: 'w2', week: 'current', type: 'lift', completed: true }\n  ]\n};\n",
+        "src/types/workout.ts": "export type Workout = { id: string; date: string; week: string; type: string; completed: boolean };\nexport type WorkoutState = { selectedWeek: string; workouts: Workout[] };\nexport type StreakPanelProps = { streak: number; week: string };\n",
+        "src/styles.css": ":root { --ink: #18324a; --muted: #65758b; --surface: #ffffff; --accent: #e17b45; }\n* { box-sizing: border-box; }\nbody { margin: 0; background: #f2eee7; font-family: system-ui, sans-serif; }\n.dashboard { display: grid; min-height: 100vh; gap: 24px; padding: 48px; color: var(--ink); }\n.dashboard__header { display: flex; align-items: center; justify-content: space-between; max-width: 880px; }\n.dashboard__header h1 { margin: 0; font-size: 2rem; letter-spacing: -0.03em; }\n.dashboard__header button { border: 0; border-radius: 999px; padding: 12px 18px; background: var(--ink); color: white; cursor: pointer; }\n.streak-panel { display: grid; align-content: center; gap: 8px; min-height: 280px; max-width: 880px; padding: 36px; border: 1px solid #ddd6cb; border-radius: 24px; background: var(--surface); box-shadow: 0 12px 40px #18324a12; }\n.streak-panel__value { font-size: 4rem; font-weight: 700; line-height: 1; color: var(--accent); }\n.streak-panel__period { color: var(--muted); text-transform: capitalize; }\n.dashboard button:focus-visible { outline: 3px solid #f4b183; outline-offset: 3px; }\n@media (max-width: 640px) { .dashboard { padding: 24px; } .dashboard__header { display: grid; gap: 16px; } .streak-panel__value { font-size: 3rem; } }\n",
+        "src/App.test.jsx": "import { render, screen } from '@testing-library/react';\nimport { describe, expect, it } from 'vitest';\nimport App from './App';\n\ndescribe('weekly streak dashboard', () => {\n  it('renders the current workout streak', () => {\n    render(<App />);\n    expect(screen.getByRole('heading', { name: /weekly workout streak/i })).toBeInTheDocument();\n    expect(screen.getByLabelText(/weekly workout streak/i)).toHaveTextContent(/workouts/);\n  });\n  it('keeps the week control available to select current data', () => {\n    render(<App />);\n    expect(screen.getByRole('button', { name: /current week/i })).toBeEnabled();\n  });\n});\n",
+        "src/components/WeeklyStreakPanel.test.jsx": "import { render, screen } from '@testing-library/react';\nimport { it, expect } from 'vitest';\nimport WeeklyStreakPanel from './WeeklyStreakPanel';\nit('shows a zero streak without hiding the panel', () => {\n  render(<WeeklyStreakPanel streak={0} week=\"current\" />);\n  expect(screen.getByLabelText(/weekly workout streak/i)).toHaveTextContent('0 workouts');\n});\n",
+        "package.json": "{\"scripts\":{\"test\":\"vitest run\",\"dev\":\"vite\"}}\n",
+        "README.md": "# unrelated product notes\nA generic fitness application.\n",
+        "src/legacy/Calendar.jsx": "export default function Calendar() { return null; }\n",
+        "docs/roadmap.md": "Future goals: social sharing and nutrition.\n",
+        "src/archive/WeeklyStreakCard.jsx": "// Archived weekly workout dashboard experiment\nexport default function WeeklyStreakCard() { return <section className=\"dashboard\">old streak</section>; }\n",
+        "src/archive/WorkoutDashboard.jsx": "// Deprecated workout dashboard render path\nexport default function WorkoutDashboard() { return null; }\n",
+        "src/archive/workoutState.js": "// Old state shape for weekly workout streak\nexport const weeklyWorkoutStreak = 0;\n",
+        "src/archive/dashboard.css": ".dashboard { color: #999; }\n",
+        "src/archive/WeeklyStreakCard.test.jsx": "test('weekly streak dashboard legacy card', () => {});\n",
+        "src/mocks/dashboardFixture.js": "export const dashboard = { weeklyWorkoutStreak: 7, workouts: [] };\n",
+        "src/mocks/workoutTypes.ts": "export type WorkoutDashboard = { streak: number };\n",
+        "src/experiments/streak-dashboard.jsx": "export function StreakDashboard() { return <div>weekly workout streak dashboard</div>; }\n",
+        "src/experiments/streak-dashboard.test.jsx": "test('dashboard streak validation', () => {});\n",
+        "docs/dashboard-debugging.md": "Weekly workout streak dashboard notes and validation checklist.\n",
+        "docs/old-dashboard.md": "The old dashboard rendered a weekly streak card.\n",
+        "src/styles/legacy-theme.css": ".theme-sand .dashboard { background: #f2eee7; color: #18324a; }\n.theme-sand .dashboard__header { border-bottom: 1px solid #ddd6cb; padding-bottom: 24px; }\n.theme-sand .streak-panel { background: #fff; border: 1px solid #ddd6cb; border-radius: 24px; }\n.theme-sand .streak-panel__value { color: #e17b45; font-size: 4rem; }\n.theme-sand .dashboard button { background: #18324a; color: #fff; border-radius: 999px; }\n.theme-sand .dashboard button:hover { background: #274963; }\n.theme-sand .dashboard button:focus-visible { outline: 3px solid #f4b183; }\n.theme-sand .workout-card { display: grid; gap: 12px; padding: 20px; }\n.theme-sand .workout-card__title { font-weight: 700; letter-spacing: -0.02em; }\n.theme-sand .workout-card__meta { color: #65758b; }\n.theme-sand .week-picker { display: flex; gap: 8px; }\n.theme-sand .week-picker__option { padding: 8px 12px; border: 1px solid #ddd6cb; }\n.theme-sand .week-picker__option--active { border-color: #e17b45; }\n.theme-sand .progress { height: 8px; border-radius: 4px; background: #eee8df; }\n.theme-sand .progress__bar { height: 100%; border-radius: 4px; background: #e17b45; }\n.theme-sand .empty-state { padding: 32px; color: #65758b; text-align: center; }\n.theme-sand .loading-state { opacity: .65; pointer-events: none; }\n.theme-sand .error-state { border: 1px solid #bc4d43; color: #bc4d43; }\n.theme-sand .dashboard__footer { max-width: 880px; color: #65758b; }\n.theme-sand .dashboard__footer a { color: #18324a; text-decoration: underline; }\n.theme-sand .dashboard__footer a:hover { color: #e17b45; }\n.theme-sand .dashboard .card { display: grid; min-height: 160px; align-content: space-between; gap: 16px; padding: 24px; border: 1px solid #ddd6cb; border-radius: 18px; background: #fff; }\n.theme-sand .dashboard .card__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }\n.theme-sand .dashboard .card__heading h2 { margin: 0; color: #18324a; font-size: 1.2rem; }\n.theme-sand .dashboard .card__heading small { color: #65758b; }\n.theme-sand .dashboard .card__metric { font-size: 2.6rem; font-weight: 700; color: #e17b45; }\n.theme-sand .dashboard .card__metric--quiet { color: #65758b; }\n.theme-sand .dashboard .card__description { max-width: 48ch; color: #65758b; line-height: 1.5; }\n.theme-sand .dashboard .card__action { justify-self: start; color: #18324a; font-weight: 700; }\n.theme-sand .dashboard .card__action:hover { color: #e17b45; }\n.theme-sand .dashboard .card--featured { border-color: #e17b45; box-shadow: 0 16px 48px #e17b451a; }\n.theme-sand .dashboard .card--featured .card__metric { font-size: 3.4rem; }\n.theme-sand .dashboard .table { width: 100%; border-collapse: collapse; }\n.theme-sand .dashboard .table th { padding: 12px; text-align: left; color: #65758b; font-size: .8rem; text-transform: uppercase; }\n.theme-sand .dashboard .table td { padding: 16px 12px; border-top: 1px solid #eee8df; color: #18324a; }\n.theme-sand .dashboard .table tr:hover td { background: #fffaf5; }\n.theme-sand .dashboard .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; background: #eff8ef; color: #2e6535; font-size: .8rem; }\n.theme-sand .dashboard .badge--pending { background: #fff4ed; color: #7d3c22; }\n.theme-sand .dashboard .badge--missed { background: #ece7df; color: #65758b; }\n.theme-sand .dashboard .skeleton { min-height: 18px; border-radius: 8px; background: linear-gradient(90deg, #eee8df, #fff, #eee8df); }\n.theme-sand .dashboard .skeleton--wide { width: 80%; }\n.theme-sand .dashboard .skeleton--short { width: 40%; }\n.theme-sand .dashboard .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }\n.theme-sand .dashboard .divider { height: 1px; margin: 24px 0; background: #ddd6cb; }\n.theme-sand .dashboard .modal { position: fixed; inset: 0; display: grid; place-items: center; background: #18324a66; }\n.theme-sand .dashboard .modal__body { width: min(520px, calc(100vw - 32px)); padding: 28px; border-radius: 20px; background: #fff; }\n.theme-sand .dashboard .modal__close { float: right; border: 0; background: transparent; color: #65758b; }\n"
+        ,"src/fixtures/weekly-workout-history.json": "{\"weeks\": [{\"id\": \"current\", \"label\": \"Current week\", \"workouts\": [{\"type\": \"run\", \"completed\": true}, {\"type\": \"lift\", \"completed\": true}]}, {\"id\": \"previous\", \"label\": \"Previous week\", \"workouts\": [{\"type\": \"cycle\", \"completed\": true}]}], \"metadata\": {\"source\": \"workout-dashboard\", \"updated\": \"2025-01-01\"}}\n",
+        "docs/fitness-dashboard-spec.md": "# Weekly workout dashboard\n\nThe dashboard displays the current weekly workout streak and allows a member to switch week context. Rendering, state selection, CSS presentation, loading, empty, and error states are documented here. Validation covers accessible headings, controls, workout counts, and empty history.\n\n## Product notes\n\nThe dashboard should preserve the selected week while state refreshes. Workout records may arrive in multiple pages and the streak selector must ignore incomplete activities. The panel should remain visible while data is loading so layout does not shift. Responsive styling is required for narrow screens, keyboard focus, color contrast, and long workout names.\n",
+        "src/styles/dashboard-layout.css": ".dashboard-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; max-width: 960px; margin: 0 auto; }\n.dashboard-layout__header { display: flex; align-items: center; gap: 18px; }\n.dashboard-layout__content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }\n.dashboard-layout__aside { min-width: 240px; padding: 20px; background: #fff; }\n.dashboard-layout__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }\n.dashboard-layout__toolbar button { min-height: 40px; padding: 8px 16px; border: 1px solid #ddd6cb; background: #fff; }\n.dashboard-layout__toolbar button[aria-pressed=\"true\"] { border-color: #e17b45; background: #fff4ed; }\n.dashboard-layout__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }\n.dashboard-layout__day { min-height: 80px; padding: 10px; border-radius: 12px; background: #f8f5f0; }\n.dashboard-layout__day--complete { background: #e17b45; color: #fff; }\n.dashboard-layout__day--missed { background: #ece7df; color: #65758b; }\n.dashboard-layout__day--today { box-shadow: inset 0 0 0 2px #18324a; }\n.dashboard-layout__legend { display: flex; gap: 14px; color: #65758b; font-size: .875rem; }\n.dashboard-layout__legend-item { display: inline-flex; align-items: center; gap: 6px; }\n.dashboard-layout__legend-dot { width: 10px; height: 10px; border-radius: 50%; background: #e17b45; }\n.dashboard-layout__legend-dot--missed { background: #ece7df; }\n.dashboard-layout__notice { padding: 14px 18px; border-radius: 12px; background: #fff4ed; color: #7d3c22; }\n.dashboard-layout__notice--error { background: #fff0ef; color: #8a2f2a; }\n.dashboard-layout__notice--success { background: #eff8ef; color: #2e6535; }\n@media (max-width: 760px) { .dashboard-layout__content { grid-template-columns: 1fr; } .dashboard-layout__grid { gap: 4px; } }\n"
+      },
+      "evidence_slots": {
+        "render": {"path": "src/App.jsx", "line_range": [7, 14], "all_anchor_tokens": ["main", "dashboard", "Weekly", "streak"]},
+        "state": {"path": "src/state/workouts.js", "line_range": [3, 7], "all_anchor_tokens": ["weeklyWorkoutStreak", "completedWorkouts", "workouts"]},
+        "style": {"path": "src/styles.css", "line_range": [1, 12], "all_anchor_tokens": ["dashboard", "streak", "panel", "background"]},
+        "validation": {"path": "src/App.test.jsx", "line_range": [5, 11], "all_anchor_tokens": ["renders", "current", "workout", "streak", "expect"]}
+      }
+    },
+    {
+      "case_id": "cross-file-upload-limit",
+      "repository": "cross-file-upload-limit",
+      "task": "Add upload byte limits across handle_upload, its validation dependency, and regression tests.",
+      "budget": 1800,
+      "top_k": 8,
+      "corpus_expansion": {
+        "distractor_file_count": 12,
+        "distractor_lines_per_file": 18
+      },
+      "fixture": {
+        "src/api.py": "from .limits import validate_limit\n\ndef handle_upload(payload, max_bytes):\n    validate_limit(payload, max_bytes)\n    return {\"accepted\": True, \"size\": len(payload)}\n",
+        "src/limits.py": "class UploadTooLarge(ValueError):\n    pass\n\ndef validate_limit(payload, max_bytes):\n    if len(payload) > max_bytes:\n        raise UploadTooLarge(f\"upload exceeds {max_bytes} bytes\")\n",
+        "tests/test_uploads.py": "from src.api import handle_upload\nfrom src.limits import UploadTooLarge\n\ndef test_upload_limit_rejects_large_payload():\n    try:\n        handle_upload(b\"1234\", 3)\n    except UploadTooLarge:\n        return\n    raise AssertionError(\"expected upload limit rejection\")\n",
+        "src/config.py": "DEFAULT_UPLOAD_BYTES = 1048576\n",
+        "README.md": "# Upload service\nThe service accepts binary payloads.\n"
+      },
+      "graph": {
+        "directed": false,
+        "multigraph": false,
+        "nodes": [
+          {"id": "handle", "label": "handle_upload()", "file_type": "code", "source_file": "src/api.py", "source_location": "L3", "community": 1},
+          {"id": "validate", "label": "validate_limit()", "file_type": "code", "source_file": "src/limits.py", "source_location": "L4", "community": 2},
+          {"id": "test", "label": "test_upload_limit_rejects_large_payload()", "file_type": "code", "source_file": "tests/test_uploads.py", "source_location": "L4", "community": 3}
+        ],
+        "links": [
+          {"source": "handle", "target": "validate", "relation": "calls", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "src/api.py"},
+          {"source": "test", "target": "handle", "relation": "tests", "confidence": "INFERRED", "confidence_score": 0.85, "source_file": "tests/test_uploads.py"}
+        ]
+      },
+      "evidence_slots": {
+        "entry": {"path": "src/api.py", "line_range": [3, 5], "all_anchor_tokens": ["handle_upload", "validate_limit", "accepted"]},
+        "validation": {"path": "src/limits.py", "line_range": [4, 6], "all_anchor_tokens": ["validate_limit", "max_bytes", "UploadTooLarge"]},
+        "test": {"path": "tests/test_uploads.py", "line_range": [4, 9], "all_anchor_tokens": ["test_upload_limit", "handle_upload", "UploadTooLarge"]}
+      }
+    }
+  ]
+}

@@ -44,7 +44,7 @@ prompt.
 
 The benchmark fixture contains `12` manually annotated tasks across
 `token-optimization`, `mesh`, `signalfoundry`, and `application-tracker`. It
-separates retrieval sufficiency from answer-plan sufficiency and reports:
+separates retrieval sufficiency from context-plan readiness and reports:
 
 - `edit_target_recall`: whether the feature change surface names the expected
   implementation files.
@@ -52,13 +52,15 @@ separates retrieval sufficiency from answer-plan sufficiency and reports:
   files.
 - `required_observation_recall`: whether selected excerpts expose required
   behavior, config, or test observations.
-- `answer_plan_pass_rate`: deterministic pass signal that the pack includes
+- `context_plan_readiness_rate`: deterministic readiness signal that the pack includes
   edit targets, test signals, and enough required observations for an agent to
-  start work.
+  start work. The performance-certification threshold is `0.85`.
+- `answer_plan_rubric`: manual, non-scored metadata retained for qualitative review.
 - `median_token_reduction_percent`: selected context reduction versus scanned
   eligible repository context.
-- `median_full_scan_prompt_tokens`: median tokens in a rendered prompt that
-  includes the user task plus every scanned eligible source chunk.
+- `median_full_scan_prompt_tokens`: median additive token counterfactual for
+  the user task plus every scanned eligible source chunk. The implementation
+  sums independently tokenized blocks and does not render or send this prompt.
 - `median_packed_prompt_tokens`: median tokens in the actual packed prompt that
   would be handed to a coding agent.
 - `median_prompt_tokens_saved_vs_full_scan`: median token savings for the
@@ -75,18 +77,62 @@ Run it with:
   --summary
 ```
 
-Current local result from July 7, 2026:
+Current local result from July 11, 2026 (12 hand-authored cases; run with the
+command above):
 
-- edit-target recall: `1.0`
-- test-target recall: `0.8333`
-- required-observation recall: `0.9167`
-- answer-plan pass rate: `0.8333`
-- median token reduction: `96.73%`
-- median full-scan prompt: `80,921.5` tokens
-- median packed prompt: `1,993.0` tokens
-- median prompt tokens saved: `78,813.0`
-- total prompt tokens saved across 12 cases: `1,318,563`
+- edit-target recall: `0.9583` (23/24 expected files)
+- test-target recall: `1.0` (12/12 cases)
+- required-observation recall: `0.9722`
+- context-plan readiness rate: `0.9167` (11/12 cases)
+- median token reduction: `93.22%`
+- median full-scan prompt: `74,941` tokens
+- median packed prompt: `3,919` tokens
+- median additive counterfactual tokens omitted: `71,056`
+- total additive counterfactual tokens omitted: reported only in each generated
+  artifact because the current local corpus is not yet pinned
 - acceptance pass: `true`
+
+These are deterministic local retrieval measurements against an additive
+full-scan counterfactual. They are not provider-billed cost, latency, or model
+answer-quality measurements. Runtime varies by machine and cache state and is
+reported in each generated artifact rather than treated as a durable impact
+claim. The lower reduction than the older snapshot is
+intentional: the current planner reserves more evidence to improve first-pass
+feature grounding.
+
+## Graphify Ablation
+
+`graphify_ablation.py` pairs the normal feature packer with the optional
+Graphify-backed packer on ten annotated cross-file tasks from pinned Click and
+FastAPI revisions. It measures evidence-region recall, edit/test target recall,
+missing-context expansion signals, packed tokens, graph overhead, and total
+pack runtime.
+
+Graphify is installed and run outside AgenVantage's core environment:
+
+```bash
+uv tool install 'graphifyy==0.9.13'
+graphify extract . --code-only --out /path/to/fresh-output
+```
+
+Run the paired benchmark after materializing the repositories and graph files
+named in `examples/graphify_ablation_cases.json`:
+
+```bash
+.venv/bin/python benchmarks/graphify_ablation.py \
+  --fixture examples/graphify_ablation_cases.json \
+  --repos-root external/graphify-eval \
+  --output-json artifacts/graphify-ablation.json \
+  --output-md artifacts/graphify-ablation.md \
+  --summary
+```
+
+The July 12, 2026 run passed the deterministic gate through a `38.10%`
+reduction in missing-context expansions with no edit/test recall regression.
+Evidence-region recall did not improve, and median graph processing added about
+`680 ms`. See
+[`docs/graphify-ablation-results.md`](../docs/graphify-ablation-results.md) for
+the full claim boundary and the blocked task-level agent gate.
 
 ## Provider Validation
 
@@ -247,7 +293,8 @@ Recover exact text for an imaged block with:
   --id rec_...
 ```
 
-Current local result from July 7, 2026:
+Historical local result from July 7, 2026 (modality snapshot; superseded by
+the current feature-work benchmark above for retrieval claims):
 
 - cases: `12`
 - full-scan median text prompt: `80,968.5` tokens

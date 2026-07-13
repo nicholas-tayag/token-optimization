@@ -16,5 +16,6 @@ class TokenCounter:
             self.encoding_name = "o200k_base"
 
     def count(self, text: str) -> int:
-        return len(self.encoding.encode(text))
-
+        # Repository content is untrusted input and may mention tokenizer sentinels
+        # literally. Count those strings as ordinary text instead of rejecting them.
+        return len(self.encoding.encode(text, disallowed_special=()))

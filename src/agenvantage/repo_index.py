@@ -4,15 +4,53 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-_INDEX_FORMAT_VERSION = 3
+_INDEX_FORMAT_VERSION = 4
 _SYMBOL_LIMIT = 40
 _IMPORT_LIMIT = 40
 _LOCAL_IMPORT_LIMIT = 40
-_LOCAL_IMPORT_SUFFIXES = (".js", ".mjs", ".ts", ".tsx", ".jsx", ".py")
+_LOCAL_IMPORT_SUFFIXES = (
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".py",
+    ".css",
+    ".scss",
+    ".sass",
+    ".less",
+    ".json",
+    ".svg",
+    ".vue",
+    ".svelte",
+)
+_STYLE_SUFFIXES = {".css", ".scss", ".sass", ".less", ".styl", ".stylus"}
+_DOC_SUFFIXES = {".md", ".mdx", ".rst", ".txt", ".adoc"}
+_CONFIG_SUFFIXES = {".json", ".jsonc", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
+_CONFIG_NAMES = {
+    ".env",
+    ".env.example",
+    "babel.config.js",
+    "eslint.config.js",
+    "jest.config.js",
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "pyproject.toml",
+    "tsconfig.json",
+    "vite.config.js",
+    "vite.config.ts",
+    "webpack.config.js",
+}
+_GENERATED_PARTS = {"artifacts", "build", "coverage", "dist", "generated", "out", "target"}
+_VENDOR_PARTS = {"bower_components", "node_modules", "third_party", "vendor"}
 
 
 @dataclass(frozen=True)
@@ -48,6 +86,25 @@ class RepositoryFileIndexEntry:
     local_import_paths: tuple[str, ...]
     imported_by_paths: tuple[str, ...]
     symbol_occurrences: tuple[SymbolOccurrence, ...]
+    role: str = "source"
+    language: str = ""
+    landmarks: tuple[str, ...] = ()
+
+    @property
+    def file_role(self) -> str:
+        return self.role
+
+    @property
+    def is_generated(self) -> bool:
+        return self.role == "generated"
+
+    @property
+    def is_vendor(self) -> bool:
+        return self.role == "vendor"
+
+    @property
+    def is_test(self) -> bool:
+        return self.role == "test"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +117,10 @@ class RepositoryFileIndexEntry:
             "local_import_paths": list(self.local_import_paths),
             "imported_by_paths": list(self.imported_by_paths),
             "symbol_occurrences": [item.to_dict() for item in self.symbol_occurrences],
+            "role": self.role,
+            "file_role": self.role,
+            "language": self.language,
+            "landmarks": list(self.landmarks),
         }
 
     @classmethod
@@ -78,6 +139,9 @@ class RepositoryFileIndexEntry:
                 for item in payload.get("symbol_occurrences", [])
                 if isinstance(item, dict)
             ),
+            role=str(payload.get("role", payload.get("file_role", "source"))),
+            language=str(payload.get("language", "")),
+            landmarks=tuple(str(item) for item in payload.get("landmarks", [])),
         )
 
 
@@ -143,14 +207,152 @@ def _read_cache(path: Path) -> dict[str, RepositoryFileIndexEntry]:
     return result
 
 
-def _write_cache(path: Path, repo: Path, entries: dict[str, RepositoryFileIndexEntry]) -> None:
+def _read_cache_manifest(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    manifest = payload.get("manifest", {})
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _write_cache(
+    path: Path,
+    repo: Path,
+    entries: dict[str, RepositoryFileIndexEntry],
+    manifest: dict[str, Any],
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "format_version": _INDEX_FORMAT_VERSION,
         "repo": str(repo.resolve()),
+        "manifest": manifest,
         "entries": {relative_path: entry.to_dict() for relative_path, entry in entries.items()},
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _language_for_path(relative_path: str) -> str:
+    suffix = Path(relative_path).suffix.lower()
+    if suffix in {".tsx", ".jsx"}:
+        return "typescript-react" if suffix == ".tsx" else "javascript-react"
+    return {
+        ".js": "javascript",
+        ".mjs": "javascript",
+        ".cjs": "javascript",
+        ".ts": "typescript",
+        ".py": "python",
+        ".css": "css",
+        ".scss": "scss",
+        ".sass": "sass",
+        ".json": "json",
+        ".md": "markdown",
+    }.get(suffix, suffix.lstrip(".") or "text")
+
+
+def classify_file_role(relative_path: str, text: str = "") -> str:
+    """Classify a path using stable path/name signals before content hints."""
+    path = Path(relative_path)
+    parts = {part.casefold() for part in path.parts}
+    name = path.name.casefold()
+    suffix = path.suffix.casefold()
+    if parts & _VENDOR_PARTS:
+        return "vendor"
+    if (
+        parts & _GENERATED_PARTS
+        or ".generated." in name
+        or name.endswith((".min.js", ".min.css", ".map"))
+    ):
+        return "generated"
+    if (
+        "/tests/" in f"/{relative_path.casefold()}"
+        or "/test/" in f"/{relative_path.casefold()}"
+        or "/spec/" in f"/{relative_path.casefold()}"
+        or re.search(r"(?:^|[._-])(test|spec)(?:[._-]|$)", name)
+    ):
+        return "test"
+    if suffix in _STYLE_SUFFIXES:
+        return "style"
+    if suffix in _DOC_SUFFIXES or name.startswith(("readme", "changelog", "license")):
+        return "docs"
+    if name in _CONFIG_NAMES or suffix in _CONFIG_SUFFIXES:
+        return "config"
+    if text and re.search(r"^\s*#!.*\b(?:bash|sh|python)\b", text):
+        return "source"
+    return "source"
+
+
+def _file_landmarks(relative_path: str, text: str, role: str) -> tuple[str, ...]:
+    path = Path(relative_path)
+    name = path.name.casefold()
+    suffix = path.suffix.casefold()
+    values: list[str] = []
+    if role == "test":
+        values.append("test-layout")
+    if role == "style":
+        values.append("style")
+    if role == "config" and name in _CONFIG_NAMES:
+        values.append("config")
+    if name in {"package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"}:
+        values.append("dependency-manifest")
+    if name.startswith("vite.config"):
+        values.append("vite-config")
+    if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".go", ".rs"} and (
+        name in {
+            "main.js",
+            "main.jsx",
+            "main.ts",
+            "main.tsx",
+            "index.js",
+            "index.jsx",
+            "index.ts",
+            "index.tsx",
+            "app.py",
+            "manage.py",
+            "server.js",
+            "server.ts",
+            "cli.py",
+        }
+        or "entrypoint" in name
+    ):
+        values.append("entrypoint")
+    if suffix in {".tsx", ".jsx"}:
+        if name in {"main.tsx", "main.jsx", "index.tsx", "index.jsx", "client.tsx", "client.jsx"}:
+            values.append("react-entrypoint")
+        if re.search(r"\b(?:createRoot|ReactDOM\.render|hydrateRoot)\b", text):
+            values.append("react-root")
+        if re.search(r"<([A-Z][A-Za-z0-9]*|[a-z]+)[\s/>]", text):
+            values.append("react-component")
+    if name.startswith("app.") or path.stem.casefold() in {"app", "root", "layout"}:
+        values.append("app-shell")
+    if re.search(r"\b(?:useState|useReducer|createContext|Redux|zustand|recoil)\b", text) or any(
+        term in path.stem.casefold() for term in ("state", "store", "reducer", "context")
+    ):
+        values.append("state")
+    if re.search(r"\b(?:interface|type|enum)\s+[A-Za-z_]", text) or "types" in path.parts:
+        values.append("types")
+    if re.search(r"\b(?:BrowserRouter|HashRouter|createBrowserRouter|Routes|Route)\b", text):
+        values.append("router")
+    return _ordered_unique(values, 12)
+
+
+def _repository_revision(repo: Path) -> tuple[str, str]:
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        revision = ""
+    if revision:
+        return revision, "git"
+    return hashlib.sha256(str(repo).encode("utf-8")).hexdigest(), "path"
 
 
 def extract_symbol_occurrences(path: Path, text: str) -> tuple[SymbolOccurrence, ...]:
@@ -197,27 +399,19 @@ def _extract_symbols(path: Path, text: str) -> tuple[str, ...]:
 
 
 def _extract_imports(text: str) -> tuple[str, ...]:
-    values: list[str] = []
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r"\bfrom\s+['\"]([^'\"]+)['\"]", text)
+    matches: list[tuple[int, str]] = []
+    patterns = (
+        # ES module source imports, including side-effect-only CSS imports.
+        r"\bfrom\s*['\"]([^'\"]+)['\"]",
+        r"\bimport\s*['\"]([^'\"]+)['\"]",
+        r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]\s*\)",
+        r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)",
+        # Python's `from package.module import name` form.
+        r"^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\b",
     )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r"\brequire\(\s*['\"]([^'\"]+)['\"]\s*\)", text)
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r"^\s*import\s+([A-Za-z0-9_., ]+)", text, re.MULTILINE)
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r"^\s*from\s+([A-Za-z0-9_\.]+)\s+import\b", text, re.MULTILINE)
-    )
-    values.extend(
-        match.group(1)
-        for match in re.finditer(r'^\s*import\s+"([^"]+)"', text, re.MULTILINE)
-    )
+    for pattern in patterns:
+        matches.extend((match.start(), match.group(1)) for match in re.finditer(pattern, text, re.MULTILINE))
+    values = [value for _, value in sorted(matches, key=lambda item: (item[0], item[1]))]
     return _ordered_unique(values, _IMPORT_LIMIT)
 
 
@@ -227,18 +421,21 @@ def _resolve_local_imports(
     base_dir = Path(relative_path).parent
     resolved: list[str] = []
     for value in imports:
-        if not value.startswith(("./", "../")):
-            continue
-        raw_target = (base_dir / value).as_posix()
-        target_path = Path(raw_target)
-        candidates = [target_path]
-        if target_path.suffix:
-            candidates.append(target_path.with_suffix(target_path.suffix))
+        if value.startswith(("./", "../")):
+            target_path = Path(os.path.normpath((base_dir / value).as_posix()))
+            candidates = [target_path]
+            if not target_path.suffix:
+                candidates.extend(target_path.with_suffix(suffix) for suffix in _LOCAL_IMPORT_SUFFIXES)
+                candidates.extend(target_path / f"index{suffix}" for suffix in _LOCAL_IMPORT_SUFFIXES)
+        elif Path(relative_path).suffix == ".py" and re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*",
+            value,
+        ):
+            # Resolve absolute imports that name modules inside the repository.
+            target_path = Path(value.replace(".", "/"))
+            candidates = [target_path.with_suffix(".py"), target_path / "__init__.py"]
         else:
-            candidates.extend(target_path.with_suffix(suffix) for suffix in _LOCAL_IMPORT_SUFFIXES)
-            candidates.extend(
-                (target_path / f"index{suffix}") for suffix in _LOCAL_IMPORT_SUFFIXES
-            )
+            continue
         for candidate in candidates:
             normalized = candidate.as_posix()
             if normalized in candidate_paths:
@@ -263,41 +460,62 @@ def _reverse_local_imports(
 
 def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndexBuildResult:
     repo = repo.resolve()
-    file_list = tuple(files)
+    file_list = tuple(sorted((Path(path).resolve() for path in files), key=lambda path: path.as_posix()))
     candidate_paths = {path.relative_to(repo).as_posix() for path in file_list}
     cache_path = repository_index_path(repo)
     cached_entries = _read_cache(cache_path)
+    cached_manifest = _read_cache_manifest(cache_path)
+    revision, revision_source = _repository_revision(repo)
     entries: dict[str, RepositoryFileIndexEntry] = {}
     reused_files = 0
     rebuilt_files = 0
     skipped_files = 0
+    validated_files = 0
     for path in file_list:
         relative_path = path.relative_to(repo).as_posix()
-        stat = path.stat()
-        cached_entry = cached_entries.get(relative_path)
-        if (
-            cached_entry is not None
-            and cached_entry.size_bytes == stat.st_size
-            and cached_entry.mtime_ns == stat.st_mtime_ns
-        ):
-            entries[relative_path] = cached_entry
-            reused_files += 1
-            continue
         try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+            stat = path.stat()
+            raw = path.read_bytes()
+            content_hash = hashlib.sha256(raw).hexdigest()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
             skipped_files += 1
             continue
+        validated_files += 1
+        cached_entry = cached_entries.get(relative_path)
+        if cached_entry is not None and cached_entry.content_hash == content_hash:
+            # The file was read and hashed above; size/mtime are metadata only and
+            # never decide whether parsed data is safe to reuse.
+            entries[relative_path] = RepositoryFileIndexEntry(
+                relative_path=cached_entry.relative_path,
+                size_bytes=stat.st_size,
+                mtime_ns=stat.st_mtime_ns,
+                content_hash=content_hash,
+                symbols=cached_entry.symbols,
+                imports=cached_entry.imports,
+                local_import_paths=cached_entry.local_import_paths,
+                imported_by_paths=(),
+                symbol_occurrences=cached_entry.symbol_occurrences,
+                role=cached_entry.role,
+                language=cached_entry.language or _language_for_path(relative_path),
+                landmarks=cached_entry.landmarks,
+            )
+            reused_files += 1
+            continue
+        role = classify_file_role(relative_path, text)
         entry = RepositoryFileIndexEntry(
             relative_path=relative_path,
             size_bytes=stat.st_size,
             mtime_ns=stat.st_mtime_ns,
-            content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            content_hash=content_hash,
             symbols=_extract_symbols(path, text),
             imports=_extract_imports(text),
             local_import_paths=(),
             imported_by_paths=(),
             symbol_occurrences=extract_symbol_occurrences(path, text),
+            role=role,
+            language=_language_for_path(relative_path),
+            landmarks=_file_landmarks(relative_path, text, role),
         )
         entries[relative_path] = entry
         rebuilt_files += 1
@@ -314,6 +532,9 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             ),
             imported_by_paths=(),
             symbol_occurrences=entry.symbol_occurrences,
+            role=entry.role,
+            language=entry.language,
+            landmarks=entry.landmarks,
         )
     imported_by_paths = _reverse_local_imports(entries)
     for relative_path, entry in tuple(entries.items()):
@@ -327,17 +548,59 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             local_import_paths=entry.local_import_paths,
             imported_by_paths=imported_by_paths.get(entry.relative_path, ()),
             symbol_occurrences=entry.symbol_occurrences,
+            role=entry.role,
+            language=entry.language,
+            landmarks=entry.landmarks,
         )
-    _write_cache(cache_path, repo, entries)
+    indexed_at = datetime.now(timezone.utc).isoformat()
+    role_counts: dict[str, int] = {}
+    landmark_records: list[dict[str, str]] = []
+    test_files: list[str] = []
+    test_directories: set[str] = set()
+    for relative_path, entry in sorted(entries.items()):
+        role_counts[entry.role] = role_counts.get(entry.role, 0) + 1
+        if entry.role == "test":
+            test_files.append(relative_path)
+            test_directories.add(str(Path(relative_path).parent.as_posix()))
+        landmark_records.extend(
+            {"path": relative_path, "kind": landmark} for landmark in entry.landmarks
+        )
+    manifest = {
+        "revision": revision,
+        "revision_source": revision_source,
+        "indexed_at": indexed_at,
+        "indexed_files": len(entries),
+        "content_hashes_validated": validated_files,
+        "role_counts": dict(sorted(role_counts.items())),
+    }
+    _write_cache(cache_path, repo, entries, manifest)
+    revision_match = cached_manifest.get("revision") == revision
     stats = {
         "cache_path": str(cache_path),
         "format_version": _INDEX_FORMAT_VERSION,
+        "revision": revision,
+        "revision_source": revision_source,
+        "indexed_at": indexed_at,
+        "freshness": {
+            "status": "fresh" if rebuilt_files == 0 and revision_match else "refreshed",
+            "revision_match": revision_match,
+            "content_hashes_validated": validated_files,
+            "cached_revision": cached_manifest.get("revision"),
+        },
+        "freshness_status": "fresh" if rebuilt_files == 0 and revision_match else "refreshed",
         "indexed_files": len(entries),
         "reused_files": reused_files,
         "rebuilt_files": rebuilt_files,
         "skipped_files": skipped_files,
+        "content_hashes_validated": validated_files,
         "symbol_count": sum(len(entry.symbols) for entry in entries.values()),
         "import_count": sum(len(entry.imports) for entry in entries.values()),
         "local_import_count": sum(len(entry.local_import_paths) for entry in entries.values()),
+        "role_counts": dict(sorted(role_counts.items())),
+        "landmarks": sorted(landmark_records, key=lambda item: (item["path"], item["kind"])),
+        "test_layout": {
+            "directories": sorted(test_directories),
+            "files": test_files,
+        },
     }
     return RepositoryIndexBuildResult(entries=entries, stats=stats)

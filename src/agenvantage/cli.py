@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -12,9 +13,35 @@ from pathlib import Path
 from typing import Any
 
 from agenvantage import __version__
+from agenvantage.agent_launcher import resolve_agent_command
+from agenvantage.agent_integrations import (
+    SUPPORTED_TARGETS,
+    agent_skill_status,
+    install_agent_skill,
+)
 from agenvantage.config import PackConfig, load_pack_config
+from agenvantage.cursor_integration import (
+    cursor_skill_destination,
+    cursor_skill_status,
+    install_cursor_skill,
+    uninstall_cursor_skill,
+)
 from agenvantage.env import load_dotenv
 from agenvantage.experiment import load_scenario, run_experiment
+from agenvantage.orchestrator import (
+    build_development_plan,
+    dispatch_worker_run,
+    load_development_partition,
+    orchestration_root,
+    review_worker_handoff,
+)
+from agenvantage.paired_codex_validation import (
+    build_adhoc_paired_case,
+    codex_jsonl_to_provider_records,
+    default_compare_output_dir,
+    format_compare_summary,
+    run_paired_codex_validation,
+)
 from agenvantage.feature_provider_validation import (
     feature_provider_fixture_readiness_report,
     load_feature_provider_dataset,
@@ -28,6 +55,14 @@ from agenvantage.modality import (
     resolve_recoverable_text_path,
     verify_mixed_modality_manifest,
     verify_recoverable_block,
+)
+from agenvantage.mcp_server import run_stdio_server
+from agenvantage.studio import (
+    build_doctor_payload,
+    build_studio_status,
+    demo_task,
+    studio_root,
+    write_studio_pages,
 )
 from agenvantage.observability import (
     ANNOTATION_LABELS,
@@ -78,12 +113,80 @@ _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
 _DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
 _DEFAULT_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "provider_validation_cases.json"
 _DEFAULT_FEATURE_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "feature_work_validation_cases.json"
+_DEFAULT_PAIRED_CODEX_FIXTURE = _PACKAGE_ROOT / "examples" / "paired_codex_validation_cases.json"
+_DEFAULT_PAIRED_CODEX_OUTPUT = _PACKAGE_ROOT / "artifacts" / "paired-codex-validation"
 _DEFAULT_REPOS_ROOT = _PACKAGE_ROOT.parent
 _DEFAULT_BUDGET = 360
 _DEFAULT_DEMO_OUTPUT = _PACKAGE_ROOT / "artifacts" / "oncall-report.json"
 _DEFAULT_PACK_BUDGET = 6000
 _DEFAULT_PACK_MODEL = "gpt-4o-mini"
 _DEFAULT_PACK_TOP_K = 20
+_DEFAULT_GRAPH_HOPS = 2
+_DEFAULT_GRAPH_TIMEOUT = 120.0
+
+
+def _add_graph_pack_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--graph-backend",
+        choices=("auto", "off", "graphify"),
+        default=None,
+        help="Repository-graph policy: automatic, disabled, or forced (default: off).",
+    )
+    parser.add_argument(
+        "--graph-json",
+        type=Path,
+        help="Read an existing Graphify graph.json instead of generating one.",
+    )
+    parser.add_argument(
+        "--graph-hops",
+        type=int,
+        choices=(1, 2),
+        default=None,
+        help="Maximum bounded Graphify traversal depth (default: 2).",
+    )
+    parser.add_argument(
+        "--graph-timeout",
+        type=float,
+        default=None,
+        help="Maximum Graphify extraction time in seconds (default: 120).",
+    )
+    parser.add_argument(
+        "--graphify-executable",
+        default=None,
+        help="Graphify executable path or command name (default: graphify).",
+    )
+
+
+def _add_agent_alias_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    provider: str,
+) -> None:
+    parser.add_argument("task", help=f"Feature task to run with {provider.title()}.")
+    parser.add_argument("--repo", type=Path, action="append")
+    parser.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default="feature",
+    )
+    parser.add_argument("--budget", type=int, default=None)
+    parser.add_argument("--tokenizer-model", dest="model", default=None)
+    parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument("--include-diff", action="store_true")
+    parser.add_argument("--include-log", action="store_true")
+    parser.add_argument("--include-glob", action="append", default=[])
+    parser.add_argument("--exclude-glob", action="append", default=[])
+    _add_graph_pack_arguments(parser)
+    parser.add_argument("--db", type=Path)
+    parser.add_argument("--handoff-file", type=Path)
+    parser.add_argument("--executable")
+    parser.add_argument("--agent-model")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Prepare and summarize context without launching the external agent.",
+    )
+    parser.add_argument("--allow-failure", action="store_true")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -105,6 +208,115 @@ def _parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    initialize = subparsers.add_parser(
+        "init",
+        help="Install automatic AgenVantage integrations for coding agents.",
+    )
+    initialize.add_argument(
+        "--agent",
+        dest="agents",
+        action="append",
+        choices=("all", "cursor", "codex", "claude"),
+        help="Agent integration to install; repeat as needed (default: all).",
+    )
+    initialize.add_argument(
+        "--project",
+        action="store_true",
+        help="Install repository-shared skills instead of personal skills.",
+    )
+    initialize.add_argument("--force", action="store_true")
+    initialize.add_argument("--json", dest="as_json", action="store_true")
+
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="Check Graphify, agent, skill, MCP, and repository readiness.",
+    )
+    doctor.add_argument(
+        "--project",
+        action="store_true",
+        help="Check repository-shared skills instead of personal skills.",
+    )
+    doctor.add_argument("--json", dest="as_json", action="store_true")
+
+    studio = subparsers.add_parser(
+        "studio",
+        help="Open the local AgenVantage studio for setup, preview, and trace navigation.",
+    )
+    studio_subparsers = studio.add_subparsers(dest="studio_command")
+    studio_open = studio_subparsers.add_parser(
+        "open",
+        help="Generate and open the studio hub (default).",
+    )
+    studio_demo = studio_subparsers.add_parser(
+        "demo",
+        help="Pack a demo task, write a context preview, record a trace, and open the studio.",
+    )
+    for studio_parser in (studio, studio_open, studio_demo):
+        studio_parser.add_argument("--repo", type=Path, default=Path("."))
+        studio_parser.add_argument(
+            "--project",
+            action="store_true",
+            help="Use project-scoped skill status instead of personal skills.",
+        )
+        studio_parser.add_argument("--db", type=Path)
+        studio_parser.add_argument(
+            "--no-browser",
+            action="store_true",
+            help="Print the studio URI instead of opening a browser tab.",
+        )
+    studio_demo.add_argument(
+        "--preset",
+        choices=preset_names(),
+        default="explain",
+        help="Preset for the one-click demo pack (default: explain).",
+    )
+    studio_demo.add_argument("--task", help="Override the default demo task.")
+    studio_demo.add_argument("--budget", type=int, default=None)
+    studio_demo.add_argument("--model", default=None)
+    studio_demo.add_argument("--top-k", type=int, default=None)
+    _add_graph_pack_arguments(studio_demo)
+
+    subparsers.add_parser(
+        "mcp",
+        help="Run the AgenVantage MCP server over standard input/output.",
+    )
+
+    cursor = subparsers.add_parser(
+        "cursor",
+        help="Install or manage automatic AgenVantage context preparation in Cursor.",
+    )
+    cursor_subparsers = cursor.add_subparsers(dest="cursor_command", required=True)
+    for command_name, command_help in (
+        ("install", "Install or update the automatic AgenVantage Cursor skill."),
+        ("status", "Show whether the AgenVantage Cursor skill is installed."),
+        ("uninstall", "Remove the AgenVantage Cursor skill."),
+    ):
+        cursor_command = cursor_subparsers.add_parser(command_name, help=command_help)
+        cursor_command.add_argument(
+            "--project",
+            action="store_true",
+            help="Use this repository's .cursor/skills instead of the personal Cursor skills directory.",
+        )
+        cursor_command.add_argument(
+            "--json",
+            dest="as_json",
+            action="store_true",
+            help="Print machine-readable JSON.",
+        )
+        if command_name in {"install", "uninstall"}:
+            cursor_command.add_argument(
+                "--force",
+                action="store_true",
+                help="Replace or remove a locally modified skill.",
+            )
+
+    for provider in ("codex", "claude"):
+        agent_alias = subparsers.add_parser(
+            provider,
+            help=f"Prepare automatic context and run {provider.title()}.",
+        )
+        _add_agent_alias_arguments(agent_alias, provider=provider)
 
     demo = subparsers.add_parser(
         "demo",
@@ -395,6 +607,151 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional OTLP-style JSON export path for the feature-provider records.",
     )
 
+    validate_paired_codex = subparsers.add_parser(
+        "validate-paired-codex",
+        help="Compare plain Codex vs AgenVantage handoff token usage for feature tasks.",
+        description=(
+            "Measure local prompt compression and optionally run paired Codex "
+            "control-vs-treatment trajectories on annotated feature cases."
+        ),
+    )
+    validate_paired_codex.add_argument(
+        "--fixture",
+        type=Path,
+        default=_DEFAULT_PAIRED_CODEX_FIXTURE,
+        help=(
+            "Paired Codex validation fixture JSON "
+            f"(default: {_DEFAULT_PAIRED_CODEX_FIXTURE.relative_to(_PACKAGE_ROOT)})."
+        ),
+    )
+    validate_paired_codex.add_argument(
+        "--repos-root",
+        type=Path,
+        default=_PACKAGE_ROOT,
+        help=f"Root for resolving case repo_path values (default: {_PACKAGE_ROOT.name}).",
+    )
+    validate_paired_codex.add_argument(
+        "--output-dir",
+        type=Path,
+        default=_DEFAULT_PAIRED_CODEX_OUTPUT,
+        help="Directory for JSON, Markdown, and per-case handoff artifacts.",
+    )
+    validate_paired_codex.add_argument(
+        "--mode",
+        choices=("local_only", "live"),
+        default="local_only",
+        help="local_only measures prompt compression; live runs paired Codex trajectories.",
+    )
+    validate_paired_codex.add_argument("--codex-executable", help="Optional Codex CLI path.")
+    validate_paired_codex.add_argument("--timeout-seconds", type=int, default=1800)
+    validate_paired_codex.add_argument("--max-cases", type=int)
+    validate_paired_codex.add_argument(
+        "--control-jsonl",
+        type=Path,
+        help="Import a saved control Codex --json JSONL log.",
+    )
+    validate_paired_codex.add_argument(
+        "--treatment-jsonl",
+        type=Path,
+        help="Import a saved treatment Codex --json JSONL log.",
+    )
+    validate_paired_codex.add_argument(
+        "--repo",
+        type=Path,
+        help="Target repository for a one-off compare (use with --task instead of --fixture).",
+    )
+    validate_paired_codex.add_argument(
+        "--task",
+        help="Feature task for a one-off compare (use with --repo instead of --fixture).",
+    )
+    validate_paired_codex.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a compact JSON summary to stdout.",
+    )
+
+    compare = subparsers.add_parser(
+        "compare",
+        help="Measure token savings for any repository task (plug-and-play).",
+        description=(
+            "Compare full-scan counterfactual vs AgenVantage-packed context for a task "
+            "in the current or specified repository. Writes artifacts under "
+            ".agenvantage/compare/ in the target repo."
+        ),
+    )
+    compare.add_argument("--repo", type=Path, default=Path("."), help="Repository to analyze.")
+    compare.add_argument("--task", required=True, help="Coding task or feature request.")
+    compare.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Optional output directory (default: <repo>/.agenvantage/compare).",
+    )
+    compare.add_argument(
+        "--live",
+        action="store_true",
+        help="Run paired Codex control-vs-treatment trajectories (requires Codex CLI + API key).",
+    )
+    compare.add_argument("--budget", type=int, default=6000)
+    compare.add_argument(
+        "--graph-backend",
+        choices=("auto", "off", "graphify"),
+        default="auto",
+    )
+    compare.add_argument("--codex-executable", help="Optional Codex CLI path.")
+    compare.add_argument("--timeout-seconds", type=int, default=1800)
+    compare.add_argument(
+        "--control-jsonl",
+        type=Path,
+        help="Import a saved control Codex --json JSONL log.",
+    )
+    compare.add_argument(
+        "--treatment-jsonl",
+        type=Path,
+        help="Import a saved treatment Codex --json JSONL log.",
+    )
+    compare.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Print machine-readable JSON instead of the human summary.",
+    )
+
+    orchestrate = subparsers.add_parser(
+        "orchestrate",
+        help="Manager/worker development orchestration for partitioned packages.",
+    )
+    orchestrate_sub = orchestrate.add_subparsers(dest="orchestrate_command", required=True)
+    orchestrate_plan = orchestrate_sub.add_parser("plan", help="Build a development plan from the partition JSON.")
+    orchestrate_plan.add_argument(
+        "--partition",
+        type=Path,
+        default=_PACKAGE_ROOT / "examples" / "agent_development_partition.json",
+    )
+    orchestrate_plan.add_argument("--repo", type=Path, default=Path("."))
+    orchestrate_plan.add_argument("--output", type=Path)
+    orchestrate_plan.add_argument("--json", dest="as_json", action="store_true")
+
+    orchestrate_run = orchestrate_sub.add_parser("run", help="Prepare and optionally dispatch a worker package.")
+    orchestrate_run.add_argument("--package", required=True, help="Package id such as W2.1.")
+    orchestrate_run.add_argument(
+        "--partition",
+        type=Path,
+        default=_PACKAGE_ROOT / "examples" / "agent_development_partition.json",
+    )
+    orchestrate_run.add_argument("--repo", type=Path, default=Path("."))
+    orchestrate_run.add_argument(
+        "--execute",
+        action="store_true",
+        help="Execute the worker agent command instead of printing the dispatch plan.",
+    )
+    orchestrate_run.add_argument("--json", dest="as_json", action="store_true")
+
+    orchestrate_review = orchestrate_sub.add_parser("review", help="Review a worker handoff JSON against allowed paths.")
+    orchestrate_review.add_argument("--package", required=True)
+    orchestrate_review.add_argument("--repo", type=Path, default=Path("."))
+    orchestrate_review.add_argument("--handoff-json", type=Path)
+    orchestrate_review.add_argument("--json", dest="as_json", action="store_true")
+
     view = subparsers.add_parser("view", help="Open the policy explorer dashboard in a browser.")
     view.add_argument(
         "--report",
@@ -440,6 +797,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Maximum number of ranked candidate chunks considered for selection.",
     )
+    _add_graph_pack_arguments(pack)
     pack.add_argument(
         "--include-diff",
         action="store_true",
@@ -499,6 +857,11 @@ def _parser() -> argparse.ArgumentParser:
         "--modality-output-dir",
         type=Path,
         help="Directory for multimodal artifacts (default: artifacts/context-images/<pack-id>).",
+    )
+    pack.add_argument(
+        "--preview",
+        action="store_true",
+        help="Write a local HTML context preview page under .agenvantage/studio/.",
     )
     pack.add_argument(
         "--copy",
@@ -564,6 +927,7 @@ def _parser() -> argparse.ArgumentParser:
     observe_pack.add_argument("--include-log", action="store_true")
     observe_pack.add_argument("--include-glob", action="append", default=[])
     observe_pack.add_argument("--exclude-glob", action="append", default=[])
+    _add_graph_pack_arguments(observe_pack)
     observe_pack.add_argument("--output", type=Path, help="Optional Markdown context output.")
     observe_pack.add_argument("--manifest", type=Path, help="Optional JSON manifest output.")
     observe_pack.add_argument("--db", type=Path, help="Explicit observability database path.")
@@ -808,6 +1172,7 @@ def _parser() -> argparse.ArgumentParser:
     agent_run.add_argument("--include-log", action="store_true")
     agent_run.add_argument("--include-glob", action="append", default=[])
     agent_run.add_argument("--exclude-glob", action="append", default=[])
+    _add_graph_pack_arguments(agent_run)
     agent_run.add_argument("--db", type=Path, help="Explicit observability database path.")
     agent_run.add_argument(
         "--multimodal",
@@ -1493,8 +1858,23 @@ def _resolve_pack_settings(
     preset_name = args.preset or config.preset or default_preset
     preset = get_preset(preset_name)
 
-    include_globs = tuple(config.include_glob) + tuple(args.include_glob)
-    exclude_globs = tuple(config.exclude_glob) + tuple(args.exclude_glob)
+    include_globs = tuple(config.include_glob) + tuple(getattr(args, "include_glob", None) or [])
+    exclude_globs = tuple(config.exclude_glob) + tuple(getattr(args, "exclude_glob", None) or [])
+    graph_backend = (
+        getattr(args, "graph_backend", None) or config.graph_backend or "off"
+    )
+    graph_json = getattr(args, "graph_json", None) or config.graph_json
+    graph_hops = getattr(args, "graph_hops", None) or config.graph_hops or _DEFAULT_GRAPH_HOPS
+    graph_timeout = (
+        getattr(args, "graph_timeout", None)
+        or config.graph_timeout
+        or _DEFAULT_GRAPH_TIMEOUT
+    )
+    graphify_executable = (
+        getattr(args, "graphify_executable", None)
+        or config.graphify_executable
+        or "graphify"
+    )
 
     return {
         "repos": repos,
@@ -1505,8 +1885,13 @@ def _resolve_pack_settings(
         "preset": preset,
         "include_globs": include_globs,
         "exclude_globs": exclude_globs,
-        "include_diff": args.include_diff or preset.include_diff,
-        "include_log": args.include_log or preset.include_log,
+        "include_diff": getattr(args, "include_diff", False) or preset.include_diff,
+        "include_log": getattr(args, "include_log", False) or preset.include_log,
+        "graph_backend": graph_backend,
+        "graph_json": graph_json,
+        "graph_hops": graph_hops,
+        "graph_timeout": graph_timeout,
+        "graphify_executable": graphify_executable,
         "config_source": config.source,
     }
 
@@ -1534,6 +1919,11 @@ def _build_pack_artifacts(
             include_globs=settings["include_globs"],
             exclude_globs=settings["exclude_globs"],
             workflow=settings["preset_name"] if settings["preset_name"] == "feature" else "generic",
+            graph_backend=settings["graph_backend"],
+            graph_json=settings["graph_json"],
+            graph_hops=settings["graph_hops"],
+            graph_timeout=settings["graph_timeout"],
+            graphify_executable=settings["graphify_executable"],
         )
     else:
         markdown, report = build_multi_repo_context_package(
@@ -1548,6 +1938,11 @@ def _build_pack_artifacts(
             include_globs=settings["include_globs"],
             exclude_globs=settings["exclude_globs"],
             workflow=settings["preset_name"] if settings["preset_name"] == "feature" else "generic",
+            graph_backend=settings["graph_backend"],
+            graph_json=settings["graph_json"],
+            graph_hops=settings["graph_hops"],
+            graph_timeout=settings["graph_timeout"],
+            graphify_executable=settings["graphify_executable"],
         )
 
     report["preset"] = settings["preset_name"]
@@ -1561,6 +1956,43 @@ def _build_pack_artifacts(
         model=settings["model"],
     )
     return markdown, report, settings
+
+
+def _studio_status_for_repo(
+    repo: Path,
+    db_path: Path,
+    *,
+    scope: str,
+    command: str,
+) -> dict[str, Any]:
+    return build_studio_status(
+        repo=repo,
+        doctor=build_doctor_payload(
+            scope=scope,
+            command=command,
+            project_root=repo,
+        ),
+        checkup=_build_checkup_report(repo, db_path),
+    )
+
+
+def _write_studio_preview(
+    repo: Path,
+    report: dict[str, Any],
+    *,
+    db_path: Path,
+    preset_name: str,
+    scope: str = "personal",
+) -> Path:
+    command = _installed_agenvantage_command()
+    status = _studio_status_for_repo(repo, db_path, scope=scope, command=command)
+    paths = write_studio_pages(
+        repo,
+        status=status,
+        preview_report=report,
+        preset_name=preset_name,
+    )
+    return paths["preview"]
 
 
 def _run_pack(args: argparse.Namespace) -> None:
@@ -1588,6 +2020,16 @@ def _run_pack(args: argparse.Namespace) -> None:
         notices.append(f"Context package written to {args.output.resolve()}")
     if args.manifest:
         notices.append(f"Decision manifest written to {args.manifest.resolve()}")
+    if args.preview:
+        repo = Path((getattr(args, "repo", None) or [Path(".")])[0]).resolve()
+        preview_path = _write_studio_preview(
+            repo,
+            report,
+            db_path=_observability_db_from_args(args, repo),
+            preset_name=settings["preset_name"],
+            scope="project" if getattr(args, "project", False) else "personal",
+        )
+        notices.append(f"Context preview written to {preview_path.resolve()}")
     multimodal = report.get("multimodal") or {}
     if args.multimodal == "artifact" and multimodal.get("image_attachments"):
         notices.append(f"Multimodal artifacts written to {multimodal.get('artifact_root')}")
@@ -2547,18 +2989,30 @@ def _run_experiments(args: argparse.Namespace) -> None:
 def _run_provider(args: argparse.Namespace) -> None:
     if args.provider_command != "import":
         raise SystemExit(f"Unknown provider command: {args.provider_command}")
-    raw_payload = json.loads(args.records.read_text(encoding="utf-8"))
-    pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
-    try:
-        records = normalize_provider_records_payload(raw_payload, pricing)
-    except ValueError:
-        if isinstance(raw_payload, dict) and any(
-            key in raw_payload
-            for key in ("input_tokens", "prompt_tokens", "usage", "request_cost_usd")
-        ):
-            records = normalize_provider_records_payload([raw_payload], pricing)
-        else:
-            raise
+    records_path = Path(args.records)
+    if records_path.suffix.lower() == ".jsonl":
+        from agenvantage.paired_codex_validation import codex_jsonl_to_provider_records
+
+        records = codex_jsonl_to_provider_records(
+            records_path.read_text(encoding="utf-8"),
+            trace_id=args.trace_id,
+            provider=args.provider if args.provider != "unknown" else "codex",
+            policy_id=str(getattr(args, "policy_id", None) or "trajectory"),
+        )
+        pricing = None
+    else:
+        raw_payload = json.loads(records_path.read_text(encoding="utf-8"))
+        pricing = load_pricing_snapshot(args.pricing) if args.pricing is not None else None
+        try:
+            records = normalize_provider_records_payload(raw_payload, pricing)
+        except ValueError:
+            if isinstance(raw_payload, dict) and any(
+                key in raw_payload
+                for key in ("input_tokens", "prompt_tokens", "usage", "request_cost_usd")
+            ):
+                records = normalize_provider_records_payload([raw_payload], pricing)
+            else:
+                raise
     db_path = _observability_db_from_args(args, args.repo)
     try:
         summary = import_provider_usage_records(
@@ -2991,6 +3445,133 @@ def _run_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _paired_validation_request(args: argparse.Namespace) -> dict[str, Any]:
+    repo = Path(getattr(args, "repo", None) or ".").resolve()
+    task = getattr(args, "task", None)
+    if task:
+        output_dir = getattr(args, "output_dir", None) or default_compare_output_dir(repo)
+        adhoc = build_adhoc_paired_case(
+            repo,
+            task,
+            budget=int(getattr(args, "budget", 6000) or 6000),
+            graph_backend=str(getattr(args, "graph_backend", "auto") or "auto"),
+        )
+        mode = "live" if getattr(args, "live", False) else getattr(args, "mode", "local_only")
+        return {
+            "fixture": None,
+            "adhoc_cases": [adhoc],
+            "repos_root": repo.parent,
+            "output_dir": Path(output_dir),
+            "mode": mode,
+            "codex_executable": getattr(args, "codex_executable", None),
+            "timeout_seconds": getattr(args, "timeout_seconds", 1800),
+            "max_cases": getattr(args, "max_cases", None),
+            "control_jsonl": getattr(args, "control_jsonl", None),
+            "treatment_jsonl": getattr(args, "treatment_jsonl", None),
+        }
+    return {
+        "fixture": args.fixture,
+        "adhoc_cases": None,
+        "repos_root": args.repos_root,
+        "output_dir": args.output_dir,
+        "mode": getattr(args, "mode", "local_only"),
+        "codex_executable": getattr(args, "codex_executable", None),
+        "timeout_seconds": getattr(args, "timeout_seconds", 1800),
+        "max_cases": getattr(args, "max_cases", None),
+        "control_jsonl": getattr(args, "control_jsonl", None),
+        "treatment_jsonl": getattr(args, "treatment_jsonl", None),
+    }
+
+
+def _run_paired_codex_validation(args: argparse.Namespace) -> None:
+    request = _paired_validation_request(args)
+    report = run_paired_codex_validation(**request)
+    if getattr(args, "summary", False) or getattr(args, "as_json", False):
+        payload = {
+            "mode": report["mode"],
+            "output_paths": report["output_paths"],
+            "cases": [
+                {
+                    "case_id": case["case_id"],
+                    "local_prompt": {
+                        key: value
+                        for key, value in case["local_prompt"].items()
+                        if key not in {"change_surface", "graph", "experiments_compare"}
+                    },
+                    "live_codex": case.get("live_codex"),
+                    "control": case.get("control"),
+                    "treatment": case.get("treatment"),
+                    "treatment_delta_percent": case.get("treatment_delta_percent"),
+                }
+                for case in report["cases"]
+            ],
+            "aggregate": report.get("aggregate"),
+            "claim_boundary": report.get("claim_boundary"),
+        }
+        print(json.dumps(payload, indent=2))
+        return
+    if args.command == "compare":
+        print(format_compare_summary(report))
+        print(f"Report: {report['output_paths']['markdown']}")
+        return
+    print(f"Paired Codex validation written to {report['output_paths']['json']}")
+    print(f"Markdown report: {report['output_paths']['markdown']}")
+    for case in report["cases"]:
+        handoff = case["local_prompt"].get("handoff_markdown_path")
+        if handoff:
+            print(f"Handoff ({case['case_id']}): {handoff}")
+
+
+def _run_compare(args: argparse.Namespace) -> None:
+    _run_paired_codex_validation(args)
+
+
+def _run_orchestrate(args: argparse.Namespace) -> None:
+    partition = load_development_partition(args.partition)
+    packages = {str(item["package_id"]): item for item in partition.get("packages", [])}
+    repo = Path(args.repo).resolve()
+    if args.orchestrate_command == "plan":
+        plan = build_development_plan(partition, repo=repo)
+        output = args.output or (orchestration_root(repo) / "plan.json")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+        if args.as_json:
+            print(json.dumps(plan, indent=2))
+        else:
+            print(f"Orchestration plan written to {output.resolve()}")
+        return
+    package_id = str(args.package)
+    package = packages.get(package_id)
+    if package is None:
+        raise SystemExit(f"Unknown package id: {package_id}")
+    if args.orchestrate_command == "run":
+        result = dispatch_worker_run(repo, package, execute=args.execute)
+        if args.as_json:
+            print(json.dumps(result, indent=2))
+            return
+        print(f"Worker package: {package_id}")
+        print(f"Task file: {result['worker_task_path']}")
+        print(f"Command: {' '.join(result['command'])}")
+        if result.get("executed"):
+            print(f"Exit code: {result.get('exit_code')}")
+        return
+    if args.orchestrate_command == "review":
+        payload = None
+        if args.handoff_json is not None:
+            payload = json.loads(Path(args.handoff_json).read_text(encoding="utf-8"))
+        review = review_worker_handoff(repo, package_id, handoff_json=payload)
+        if args.as_json:
+            print(json.dumps(review, indent=2))
+            return
+        print(f"Review: {review['status']}")
+        if review["findings"]:
+            print("Findings:")
+            for finding in review["findings"]:
+                print(f"  - {finding}")
+        return
+    raise SystemExit(f"Unknown orchestrate command: {args.orchestrate_command}")
+
+
 def _run_feature_provider_validation(args: argparse.Namespace) -> dict[str, Any]:
     if args.trace_console:
         configure_console_tracing()
@@ -3074,9 +3655,277 @@ def _run_feature_provider_validation(args: argparse.Namespace) -> dict[str, Any]
     return report
 
 
+def _installed_agenvantage_command() -> str:
+    return shlex.join([sys.executable, "-m", "agenvantage"])
+
+
+def _run_init(args: argparse.Namespace) -> None:
+    requested = list(args.agents or ["all"])
+    targets = (
+        list(SUPPORTED_TARGETS)
+        if "all" in requested
+        else [target for target in SUPPORTED_TARGETS if target in requested]
+    )
+    scope = "project" if args.project else "personal"
+    command = _installed_agenvantage_command()
+    results: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for target in targets:
+        try:
+            results.append(
+                install_agent_skill(
+                    target,
+                    scope=scope,
+                    force=args.force,
+                    command=command,
+                )
+            )
+        except (FileExistsError, OSError, ValueError) as exc:
+            errors.append({"target": target, "error": str(exc)})
+    payload = {
+        "scope": scope,
+        "command": command,
+        "integrations": results,
+        "errors": errors,
+        "mcp_command": f"{command} mcp",
+        "ready": bool(results) and not errors,
+    }
+    if args.as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for result in results:
+            verb = "Installed" if result.get("changed") else "Already installed"
+            print(f"{verb} {result['target']}: {result['destination']}")
+        for error in errors:
+            print(f"Could not install {error['target']}: {error['error']}", file=sys.stderr)
+        print(f"MCP command: {payload['mcp_command']}")
+        print("Run `agenvantage doctor` to verify the complete setup.")
+    if errors:
+        raise SystemExit(1)
+
+
+def _run_doctor(args: argparse.Namespace) -> None:
+    scope = "project" if args.project else "personal"
+    command = _installed_agenvantage_command()
+    payload = build_doctor_payload(
+        scope=scope,
+        command=command,
+        project_root=Path.cwd(),
+    )
+    payload = {
+        **payload,
+        "python": sys.executable,
+    }
+    if args.as_json:
+        print(json.dumps(payload, indent=2))
+        return
+    print(f"AgenVantage doctor: {payload['status']}")
+    print(f"Repository: {payload['repository_root'] or 'not detected'}")
+    graphify = payload.get("graphify") or {}
+    print(f"Graphify: {graphify.get('version') or graphify.get('error') or 'not installed'}")
+    for skill in payload["skills"]:
+        print(f"{skill['target'].title()} skill: {skill['status']}")
+    print(
+        "Agent launchers: "
+        f"Codex={'ready' if payload['agent_launchers']['codex'] else 'missing'}, "
+        f"Claude={'ready' if payload['agent_launchers']['claude'] else 'missing'}"
+    )
+    print(f"MCP command: {payload['mcp_command']}")
+    print("Open the local studio with `agenvantage studio`.")
+
+
+def _run_cursor(args: argparse.Namespace) -> None:
+    destination = cursor_skill_destination(project=args.project)
+    command = _installed_agenvantage_command()
+    try:
+        if args.cursor_command == "install":
+            result = install_cursor_skill(
+                destination,
+                force=args.force,
+                command=command,
+            )
+        elif args.cursor_command == "status":
+            result = cursor_skill_status(destination, command=command)
+        elif args.cursor_command == "uninstall":
+            result = uninstall_cursor_skill(
+                destination,
+                force=args.force,
+                command=command,
+            )
+        else:  # pragma: no cover - argparse constrains this value
+            raise SystemExit(f"Unknown Cursor command: {args.cursor_command}")
+    except FileExistsError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if args.as_json:
+        print(json.dumps(result, indent=2))
+        return
+    if args.cursor_command == "install":
+        verb = "Installed" if result.get("changed") else "Already installed"
+        print(f"{verb}: {destination}")
+        print("Cursor will now prepare AgenVantage context automatically for substantive code tasks.")
+        return
+    if args.cursor_command == "uninstall":
+        verb = "Removed" if result.get("changed") else "Not installed"
+        print(f"{verb}: {destination}")
+        return
+    print(f"Cursor skill: {result['status']}")
+    print(f"Location: {destination}")
+
+
+def _run_agent_alias(args: argparse.Namespace) -> None:
+    repo = Path((args.repo or [Path(".")])[0]).resolve()
+    try:
+        command = resolve_agent_command(
+            args.command,
+            repo=repo,
+            executable=args.executable,
+            agent_model=args.agent_model,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    args.graph_backend = args.graph_backend or "auto"
+    args.multimodal = "off"
+    args.modality_profile = "auto"
+    args.modality_output_dir = None
+    args.no_stdin = False
+    args.agent_command = "run"
+    args.external_command = command
+    if args.dry_run:
+        _, report, _ = _build_pack_artifacts(args, default_preset="feature")
+        accounting = report.get("prompt_token_accounting") or {}
+        graph = report.get("graph") or {}
+        print(
+            json.dumps(
+                {
+                    "provider": args.command,
+                    "command": command,
+                    "repo": str(repo),
+                    "task": args.task,
+                    "packed_prompt_tokens": accounting.get("packed_prompt_tokens"),
+                    "full_scan_prompt_tokens": accounting.get("full_scan_prompt_tokens"),
+                    "graph": graph,
+                    "selected_paths": sorted(
+                        {
+                            str(chunk.get("relative_path"))
+                            for chunk in report.get("selected_chunks", [])
+                            if isinstance(chunk, dict) and chunk.get("relative_path")
+                        }
+                    ),
+                },
+                indent=2,
+            )
+        )
+        return
+    _run_agent(args)
+
+
+def _normalize_repo_args(args: argparse.Namespace) -> None:
+    repo = getattr(args, "repo", None)
+    if repo is None:
+        args.repo = [Path(".")]
+    elif isinstance(repo, Path):
+        args.repo = [repo]
+
+
+def _run_studio(args: argparse.Namespace) -> None:
+    _normalize_repo_args(args)
+    repo = Path(args.repo[0]).resolve()
+    db_path = _observability_db_from_args(args, repo)
+    scope = "project" if args.project else "personal"
+    command = _installed_agenvantage_command()
+    status = _studio_status_for_repo(repo, db_path, scope=scope, command=command)
+    paths = write_studio_pages(repo, status=status)
+    hub_uri = paths["hub"].resolve().as_uri()
+    print(f"AgenVantage studio written to {paths['hub'].resolve()}")
+    print(f"Setup panel: {paths['setup'].resolve()}")
+    if not args.no_browser:
+        webbrowser.open(hub_uri)
+    else:
+        print(hub_uri)
+
+
+def _run_studio_demo(args: argparse.Namespace) -> None:
+    _normalize_repo_args(args)
+    repo = Path(args.repo[0]).resolve()
+    db_path = _observability_db_from_args(args, repo)
+    init_observability_store(db_path)
+    args.graph_backend = args.graph_backend or "auto"
+    args.task = args.task or demo_task()
+    args.multimodal = "off"
+    args.modality_profile = "auto"
+    args.modality_output_dir = None
+    markdown, report, settings = _build_pack_artifacts(args, default_preset=args.preset)
+    preview_dir = studio_root(repo)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    output = preview_dir / "demo-context.md"
+    manifest = preview_dir / "demo-manifest.json"
+    write_package_outputs(markdown, report, output, manifest)
+    record_pack_trace(
+        db_path,
+        markdown=markdown,
+        report=report,
+        repo_path=repo,
+        workflow=str(settings["preset_name"]),
+        artifact_paths={"markdown": output, "manifest": manifest},
+    )
+    scope = "project" if args.project else "personal"
+    paths = write_studio_pages(
+        repo,
+        status=_studio_status_for_repo(repo, db_path, scope=scope, command=_installed_agenvantage_command()),
+        preview_report=report,
+        preset_name=settings["preset_name"],
+    )
+    dashboard_path = write_observability_dashboard(
+        db_path,
+        repo / ".agenvantage" / "observability-dashboard.html",
+    )
+    hub_uri = paths["hub"].resolve().as_uri()
+    accounting = report.get("prompt_token_accounting") or {}
+    print(
+        "\n".join(
+            [
+                "AgenVantage studio demo completed.",
+                "",
+                f"Task: {report.get('task')}",
+                f"Packed tokens: {accounting.get('packed_prompt_tokens', 0):,}",
+                f"Full scan tokens: {accounting.get('full_scan_prompt_tokens', 0):,}",
+                f"Context preview: {paths['preview'].resolve()}",
+                f"Observability dashboard: {dashboard_path.resolve()}",
+                f"Studio hub: {paths['hub'].resolve()}",
+            ]
+        )
+    )
+    if not args.no_browser:
+        webbrowser.open(hub_uri)
+    else:
+        print(hub_uri)
+
+
 def main() -> None:
     load_dotenv()
     args = _parser().parse_args()
+    if args.command == "init":
+        _run_init(args)
+        return
+    if args.command == "doctor":
+        _run_doctor(args)
+        return
+    if args.command == "studio":
+        if args.studio_command == "demo":
+            _run_studio_demo(args)
+        else:
+            _run_studio(args)
+        return
+    if args.command == "mcp":
+        run_stdio_server()
+        return
+    if args.command == "cursor":
+        _run_cursor(args)
+        return
+    if args.command in {"codex", "claude"}:
+        _run_agent_alias(args)
+        return
     if args.command == "demo":
         _run_experiment(
             args.fixture,
@@ -3127,6 +3976,15 @@ def main() -> None:
         return
     if args.command == "validate-feature-provider":
         _run_feature_provider_validation(args)
+        return
+    if args.command == "validate-paired-codex":
+        _run_paired_codex_validation(args)
+        return
+    if args.command == "compare":
+        _run_compare(args)
+        return
+    if args.command == "orchestrate":
+        _run_orchestrate(args)
         return
 
     _run_experiment(

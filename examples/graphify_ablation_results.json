@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-12",
+  "graphify": {
+    "package": "graphifyy",
+    "version": "0.9.13",
+    "commit": "eec7a0183847cbdc8a87d92b233759a5204b89fe",
+    "mode": "code-only"
+  },
+  "summary": {
+    "case_count": 10,
+    "repository_count": 2,
+    "graph_used_case_count": 10,
+    "evidence_slot_count": 39,
+    "baseline_evidence_recall": 0.2051,
+    "graphify_evidence_recall": 0.2051,
+    "evidence_recall_delta_percentage_points": 0.0,
+    "baseline_missing_expansions": 21,
+    "graphify_missing_expansions": 13,
+    "missing_expansion_reduction_percent": 38.1,
+    "baseline_edit_target_recall": 0.7727,
+    "graphify_edit_target_recall": 0.7727,
+    "baseline_test_target_recall": 0.6429,
+    "graphify_test_target_recall": 0.6429,
+    "median_baseline_prompt_tokens": 3935.0,
+    "median_graphify_prompt_tokens": 3921.0,
+    "median_baseline_pack_runtime_ms": 17282.195,
+    "median_graphify_pack_runtime_ms": 18269.39,
+    "median_graph_backend_runtime_ms": 679.69,
+    "acceptance": {
+      "recall_or_expansion_gate": true,
+      "no_edit_test_recall_regression": true,
+      "overall_pass": true,
+      "thresholds": {
+        "minimum_evidence_recall_delta_percentage_points": 5.0,
+        "minimum_missing_expansion_reduction_percent": 25.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_id": "click-completion-argument-default-source",
+      "repository": "click",
+      "baseline_evidence_recall": 0.25,
+      "graphify_evidence_recall": 0.25,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 2
+    },
+    {
+      "case_id": "click-parser-split-arg-string-deprecation",
+      "repository": "click",
+      "baseline_evidence_recall": 0.6667,
+      "graphify_evidence_recall": 0.6667,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "click-clirunner-isolation-ansi-strip",
+      "repository": "click",
+      "baseline_evidence_recall": 0.5,
+      "graphify_evidence_recall": 0.5,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "click-progressbar-lazy-impl-delegation",
+      "repository": "click",
+      "baseline_evidence_recall": 0.25,
+      "graphify_evidence_recall": 0.25,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "click-prompt-show-choices-formatting",
+      "repository": "click",
+      "baseline_evidence_recall": 0.25,
+      "graphify_evidence_recall": 0.25,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "fastapi-validation-error-pipeline",
+      "repository": "fastapi",
+      "baseline_evidence_recall": 0.0,
+      "graphify_evidence_recall": 0.0,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "fastapi-openapi-header-alias",
+      "repository": "fastapi",
+      "baseline_evidence_recall": 0.0,
+      "graphify_evidence_recall": 0.0,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "fastapi-multi-body-embed",
+      "repository": "fastapi",
+      "baseline_evidence_recall": 0.0,
+      "graphify_evidence_recall": 0.0,
+      "baseline_missing_expansions": 3,
+      "graphify_missing_expansions": 2
+    },
+    {
+      "case_id": "fastapi-annotated-param-analysis",
+      "repository": "fastapi",
+      "baseline_evidence_recall": 0.25,
+      "graphify_evidence_recall": 0.25,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 1
+    },
+    {
+      "case_id": "fastapi-response-serialization-fallback",
+      "repository": "fastapi",
+      "baseline_evidence_recall": 0.0,
+      "graphify_evidence_recall": 0.0,
+      "baseline_missing_expansions": 2,
+      "graphify_missing_expansions": 2
+    }
+  ],
+  "claim_boundary": {
+    "retrieval_gate_supported": true,
+    "task_level_usefulness_supported": false,
+    "reason": "The six-pair coding-agent gate was blocked by runner quota before any implementation run."
+  }
+}
