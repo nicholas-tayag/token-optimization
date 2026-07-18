@@ -54,6 +54,18 @@ Some parts of AgenVantage are deliberate experiments inspired by adjacent tools 
 
 The goal is to study and adapt useful ideas, not to claim equivalence with those projects or reproduce their production guarantees.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Repository and task] --> B[Scan files, symbols, and imports]
+    B --> C[Rank relevant evidence]
+    C --> D[Apply budget and safety rules]
+    D --> E[Context package and decision manifest]
+    E --> F[Agent, MCP, or local experiment]
+    F -. evaluation feedback .-> C
+```
+
 ## Quick start
 
 ```bash
