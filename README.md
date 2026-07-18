@@ -1,546 +1,94 @@
 # AgenVantage
 
-**A clearer way to decide what an AI coding assistant needs to see.**
+**A research and experimental tool for deciding what an AI coding assistant needs to see.**
 
-AgenVantage started as a way to understand and improve my own AI-assisted
-development workflows. Coding requests rarely contain only a question: they
-also carry source files, diffs, test failures, documentation, tools, and
-conversation history.
+AgenVantage prepares focused, token-budgeted context packages from local repositories before a model call. It shows what was selected, what was left out, and why.
+
+## What it offers
+
+- Packs relevant repository files, symbols, imports, diffs, tests, and configuration for a coding task.
+- Supports `explain`, `feature`, `review`, `debug`, `change`, and `compare` workflows.
+- Produces readable Markdown handoffs and machine-readable decision manifests.
+- Works across one or more local repositories.
+- Redacts secret-looking values and avoids dependency folders and `.env` files.
+- Connects to Codex, Claude Code, Cursor, and MCP-based workflows.
+- Records provenance so each context package can be inspected.
 
 ## Why I built it
 
-AI coding tools are only as helpful as the context they receive. Too little
-context leads to missed details; too much makes work slower, more expensive,
-and harder to reason about. I built AgenVantage to make that tradeoff visible:
-it prepares focused context packages and explains what was included, left out,
-and why.
+AI coding tools are only as useful as the context they receive. Too little context causes missed details; too much makes work slower, more expensive, and harder to reason about. AgenVantage is my attempt to make that tradeoff measurable and inspectable.
 
-This project treats that context as measurable input. It builds token-budgeted
-context packages from local repositories before a model call occurs, showing
-what was selected, what was omitted, and why. A secondary experiment harness
-compares synthetic context policies as a foundation for future API-backed
-latency, caching, cost, and quality measurements.
+## Implemented today
 
-The implementation and open-source release contract is documented in
-[the open-source repository intelligence PRD](docs/prd-open-source-repository-intelligence.md).
-The broader technical north star remains in
-[the context performance platform PRD](docs/prd-context-performance-platform.md).
-The first clean control-versus-treatment feature runs are documented in
-[paired feature implementation validation](docs/paired-feature-implementation-validation.md).
-The optional repository-graph experiment is documented in
-[Graphify integration and ablation](docs/graphify-ablation-results.md).
-Competitive improvements and hierarchical agent development (manager + worker
-model routing) are specified in
-[PRD: Hierarchical Agent Development](docs/prd-hierarchical-agent-development.md).
+The current tool includes:
 
-## Current Scope
+- Git-aware scanning, lexical ranking, symbol/import signals, and budgeted selection.
+- Feature-work handoffs that reserve room for likely edit files, tests, and configuration evidence.
+- Persistent local repository metadata for faster repeated runs.
+- Deterministic secret redaction, include/exclude path controls, and diff provenance.
+- A lightweight MCP server with `prepare_context`, `expand_context`, `search_graph`, and `context_status` tools.
+- Local experiment harnesses for policy comparison, feature-work validation, provider-usage normalization, and context observability.
+- Cache-aware sessions that separate stable repository context from changing task instructions.
 
-The current local workflow provides:
+## Research and active experiments
 
-- an `agenvantage pack` command for real coding questions over local
-  repositories, including multi-repository tasks with repeated `--repo` flags,
-  smart defaults (`--repo .`, default budget), task presets
-  (`explain`/`feature`/`review`/`debug`/`change`/`compare`), clipboard/stdout output, and
-  optional `.agenvantage.toml` project defaults;
-- git-aware source scanning that includes tracked files plus untracked,
-  non-ignored worktree files while still avoiding dependency folders and `.env` files;
-- deterministic redaction of secret-looking values inside otherwise eligible
-  files before ranking or rendering, with redaction counts surfaced in
-  manifests and summaries;
-- a persistent local repository-metadata index that caches per-file symbols,
-  line-addressed symbol occurrences, local imports, and reverse import edges
-  outside the worktree for reuse across runs;
-- an optional Graphify `graph.json` candidate backend with explicit and
-  automatic policy modes, pinned out-of-process extraction, bounded
-  confidence-weighted traversal, source/revision validation, deterministic
-  fallback, and manifest telemetry;
-- one-command Cursor, Codex, and Claude Code skill installation, direct
-  context-first agent wrappers, and a dependency-light MCP server;
-- optional git diff and recent commit-log provenance sections for changed-
-  behavior and review-style tasks;
-- optional include and exclude path globs for narrowing eligible repository
-  files before ranking;
-- line-addressable source chunk ranking using task terms;
-- chunk-local anchor symbols plus file-level symbol and import boosts layered
-  onto chunk ranking, with a diversity-aware candidate pool and
-  imported-helper expansion before budget selection;
-- a deterministic feature-work planner that separates candidate exploration
-  from final packing, reserves room for likely edit files, tests, config/schema
-  evidence, and supporting neighbors, and can emit a structured handoff JSON
-  artifact for agent workflows;
-- Markdown context packages and JSON decision manifests under a token budget;
-- local candidate-context reduction metrics that do not pretend to be API
-  savings; and
-- use-case and feature-work benchmarks that score required behavioral
-  observations against the selected excerpts, not just file recall;
-- an experimental `agenvantage validate-provider` workflow that can dry-run a
-  cache-eligible synthetic dataset locally, normalize raw usage artifacts
-  including OTLP spans/logs/per-request metrics, replay recorded provider
-  results, or collect OpenAI Responses API usage,
-  latency, and deterministic grading data when credentials and a pricing
-  snapshot are supplied, with readiness reporting for claim-sufficiency gaps
-  and paired-bootstrap reporting for measured deltas, plus optional Costs API
-  reconciliation;
-- an experimental `agenvantage validate-feature-provider` workflow that compares
-  full-scan, AgenVantage-packed, and cache-aligned feature-work prompts against
-  provider usage and deterministic context-plan readiness grading; and
-- a cache-aware `agenvantage session` workflow that freezes stable feature
-  context once and emits smaller dynamic task packets for repeated prompts; and
-- a pxpipe-inspired mixed-modality pack mode that can estimate or write local
-  PNG context pages for bulky gist-level context while exact identifiers,
-  secrets, hashes, edit/test/config chunks, and recoverable source stay text; and
-- a typed context-policy experiment harness for controlled synthetic cases.
+This repository is also a lab notebook. I am actively researching and implementing:
 
-The experiment harness also provides:
+- Whether smaller context packages preserve task quality, not just reduce local prompt size.
+- Control-versus-treatment evaluation with provider usage, latency, caching, cost estimates, and task-completion checks.
+- Repository graphs and bounded traversal as a supplement to lexical retrieval.
+- Manager/worker agent workflows with explicit handoffs and verification.
+- Mixed text-and-image context for bulky background material while keeping exact code evidence recoverable as text.
+- Better retrieval rubrics, benchmark cases, and downstream software-engineering evaluations.
 
-- a typed context-component format for instructions, tools, memory, retrieved
-  evidence, and user requests;
-- a `full` baseline policy that includes every component;
-- a `cache_aligned` policy that places stable context before variable context;
-- a `budgeted` policy that retains required context and selects optional
-  sections under a configurable token budget;
-- `tiktoken`-based token measurements for repeatable local experiments;
-- optional OpenTelemetry spans for policy runs and live provider-validation
-  requests; and
-- a synthetic on-call incident scenario, with no private or employer data.
+These experiments are intentionally labeled as experiments. Local token reduction is not the same as proven provider cost savings, and current results do not establish broad workload quality retention.
 
-It does **not** yet include checked-in provider-backed result artifacts, prove
-broad workload quality retention, or represent a production enterprise system.
+## Inspired by other tools
 
-## Three-Layer Stack
+Some parts of AgenVantage are deliberate experiments inspired by adjacent tools and research:
 
-AgenVantage can now combine three independent controls in one local workflow:
+- **Graphify:** optional graph-assisted repository retrieval and ablation work.
+- **pxpipe:** a mixed-modality artifact path that renders selected background context while preserving exact identifiers and recoverable source blocks.
+- **OpenTelemetry and LLM observability tools:** local trace and provenance concepts for comparing context policies over time.
+- **Tool-search and prompt-caching patterns:** research into loading stable or relevant context only when needed.
 
-1. `pack` limits initial repository input and exposes missing evidence.
-2. `orchestrate` routes bounded packages to configurable Codex or Claude workers
-   and records role/model token ledgers.
-3. Feature handoffs apply a minimum-code implementation ladder after grounding.
+The goal is to study and adapt useful ideas, not to claim equivalence with those projects or reproduce their production guarantees.
 
-```bash
-agenvantage pack --preset feature --discipline full \
-  --task "Add guard-test reservation" --handoff-json
-agenvantage orchestrate run --package T1.1 \
-  --worker-provider codex --worker-model gpt-5.4-mini
-agenvantage orchestrate verify --package T1.1 --json
-.venv/bin/python benchmarks/three_layer_smoke.py
-```
-
-When a handoff reports `missing_signals`, an MCP client should call
-`expand_context` before implementation. See
-[the measured stack results](docs/three-layer-stack-results.md) for benchmark
-numbers and claim boundaries.
-
-## Quick Start
-
-Try the built-in demo in three commands:
+## Quick start
 
 ```bash
 make setup
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
 agenvantage demo
 ```
 
-Graphify is not installed by `make setup`. To enable the optional pinned
-out-of-process backend, install the extra with
-`python -m pip install -e ".[graphify]"` or use
-`uv tool install 'graphifyy==0.9.13'`.
-
-### Automatic agent integrations
-
-Install personal Cursor, Codex, and Claude Code skills once:
-
-```bash
-.venv/bin/agenvantage init
-.venv/bin/agenvantage doctor
-```
-
-After that, each agent automatically invokes AgenVantage before substantive
-feature, debug, review, explanation, and cross-file tasks. Automatic mode uses
-Graphify only when repository scale, task shape, and baseline grounding justify
-it; failures fall back to normal retrieval.
-
-Use a repository-shared skill, force context preparation before an external
-agent call, or expose the same retrieval through MCP:
-
-```bash
-agenvantage init --project
-agenvantage codex "Implement the requested cross-file feature"
-agenvantage claude "Debug the failing request flow"
-agenvantage mcp
-```
-
-### Plug into any repository
-
-From any cloned project — no fixture, config, or AgenVantage source tree required:
+Try it on another repository:
 
 ```bash
 cd /path/to/your-repo
 agenvantage compare --task "Fix the bug and add a regression test"
-agenvantage codex "Fix the bug and add a regression test"
+agenvantage pack --preset feature --task "Add a small feature" --handoff-json
 ```
 
-`compare` writes artifacts only under `<repo>/.agenvantage/compare/` and prints
-first-request token savings versus a full-scan counterfactual. Add `--live` when
-Codex is installed to run a paired control-vs-treatment trajectory. Use
-`--json` for machine-readable output.
-
-See [Plug-and-Play Agent Integrations](docs/plug-and-play-agent-integrations.md)
-for lifecycle, wrapper, auto-policy, and MCP details. The legacy
-`agenvantage cursor install|status|uninstall` commands remain supported.
-
-For live provider validation, you can store local keys in `.env` (never commit it).
-The CLI and helper scripts load that file automatically if it exists.
-
-`agenvantage demo` runs the synthetic on-call scenario, writes
-`artifacts/oncall-report.json`, prints a short summary, and opens the policy
-explorer dashboard.
-
-### Manual setup
-
-macOS / Linux:
+Install the optional local integrations:
 
 ```bash
-bash scripts/setup.sh
-source .venv/bin/activate
-agenvantage demo
-pytest
+agenvantage init
+agenvantage doctor
+agenvantage mcp
 ```
 
-Windows PowerShell:
+Run the test suite with `pytest` or `make test`.
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-agenvantage demo
-pytest
-```
+## Research notes
 
-If `python` is not available, install Python 3.10+ or use
-[uv](https://docs.astral.sh/uv/) (`uv venv .venv --python 3.12`).
+- [Repository-context research](docs/repository-context-research.md)
+- [Open-source repository intelligence](docs/prd-open-source-repository-intelligence.md)
+- [Context performance platform](docs/prd-context-performance-platform.md)
+- [Paired feature implementation validation](docs/paired-feature-implementation-validation.md)
+- [Graphify integration and ablation](docs/graphify-ablation-results.md)
+- [Hierarchical agent development](docs/prd-hierarchical-agent-development.md)
 
-### Common commands
+## Project status
 
-```bash
-agenvantage demo                              # built-in on-call walkthrough
-agenvantage init                              # install Cursor/Codex/Claude skills
-agenvantage doctor                            # verify first-install readiness
-agenvantage studio                            # open local setup + preview hub
-agenvantage studio demo                       # one-click pack, preview, and trace demo
-agenvantage compare --task "..."              # measure token savings in any repo
-agenvantage orchestrate plan                  # manager development plan
-agenvantage orchestrate run --package W2.1    # worker handoff for one package
-agenvantage pack --task "..." --preview        # write HTML context preview page
-agenvantage codex "..."                       # context-first Codex run
-agenvantage claude "..."                      # context-first Claude run
-agenvantage mcp                               # stdio MCP context server
-agenvantage run --summary                     # default scenario, readable output
-agenvantage observe init                      # create local trace storage
-agenvantage observe demo                      # seed a no-API demo trace
-agenvantage observe pack --task "..."         # pack context and record a trace
-agenvantage checkup                           # audit local agent-workflow hygiene
-agenvantage traces list                       # inspect recent AI-agent task traces
-agenvantage traces export <trace-id>          # recover stored context Markdown
-agenvantage traces annotate <trace-id> --label agent_succeeded
-agenvantage dashboard                         # open the local observability dashboard
-agenvantage dashboard --demo                  # one-command seeded dashboard
-agenvantage experiments compare --task "..."  # compare prompt strategy token/cost estimates
-agenvantage pack --preset feature --task "..." --graph-backend graphify
-.venv/bin/python benchmarks/graphify_ablation.py --summary
-agenvantage provider import --records provider-usage.json --trace-id <trace-id>
-agenvantage agent run --task "..." -- <command>
-agenvantage validate-provider --dry-run --summary
-agenvantage validate-feature-provider --pricing artifacts/openai-pricing.json --dry-run --summary
-.venv/bin/python benchmarks/modality_tradeoff_validation.py --summary
-agenvantage pack --preset feature --task "..." --multimodal artifact
-agenvantage rehydrate --manifest artifacts/context-images/<pack-id>/manifest.json --verify
-agenvantage rehydrate --manifest artifacts/context-images/<pack-id>/manifest.json --list
-agenvantage view --report artifacts/oncall-report.json
-make test
-```
-
-`validate-provider --dry-run` now verifies that the synthetic provider-eval
-fixture is actually cache-eligible before any API spend. The current fixture
-contains `30` distinct cases across `6` failure types, produces a `1066`-token
-stable prefix for cache-aligned runs, and applies enough budget pressure to
-reduce selected context by about `12.82%` on average in the dry run.
-
-`validate-feature-provider --dry-run` compares full-scan and AgenVantage-packed
-feature-work prompts without making API calls. When a pricing snapshot is
-provided, it also reports estimated cold and warm input-only cost deltas; these
-are planning metrics, not billed-provider proof.
-
-`benchmarks/modality_tradeoff_validation.py` is inspired by
-[pxpipe](https://github.com/teamchong/pxpipe). It validates the local
-mixed-modality artifact path after retrieval has already selected context. The
-benchmark can write PNG context pages, factsheets, and recoverable source
-manifests, but still reports estimated token deltas rather than provider-billed
-savings. The benchmark also verifies every generated artifact manifest for PNG
-attachment hashes, factsheet hashes, and recoverable-source hash integrity.
-
-`pack --multimodal` uses `--modality-profile auto` by default: GPT/o-series
-models use the conservative OpenAI estimate and Claude models use the standard
-Claude vision estimate. Forcing an incompatible profile keeps the package
-text-only instead of assuming an unsupported image-ingestion path.
-
-When artifact mode images background context, the manifest records factsheet
-sidecars and recoverable `rec_...` blocks. Use
-`agenvantage rehydrate --manifest ... --id rec_...` to recover exact source text
-instead of transcribing from image pages. Use `--verify` to confirm image
-attachments exist and image/factsheet/recoverable source hashes still match the
-manifest. Line-addressed references and identifier-dense blocks stay text-only
-so exact implementation evidence does not depend on image OCR. New artifact
-manifests also include a path-independent bundle fingerprint so repeated runs
-can compare generated artifact content across output directories.
-
-`observe` is the first local agent-observability workflow. It stores traces in
-`.agenvantage/observability.db` so a developer can see which task ran, what
-context was packed, which files were selected, and how many tokens were saved.
-Start with:
-
-```bash
-agenvantage observe init
-agenvantage observe demo
-agenvantage observe pack --task "Add tests for upload limits"
-agenvantage checkup
-agenvantage traces list
-agenvantage traces annotate <trace-id> --label agent_succeeded --note "Patch applied cleanly"
-agenvantage dashboard
-agenvantage experiments compare --task "Add tests for upload limits" --summary
-```
-
-A trace is one developer task; a span is one step inside that task, such as the
-context-pack operation. `agenvantage dashboard` writes
-`.agenvantage/observability-dashboard.html` and opens a local Datadog-style
-overview of token savings, selected files, warnings, and spans. This is the
-local-first foundation for the Datadog-style agent observability workflow described in
-[docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md).
-
-`agenvantage checkup` is the read-only preflight for that workflow. It reports
-Git hygiene, local trace-store readiness, dashboard availability, generated
-artifact noise, and next commands to run. Add `--json` when a script or future
-UI needs the same pass/warn/fail findings as structured data.
-
-`agenvantage experiments compare --task "..." --summary` records a trace and
-prints a Markdown comparison of full-scan, packed, cache-aligned, and
-mixed-artifact prompt variants. Use `--input-price-per-million` to add local
-estimated cost columns. These are planning metrics, not provider-billed proof.
-
-`agenvantage traces annotate <trace-id>` lets you label whether the agent
-actually succeeded after using the packed context. Supported labels are
-`agent_succeeded`, `agent_failed`, `context_missing`, `wrong_file_selected`,
-`tests_passed`, and `tests_failed`. The dashboard surfaces these labels so you
-can spot prompts that saved tokens but still failed quality.
-
-`agenvantage traces export <trace-id>` prints the stored `context_markdown`
-artifact by default. Use `--kind agent_stdout`, `--kind agent_stderr`, or
-`--artifact-id ...` to recover other stored artifacts, and `--output ...` to
-write them to disk.
-
-For a no-key first look, run `agenvantage dashboard --demo`. It seeds a
-deterministic local trace showing token savings, selected files, an external
-agent span, a quality label, and provider-usage fields without making an API
-call.
-
-`agenvantage provider import --records ... --trace-id ...` attaches saved
-provider-reported usage to a local trace. It can normalize saved validation
-reports, request lists, or OTLP-style telemetry, and stores imported
-input/output/cached-token and cost fields separately from local estimates.
-Use `--reconciliation-status costs_api_reconciled` only when the imported
-records have been matched against provider billing evidence.
-
-`agenvantage agent run --task "..." -- <command>` is the first local wrapper
-for daily coding-agent workflows. It packs context, passes the Markdown package
-to the command on stdin by default, captures stdout/stderr, records an
-`agent.external` span, and labels the trace succeeded or failed from the exit
-code.
-
-For the end-to-end billed-cost proof workflow, including live request spans,
-OTLP export, and provider-cost reconciliation, see
-[docs/provider-cost-proof-playbook.md](docs/provider-cost-proof-playbook.md).
-
-## Pack: your day-to-day token saver
-
-`agenvantage pack` is the developer workflow: it selects the repository context
-that matters for a task, fits it under a token budget, and hands you a
-ready-to-paste package. Run it from inside a repo with just a task:
-
-```bash
-agenvantage pack --task "Explain the rate limiter and its fail-open behavior."
-```
-
-That uses smart defaults (`--repo .`, a default budget, and the `explain`
-preset) and prints a readable summary of what was selected and how many tokens
-were saved versus scanning the whole repo.
-
-Send the package straight into your prompt with the clipboard or stdout:
-
-```bash
-agenvantage pack --task "Why do the checkout tests fail?" --preset debug --copy
-agenvantage pack --task "token budget selection" --stdout | pbcopy
-```
-
-### Task presets
-
-Presets pick good instructions and provenance so you do not have to remember
-flags:
-
-| Preset  | Focus                              | Includes diff | Includes log |
-|---------|------------------------------------|---------------|--------------|
-| explain | describe behavior (default)        | no            | no           |
-| feature | start implementing a feature       | no            | no           |
-| review  | correctness, edge cases, risk      | yes           | no           |
-| debug   | localize a bug from evidence       | yes           | yes          |
-| change  | plan a minimal, correct edit       | yes           | yes          |
-| compare | contrast implementations per repo  | no            | no           |
-
-```bash
-agenvantage pack --preset feature --task "Add upload limit smoke-test coverage."
-agenvantage pack --preset review --task "Review the new upload limit change."
-```
-
-The `feature` preset prints likely edit files, tests to inspect, config/schema
-targets, supporting files, covered concepts, missing signals, and token
-reduction. It is tuned for the first prompt of a coding-agent workflow.
-
-### Output modes
-
-```bash
-agenvantage pack --task "..."                 # human summary (default)
-agenvantage pack --task "..." --stdout        # only the Markdown package (pipe-friendly)
-agenvantage pack --task "..." --json          # full JSON decision manifest
-agenvantage pack --task "..." --preset feature --handoff-json
-                                               # structured agent handoff payload
-agenvantage pack --task "..." --copy          # copy the package to the clipboard
-agenvantage pack --task "..." \
-  --output artifacts/context.md \
-  --manifest artifacts/manifest.json          # write files
-```
-
-### Project defaults (`.agenvantage.toml`)
-
-Drop a config file at a repo root to stop repeating flags. CLI flags always
-override it.
-
-```toml
-[pack]
-budget = 6000
-model = "gpt-4o-mini"
-preset = "explain"
-top_k = 20
-include_glob = ["src/*"]
-exclude_glob = ["docs/*", "**/*.min.js"]
-graph_backend = "off" # set to "graphify" to opt in
-graph_json = "graphify-out/graph.json" # optional existing artifact
-graph_hops = 2
-graph_timeout = 120
-```
-
-### Multi-repo packages
-
-```bash
-agenvantage pack \
-  --repo /path/to/repo-a \
-  --repo /path/to/repo-b \
-  --preset compare \
-  --task "Compare the local static server hardening in both apps." \
-  --include-glob "scripts/*" \
-  --exclude-glob "docs/*" \
-  --budget 2200 \
-  --output artifacts/multi-repo-context.md \
-  --manifest artifacts/multi-repo-manifest.json
-```
-
-See [docs/prd-developer-workflow.md](docs/prd-developer-workflow.md) for the
-product requirements behind this workflow.
-
-### Cache-aware feature sessions
-
-For repeated work on the same feature, initialize a stable context prefix once:
-
-```bash
-agenvantage session init \
-  --repo . \
-  --task "Add memory search diagnostics and test coverage." \
-  --output .agenvantage/sessions/memory-search.json
-```
-
-Then create follow-up prompts that reuse the same stable prefix and append only
-the new task packet:
-
-```bash
-agenvantage session task \
-  --session .agenvantage/sessions/memory-search.json \
-  --task "Add an empty-result diagnostic counter." \
-  --stdout
-```
-
-The session report shows stable-prefix tokens, dynamic-packet tokens, whether
-the prefix is cache-eligible, and the estimated warm-call uncached token count.
-Actual cache hits and billed savings still require provider usage metadata from
-a live run.
-
-Write a report and display OpenTelemetry spans locally:
-
-```bash
-agenvantage run \
-  --fixture examples/synthetic_oncall_context.json \
-  --budget 360 \
-  --trace-console \
-  --summary \
-  --output artifacts/oncall-report.json
-```
-
-Open the visual policy explorer (bar charts, budget usage, per-component inclusion):
-
-```bash
-agenvantage view
-```
-
-After generating a report, load it in the dashboard via the file picker, or open the
-dashboard path printed by `agenvantage view --report artifacts/oncall-report.json`.
-
-## Why This Project
-
-The immediate use case is practical: send less irrelevant repository text
-when asking an LLM to explain, debug, or review code. Provider documentation
-also establishes a future measurement path: repeated stable prefixes can be
-cached, response metadata can reveal cached tokens, and OpenTelemetry can
-represent real GenAI usage once provider calls exist.
-
-AgenVantage begins before a provider call: it makes context composition
-inspectable in real coding workflows. See
-[docs/prd-agent-observability-devtool.md](docs/prd-agent-observability-devtool.md)
-for the next product direction as a local-first agent observability dev tool,
-[docs/prd-context-performance-platform.md](docs/prd-context-performance-platform.md)
-for the functionality-first ideal architecture and performance contract,
-[docs/context-planning-layer.md](docs/context-planning-layer.md) for the
-pre-inference design, [docs/real-token-tradeoff-experiment.md](docs/real-token-tradeoff-experiment.md)
-for the eventual API validation plan, and [docs/roadmap.md](docs/roadmap.md)
-for the measured build sequence.
-
-## Example Experiment
-
-```bash
-agenvantage run --summary
-```
-
-The report compares each policy against `full`, showing:
-
-- selected and excluded components;
-- total input tokens;
-- stable-prefix tokens eligible for later cache experiments; and
-- token savings relative to baseline.
-
-Stable-prefix tokens are a local structural measurement, not proof of a cache
-hit or provider cost reduction.
-
-## Repository Layout
-
-```text
-src/agenvantage/     Context model, policies, presets, config, tracing, and CLI
-examples/             Secondary synthetic context scenarios
-viz/                  Browser dashboard for experiment reports
-tests/                Deterministic policy, CLI, preset, and config tests
-docs/                 Research basis, PRD, and implementation roadmap
-```
+AgenVantage is a personal research project with working local tooling and an expanding evaluation suite. It is not yet a production enterprise platform, and its provider-backed claims remain an active area of validation.
