@@ -1,11 +1,19 @@
 # AgenVantage
 
-**Measure the context behind every agent decision.**
+**A clearer way to decide what an AI coding assistant needs to see.**
 
-AgenVantage started as a way to understand and reduce token usage in my own
-AI-assisted development workflows. Coding requests rarely contain only a
-question: they carry source files, diffs, test failures, documentation, tool
-schemas, instructions, and conversation history.
+AgenVantage started as a way to understand and improve my own AI-assisted
+development workflows. Coding requests rarely contain only a question: they
+also carry source files, diffs, test failures, documentation, tools, and
+conversation history.
+
+## Why I built it
+
+AI coding tools are only as helpful as the context they receive. Too little
+context leads to missed details; too much makes work slower, more expensive,
+and harder to reason about. I built AgenVantage to make that tradeoff visible:
+it prepares focused context packages and explains what was included, left out,
+and why.
 
 This project treats that context as measurable input. It builds token-budgeted
 context packages from local repositories before a model call occurs, showing
@@ -180,8 +188,7 @@ See [Plug-and-Play Agent Integrations](docs/plug-and-play-agent-integrations.md)
 for lifecycle, wrapper, auto-policy, and MCP details. The legacy
 `agenvantage cursor install|status|uninstall` commands remain supported.
 
-For live provider validation, you can store local keys in
-[`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env).
+For live provider validation, you can store local keys in `.env` (never commit it).
 The CLI and helper scripts load that file automatically if it exists.
 
 `agenvantage demo` runs the synthetic on-call scenario, writes
