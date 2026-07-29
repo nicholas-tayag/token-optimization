@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agenvantage.agent_launcher import resolve_agent_command
+from agenvantage.model_routing import RoutingDecision, route_task
 from agenvantage.repo_context import build_context_package
 from agenvantage.presets import get_preset
 from agenvantage.tokenizer import TokenCounter
@@ -30,8 +31,79 @@ def load_agent_roles(path: Path | None = None) -> dict[str, Any]:
     return payload
 
 
+def recommend_worker_route(
+    package: dict[str, Any],
+    worker_role: dict[str, Any],
+) -> dict[str, Any]:
+    """Choose a configured worker model from deterministic package signals."""
+
+    task = str(package.get("task_prompt") or package.get("title") or package.get("package_id"))
+    allowed_paths = [str(path) for path in package.get("allowed_paths", [])]
+    routing_task = task
+    if allowed_paths and all(path.startswith("docs/") or path == "README.md" for path in allowed_paths):
+        routing_task += " documentation"
+    elif package.get("role") == "verifier":
+        routing_task += " tests verification"
+    elif 0 < len(allowed_paths) <= 2:
+        routing_task += " isolated single module"
+
+    decision: RoutingDecision = route_task(
+        routing_task,
+        failed_attempts=int(package.get("failed_attempts", 0) or 0),
+    )
+    models_by_tier = worker_role.get("models_by_tier") or {}
+    model = models_by_tier.get(decision.model_tier) or worker_role.get("default_model")
+    result = {
+        **decision.to_dict(),
+        "provider": worker_role.get("provider") or "codex",
+        "model": model,
+        "explicit_model_override": False,
+    }
+    sufficiency = package.get("context_sufficiency") or {}
+    confidence = float(sufficiency.get("confidence", 1.0) or 0.0)
+    status = str(sufficiency.get("status", "sufficient"))
+    if result["model_tier"] == "low" and (status != "sufficient" or confidence < 0.9):
+        result.update(
+            {
+                "model_tier": "high",
+                "estimated_relative_cost_tier": "high",
+                "reasoning_effort": "high",
+                "escalate": True,
+                "model": models_by_tier.get("high") or worker_role.get("default_model"),
+                "reasons": [
+                    *result["reasons"],
+                    f"context sufficiency {status} at {confidence:.2f} requires escalation",
+                ],
+            }
+        )
+    return result
+
+
 def _package_map(partition: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(item["package_id"]): item for item in partition.get("packages", [])}
+
+
+def _completed_packages(repo: Path) -> set[str]:
+    packages_root = orchestration_root(repo) / "packages"
+    if not packages_root.is_dir():
+        return set()
+    completed: set[str] = set()
+    for package_root in packages_root.iterdir():
+        review_path = package_root / "manager-review.json"
+        verifier_path = package_root / "verifier.json"
+        try:
+            if review_path.is_file():
+                review = json.loads(review_path.read_text(encoding="utf-8"))
+                if review.get("status") == "accepted":
+                    completed.add(package_root.name)
+                    continue
+            if verifier_path.is_file():
+                verifier = json.loads(verifier_path.read_text(encoding="utf-8"))
+                if verifier.get("status") == "passed":
+                    completed.add(package_root.name)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return completed
 
 
 def build_development_plan(
@@ -40,7 +112,7 @@ def build_development_plan(
     repo: Path,
 ) -> dict[str, Any]:
     packages = _package_map(partition)
-    completed: set[str] = set()
+    completed = _completed_packages(repo)
     waves_out: list[dict[str, Any]] = []
     for wave in partition.get("waves", []):
         wave_packages = []
@@ -50,7 +122,9 @@ def build_development_plan(
                 continue
             depends = [str(item) for item in package.get("depends_on", [])]
             blocked_by = [item for item in depends if item not in completed]
-            status = "ready" if not blocked_by else "blocked"
+            status = "completed" if str(package_id) in completed else (
+                "ready" if not blocked_by else "blocked"
+            )
             wave_packages.append(
                 {
                     "package_id": package_id,
@@ -61,8 +135,6 @@ def build_development_plan(
                     "allowed_paths": package.get("allowed_paths", []),
                 }
             )
-            if status == "ready" and package.get("role") == "worker":
-                completed.add(str(package_id))
         waves_out.append(
             {
                 "wave_id": wave.get("wave_id"),
@@ -76,6 +148,7 @@ def build_development_plan(
         "prd": partition.get("prd"),
         "repo": str(Path(repo).resolve()),
         "north_star_metric": partition.get("north_star_metric"),
+        "completed_packages": sorted(completed),
         "waves": waves_out,
         "manager_review_checklist": partition.get("manager_review_checklist", []),
     }
@@ -83,6 +156,32 @@ def build_development_plan(
 
 def orchestration_root(repo: Path) -> Path:
     return Path(repo).resolve() / ".agenvantage" / "orchestration"
+
+
+def _git_changed_paths(repo: Path) -> set[str] | None:
+    repo = Path(repo).resolve()
+    commands = (
+        ("git", "diff", "--name-only", "-z"),
+        ("git", "diff", "--cached", "--name-only", "-z"),
+        ("git", "ls-files", "--others", "--exclude-standard", "-z"),
+    )
+    changed: set[str] = set()
+    for command in commands:
+        completed = subprocess.run(
+            command,
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return None
+        changed.update(
+            path
+            for path in completed.stdout.split("\0")
+            if path and not path.startswith(".agenvantage/")
+        )
+    return changed
 
 
 def prepare_worker_handoff(
@@ -129,6 +228,8 @@ def prepare_worker_handoff(
         "manifest_path": str(manifest_path.resolve()),
         "packed_prompt_tokens": accounting.get("packed_prompt_tokens"),
         "full_scan_prompt_tokens": accounting.get("full_scan_prompt_tokens"),
+        "context_sufficiency": report.get("context_sufficiency", {}),
+        "baseline_changed_paths": sorted(_git_changed_paths(repo) or ()),
         "manager_review_checklist": [],
     }
     task_path.write_text(json.dumps(worker_task, indent=2) + "\n", encoding="utf-8")
@@ -182,6 +283,7 @@ def review_worker_handoff(
     root = orchestration_root(repo) / "packages" / package_id
     task_path = root / "worker-task.json"
     response_path = root / "worker-response.json"
+    verifier_path = root / "verifier.json"
     package_task = json.loads(task_path.read_text(encoding="utf-8")) if task_path.is_file() else {}
     allowed_paths = [str(item) for item in package_task.get("allowed_paths", [])]
     payload = handoff_json or {}
@@ -193,12 +295,31 @@ def review_worker_handoff(
         findings.append("missing_worker_response")
     if payload.get("package_id") != package_id:
         findings.append("package_id_mismatch")
-    if not payload.get("tests_passed"):
-        findings.append("tests_not_passed")
-    changed = [str(item) for item in payload.get("files_changed", [])]
+    verifier = (
+        json.loads(verifier_path.read_text(encoding="utf-8"))
+        if verifier_path.is_file()
+        else {}
+    )
+    if not verifier:
+        findings.append("missing_verifier_artifact")
+    elif not verifier.get("tests_passed"):
+        findings.append("independent_verification_failed")
+
+    baseline_changed = set(str(item) for item in package_task.get("baseline_changed_paths", []))
+    current_changed = _git_changed_paths(repo)
+    reported_changed = {str(item) for item in payload.get("files_changed", [])}
+    if current_changed is None:
+        findings.append("git_diff_unavailable")
+        changed = sorted(reported_changed)
+    else:
+        changed = sorted(current_changed - baseline_changed)
+        if reported_changed != set(changed):
+            findings.append("worker_report_diff_mismatch")
+        for path in sorted(baseline_changed.intersection(allowed_paths)):
+            findings.append(f"ambiguous_preexisting_change:{path}")
     if allowed_paths and changed:
         for path in changed:
-            if not any(path == allowed or path.endswith(allowed) for allowed in allowed_paths):
+            if path not in allowed_paths:
                 findings.append(f"out_of_scope_file:{path}")
     status = "accepted" if not findings else "rejected"
     review = {
@@ -206,7 +327,9 @@ def review_worker_handoff(
         "status": status,
         "findings": findings,
         "allowed_paths": allowed_paths,
+        "git_changed_paths": changed,
         "worker_response": payload,
+        "verifier": verifier,
         "manager_review_checklist": package_task.get("manager_review_checklist", []),
     }
     (root / "manager-review.json").write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
@@ -222,9 +345,25 @@ def dispatch_worker_run(
     worker_provider: str = "codex",
     worker_model: str | None = None,
     worker_executable: str | None = None,
+    routing: dict[str, Any] | None = None,
+    worker_role: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _ = python_executable
     worker_task = prepare_worker_handoff(repo, package)
+    if routing is None:
+        configured_role = worker_role or load_agent_roles()["roles"].get("worker", {})
+        routing_package = {
+            **package,
+            "context_sufficiency": worker_task.get("context_sufficiency", {}),
+        }
+        routing = recommend_worker_route(routing_package, configured_role)
+        if worker_model is not None:
+            routing["model"] = worker_model
+            routing["explicit_model_override"] = True
+        else:
+            worker_model = routing.get("model")
+        if worker_provider == "codex" and configured_role.get("provider"):
+            worker_provider = str(routing["provider"])
     command = build_worker_agent_command(
         repo,
         package,
@@ -244,6 +383,7 @@ def dispatch_worker_run(
         "stderr": "",
         "worker_provider": worker_provider,
         "worker_model": worker_model,
+        "routing": routing,
     }
     if not execute:
         return result
@@ -265,10 +405,10 @@ def dispatch_worker_run(
     response = {
         "package_id": package["package_id"],
         "status": "completed" if completed.returncode == 0 else "failed",
-        "files_changed": [],
+        "files_changed": sorted(_git_changed_paths(repo) or ()),
         "tests_run": "",
-        "tests_passed": completed.returncode == 0,
-        "risks": [],
+        "tests_passed": False,
+        "risks": ["Independent package verification has not run."],
         "manager_decision_needed": [],
     }
     response_path = orchestration_root(repo) / "packages" / package["package_id"] / "worker-response.json"

@@ -376,10 +376,11 @@ def _run_synthetic_experiment(counter: TokenCounter) -> dict[str, Any]:
     }
 
 
-def _build_cases() -> list[ValidationCase]:
-    mesh = Path("/Users/nicky/GithubRepos/mesh")
-    signalfoundry = Path("/Users/nicky/GithubRepos/signalfoundry")
-    application_tracker = Path("/Users/nicky/GithubRepos/application-tracker")
+def _build_cases(repos_root: Path | None = None) -> list[ValidationCase]:
+    repos_root = repos_root or REPO_ROOT.parent
+    mesh = repos_root / "mesh"
+    signalfoundry = repos_root / "signalfoundry"
+    application_tracker = repos_root / "application-tracker"
     return [
         ValidationCase(
             case_id="locate-mesh-extraction-flow",
@@ -705,10 +706,16 @@ def main() -> None:
     )
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--output-md", type=Path, default=DEFAULT_OUTPUT_MD)
+    parser.add_argument(
+        "--repos-root",
+        type=Path,
+        default=REPO_ROOT.parent,
+        help="Directory containing mesh, signalfoundry, and application-tracker.",
+    )
     args = parser.parse_args()
 
     counter = TokenCounter()
-    cases = [_run_case(case, counter) for case in _build_cases()]
+    cases = [_run_case(case, counter) for case in _build_cases(args.repos_root)]
     synthetic = _run_synthetic_experiment(counter)
     summary = _summarize(cases, synthetic)
     report = {"summary": summary, "cases": cases}

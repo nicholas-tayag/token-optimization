@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-_INDEX_FORMAT_VERSION = 4
+_INDEX_FORMAT_VERSION = 5
 _SYMBOL_LIMIT = 40
 _IMPORT_LIMIT = 40
 _LOCAL_IMPORT_LIMIT = 40
@@ -80,6 +80,8 @@ class RepositoryFileIndexEntry:
     relative_path: str
     size_bytes: int
     mtime_ns: int
+    ctime_ns: int
+    file_id: str
     content_hash: str
     symbols: tuple[str, ...]
     imports: tuple[str, ...]
@@ -111,6 +113,8 @@ class RepositoryFileIndexEntry:
             "relative_path": self.relative_path,
             "size_bytes": self.size_bytes,
             "mtime_ns": self.mtime_ns,
+            "ctime_ns": self.ctime_ns,
+            "file_id": self.file_id,
             "content_hash": self.content_hash,
             "symbols": list(self.symbols),
             "imports": list(self.imports),
@@ -129,6 +133,8 @@ class RepositoryFileIndexEntry:
             relative_path=str(payload["relative_path"]),
             size_bytes=int(payload["size_bytes"]),
             mtime_ns=int(payload["mtime_ns"]),
+            ctime_ns=int(payload["ctime_ns"]),
+            file_id=str(payload["file_id"]),
             content_hash=str(payload["content_hash"]),
             symbols=tuple(str(item) for item in payload.get("symbols", [])),
             imports=tuple(str(item) for item in payload.get("imports", [])),
@@ -181,6 +187,10 @@ def repository_index_path(repo: Path) -> Path:
     digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:12]
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", resolved.name or "repo")
     return _default_index_root() / f"{safe_name}-{digest}.json"
+
+
+def _file_identity(stat: os.stat_result) -> str:
+    return f"{getattr(stat, 'st_dev', 0)}:{getattr(stat, 'st_ino', 0)}"
 
 
 def _read_cache(path: Path) -> dict[str, RepositoryFileIndexEntry]:
@@ -468,13 +478,50 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
     revision, revision_source = _repository_revision(repo)
     entries: dict[str, RepositoryFileIndexEntry] = {}
     reused_files = 0
+    metadata_fast_path_reused_files = 0
     rebuilt_files = 0
     skipped_files = 0
     validated_files = 0
+    metadata_checked_files = 0
     for path in file_list:
         relative_path = path.relative_to(repo).as_posix()
         try:
             stat = path.stat()
+        except (OSError, UnicodeDecodeError):
+            skipped_files += 1
+            continue
+        cached_entry = cached_entries.get(relative_path)
+        metadata_checked_files += 1
+        if (
+            cached_entry is not None
+            and cached_entry.size_bytes == stat.st_size
+            and cached_entry.mtime_ns == stat.st_mtime_ns
+            and cached_entry.ctime_ns == stat.st_ctime_ns
+            and cached_entry.file_id == _file_identity(stat)
+        ):
+            # Stable size, timestamps, and file identity let us reuse parsed
+            # metadata without reopening the file. Any metadata change falls
+            # through to content-hash validation.
+            entries[relative_path] = RepositoryFileIndexEntry(
+                relative_path=cached_entry.relative_path,
+                size_bytes=stat.st_size,
+                mtime_ns=stat.st_mtime_ns,
+                ctime_ns=stat.st_ctime_ns,
+                file_id=_file_identity(stat),
+                content_hash=cached_entry.content_hash,
+                symbols=cached_entry.symbols,
+                imports=cached_entry.imports,
+                local_import_paths=cached_entry.local_import_paths,
+                imported_by_paths=(),
+                symbol_occurrences=cached_entry.symbol_occurrences,
+                role=cached_entry.role,
+                language=cached_entry.language or _language_for_path(relative_path),
+                landmarks=cached_entry.landmarks,
+            )
+            reused_files += 1
+            metadata_fast_path_reused_files += 1
+            continue
+        try:
             raw = path.read_bytes()
             content_hash = hashlib.sha256(raw).hexdigest()
             text = raw.decode("utf-8")
@@ -482,14 +529,13 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             skipped_files += 1
             continue
         validated_files += 1
-        cached_entry = cached_entries.get(relative_path)
         if cached_entry is not None and cached_entry.content_hash == content_hash:
-            # The file was read and hashed above; size/mtime are metadata only and
-            # never decide whether parsed data is safe to reuse.
             entries[relative_path] = RepositoryFileIndexEntry(
                 relative_path=cached_entry.relative_path,
                 size_bytes=stat.st_size,
                 mtime_ns=stat.st_mtime_ns,
+                ctime_ns=stat.st_ctime_ns,
+                file_id=_file_identity(stat),
                 content_hash=content_hash,
                 symbols=cached_entry.symbols,
                 imports=cached_entry.imports,
@@ -507,6 +553,8 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             relative_path=relative_path,
             size_bytes=stat.st_size,
             mtime_ns=stat.st_mtime_ns,
+            ctime_ns=stat.st_ctime_ns,
+            file_id=_file_identity(stat),
             content_hash=content_hash,
             symbols=_extract_symbols(path, text),
             imports=_extract_imports(text),
@@ -524,6 +572,8 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             relative_path=entry.relative_path,
             size_bytes=entry.size_bytes,
             mtime_ns=entry.mtime_ns,
+            ctime_ns=entry.ctime_ns,
+            file_id=entry.file_id,
             content_hash=entry.content_hash,
             symbols=entry.symbols,
             imports=entry.imports,
@@ -542,6 +592,8 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
             relative_path=entry.relative_path,
             size_bytes=entry.size_bytes,
             mtime_ns=entry.mtime_ns,
+            ctime_ns=entry.ctime_ns,
+            file_id=entry.file_id,
             content_hash=entry.content_hash,
             symbols=entry.symbols,
             imports=entry.imports,
@@ -590,8 +642,11 @@ def build_repository_index(repo: Path, files: Iterable[Path]) -> RepositoryIndex
         "freshness_status": "fresh" if rebuilt_files == 0 and revision_match else "refreshed",
         "indexed_files": len(entries),
         "reused_files": reused_files,
+        "metadata_fast_path_reused_files": metadata_fast_path_reused_files,
         "rebuilt_files": rebuilt_files,
         "skipped_files": skipped_files,
+        "metadata_checked_files": metadata_checked_files,
+        "hashes_avoided": metadata_fast_path_reused_files,
         "content_hashes_validated": validated_files,
         "symbol_count": sum(len(entry.symbols) for entry in entries.values()),
         "import_count": sum(len(entry.imports) for entry in entries.values()),

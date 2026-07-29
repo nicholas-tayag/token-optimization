@@ -4,6 +4,7 @@ import fnmatch
 import hashlib
 import json
 import re
+import sqlite3
 import subprocess
 import time
 from collections import Counter
@@ -12,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
+from agenvantage.chunk_cache import CachedChunk, ChunkCache, ChunkCacheKey
 from agenvantage.context_planner import ContextPlan, plan_context
 from agenvantage.graph_backend import (
     GRAPHIFY_EXPECTED_COMMIT,
@@ -682,6 +684,7 @@ def chunks_for_repo(
     files: Iterable[Path] | None = None,
     repo_label: str | None = None,
     file_index: dict[str, RepositoryFileIndexEntry] | None = None,
+    chunk_cache_stats: dict[str, Any] | None = None,
 ) -> tuple[CodeChunk, ...]:
     if chunk_lines <= 0 or overlap_lines < 0 or overlap_lines >= chunk_lines:
         raise ValueError("Chunk settings require chunk_lines > overlap_lines >= 0.")
@@ -689,7 +692,91 @@ def chunks_for_repo(
     chunks: list[CodeChunk] = []
     stride = chunk_lines - overlap_lines
     repo = repo.resolve()
-    for path in files or source_files(repo):
+    file_list = tuple(files or source_files(repo))
+    cache: ChunkCache | None = None
+    cached_payloads: dict[ChunkCacheKey, Any] = {}
+    keys_by_path: dict[str, ChunkCacheKey] = {}
+    pending_cache_entries: list[CachedChunk] = []
+    if file_index is not None:
+        try:
+            cache = ChunkCache(repo)
+            tokenizer_profile = f"{counter.model}:{counter.encoding_name}"
+            for path in file_list:
+                relative = path.relative_to(repo).as_posix()
+                indexed_entry = file_index.get(relative)
+                if indexed_entry is None:
+                    continue
+                keys_by_path[relative] = ChunkCacheKey(
+                    relative,
+                    indexed_entry.content_hash,
+                    tokenizer_profile,
+                    chunk_lines,
+                    overlap_lines,
+                )
+            cached_payloads = cache.load_many(keys_by_path.values())
+        except (OSError, sqlite3.Error, ValueError):
+            cache = None
+            cached_payloads = {}
+            keys_by_path = {}
+
+    for path in file_list:
+        relative = path.relative_to(repo).as_posix()
+        display_path = f"{repo_label}/{relative}" if repo_label else relative
+        indexed_entry = file_index.get(relative) if file_index is not None else None
+        cache_key = keys_by_path.get(relative)
+        cached_payload = cached_payloads.get(cache_key) if cache_key is not None else None
+        cached_chunks = cached_payload.get("chunks") if isinstance(cached_payload, dict) else None
+        if isinstance(cached_chunks, list):
+            valid_payload = True
+            restored: list[CodeChunk] = []
+            for item in cached_chunks:
+                if not isinstance(item, dict):
+                    valid_payload = False
+                    break
+                try:
+                    start_line = int(item["start_line"])
+                    end_line = int(item["end_line"])
+                    text = str(item["text"])
+                    tokens = int(item["tokens"])
+                    restored.append(
+                        CodeChunk(
+                            chunk_id=f"{display_path}#L{start_line}-L{end_line}",
+                            relative_path=relative,
+                            display_path=display_path,
+                            repo_label=repo_label or repo.name or "repo",
+                            repo_path=str(repo),
+                            start_line=start_line,
+                            end_line=end_line,
+                            text=text,
+                            tokens=tokens,
+                            chunk_symbols=tuple(str(value) for value in item.get("chunk_symbols", [])),
+                            file_symbols=indexed_entry.symbols if indexed_entry is not None else (),
+                            file_imports=indexed_entry.imports if indexed_entry is not None else (),
+                            file_local_import_paths=(
+                                indexed_entry.local_import_paths if indexed_entry is not None else ()
+                            ),
+                            file_imported_by_paths=(
+                                indexed_entry.imported_by_paths if indexed_entry is not None else ()
+                            ),
+                            redaction_count=int(item.get("redaction_count", 0)),
+                            redaction_types=tuple(
+                                str(value) for value in item.get("redaction_types", [])
+                            ),
+                            addition_tokens=int(item.get("addition_tokens", tokens)),
+                            file_role=(
+                                indexed_entry.role if indexed_entry is not None else _file_kind(relative)
+                            ),
+                            file_landmarks=(
+                                indexed_entry.landmarks if indexed_entry is not None else ()
+                            ),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    valid_payload = False
+                    break
+            if valid_payload:
+                chunks.extend(restored)
+                continue
         try:
             raw_text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -699,14 +786,12 @@ def chunks_for_repo(
         lines = redacted_text.splitlines()
         if len(original_lines) != len(lines):
             original_lines = lines
-        relative = path.relative_to(repo).as_posix()
-        display_path = f"{repo_label}/{relative}" if repo_label else relative
-        indexed_entry = file_index.get(relative) if file_index is not None else None
         symbol_occurrences = (
             indexed_entry.symbol_occurrences
             if indexed_entry is not None and indexed_entry.symbol_occurrences
             else extract_symbol_occurrences(path, "\n".join(lines))
         )
+        file_chunk_payloads: list[dict[str, Any]] = []
         for start in range(0, len(lines), stride):
             content_lines = lines[start : start + chunk_lines]
             if not any(line.strip() for line in content_lines):
@@ -750,8 +835,43 @@ def chunks_for_repo(
                     file_landmarks=indexed_entry.landmarks if indexed_entry is not None else (),
                 )
             )
+            file_chunk_payloads.append(
+                {
+                    "redacted": True,
+                    "start_line": start + 1,
+                    "end_line": end_line,
+                    "text": text,
+                    "tokens": addition_tokens,
+                    "chunk_symbols": list(
+                        _chunk_local_symbols(
+                            symbol_occurrences,
+                            start_line=start + 1,
+                            end_line=end_line,
+                        )
+                    ),
+                    "redaction_count": sum(chunk_redactions.values()),
+                    "redaction_types": sorted(chunk_redactions),
+                    "addition_tokens": addition_tokens,
+                }
+            )
             if end_line == len(lines):
                 break
+        if cache_key is not None:
+            cache_payload: Any = {"redacted": True, "chunks": file_chunk_payloads}
+            pending_cache_entries.append(
+                CachedChunk(
+                    cache_key,
+                    cache_payload,
+                )
+            )
+    if cache is not None and pending_cache_entries:
+        try:
+            cache.save_many(pending_cache_entries)
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            pass
+    if chunk_cache_stats is not None:
+        chunk_cache_stats.update(cache.stats() if cache is not None else {})
+        chunk_cache_stats["enabled"] = cache is not None
     return tuple(chunks)
 
 
@@ -887,6 +1007,7 @@ def rank_chunks(
         repo_counts = Counter(_terms(chunk.repo_label))
         text_counts = Counter(_terms(chunk.text))
         literal_text_counts = Counter(_literal_terms(chunk.text))
+        landmark_counts = Counter(_terms(" ".join(chunk.file_landmarks)))
         chunk_symbol_counts = Counter(_terms(" ".join(chunk.chunk_symbols)))
         literal_chunk_symbol_counts = Counter(_literal_terms(" ".join(chunk.chunk_symbols)))
         symbol_counts = Counter(_terms(" ".join(chunk.file_symbols)))
@@ -898,6 +1019,7 @@ def rank_chunks(
             if path_counts.get(term, 0)
             or repo_counts.get(term, 0)
             or text_counts.get(term, 0)
+            or landmark_counts.get(term, 0)
             or chunk_symbol_counts.get(term, 0)
             or symbol_counts.get(term, 0)
             or import_counts.get(term, 0)
@@ -906,6 +1028,12 @@ def rank_chunks(
         path_score = sum(query_counts[term] * min(path_counts[term], 3) * 5 for term in matches)
         repo_score = sum(query_counts[term] * min(repo_counts[term], 2) for term in matches)
         text_score = sum(query_counts[term] * min(text_counts[term], 5) for term in matches)
+        # File landmarks are deterministic, low-noise summaries extracted by
+        # the indexer. Scoring them separately preserves chunk meaning without
+        # paying for an embedding pass or a second repository scan.
+        landmark_score = sum(
+            query_counts[term] * min(landmark_counts[term], 3) * 3 for term in matches
+        )
         chunk_symbol_score = sum(
             query_counts[term] * min(chunk_symbol_counts[term], 2) * 4 for term in matches
         )
@@ -932,6 +1060,7 @@ def rank_chunks(
             path_score
             + repo_score
             + text_score
+            + landmark_score
             + chunk_symbol_score
             + symbol_score
             + import_score
@@ -1741,10 +1870,20 @@ def build_multi_repo_context_package(
     index_totals = {
         "indexed_files": 0,
         "reused_files": 0,
+        "metadata_fast_path_reused_files": 0,
         "rebuilt_files": 0,
         "skipped_files": 0,
+        "metadata_checked_files": 0,
+        "hashes_avoided": 0,
+        "content_hashes_validated": 0,
         "symbol_count": 0,
         "import_count": 0,
+    }
+    chunk_cache_totals: dict[str, Any] = {
+        "enabled": True,
+        "hits": 0,
+        "misses": 0,
+        "writes": 0,
     }
     for repo_input in repo_inputs:
         files = source_files(
@@ -1760,6 +1899,7 @@ def build_multi_repo_context_package(
             include_diff=include_diff,
             include_log=include_log,
         )
+        repo_chunk_cache: dict[str, Any] = {}
         chunks = chunks_for_repo(
             repo_input.root,
             counter,
@@ -1767,6 +1907,7 @@ def build_multi_repo_context_package(
             files=files,
             repo_label=repo_input.label if len(repo_inputs) > 1 else None,
             file_index=index_result.entries,
+            chunk_cache_stats=repo_chunk_cache,
         )
         map_markdown, map_manifest = build_repository_map(
             repo_input.root,
@@ -1792,11 +1933,17 @@ def build_multi_repo_context_package(
                 "scanned_files": len(files),
                 "candidate_chunks": len(chunks),
                 "index": index_result.stats,
+                "chunk_cache": repo_chunk_cache,
                 "provenance_sections": [section.to_dict() for section in repo_provenance],
             }
         )
         for key in index_totals:
             index_totals[key] += int(index_result.stats[key])
+        chunk_cache_totals["enabled"] = bool(
+            chunk_cache_totals["enabled"] and repo_chunk_cache.get("enabled", False)
+        )
+        for key in ("hits", "misses", "writes"):
+            chunk_cache_totals[key] += int(repo_chunk_cache.get(key, 0))
         candidate_chunks.extend(chunks)
         provenance_sections.extend(repo_provenance)
 
@@ -2324,6 +2471,7 @@ def build_multi_repo_context_package(
         ],
         "graph": graph_manifest,
         "index": index_totals,
+        "chunk_cache": chunk_cache_totals,
         "provenance": {
             "enabled": include_diff or include_log,
             "include_diff": include_diff,

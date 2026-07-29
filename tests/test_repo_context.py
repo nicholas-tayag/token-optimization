@@ -411,6 +411,8 @@ def test_context_package_builds_and_reuses_repository_index(
     assert Path(first_index["cache_path"]).is_file()
     assert first_index["rebuilt_files"] == first_index["indexed_files"]
     assert first_index["reused_files"] == 0
+    assert first_report["chunk_cache"]["misses"] == first_index["indexed_files"]
+    assert first_report["chunk_cache"]["writes"] == first_index["indexed_files"]
 
     _, second_report = build_context_package(
         tmp_path,
@@ -421,6 +423,8 @@ def test_context_package_builds_and_reuses_repository_index(
     second_index = second_report["repos"][0]["index"]
     assert second_index["reused_files"] == second_index["indexed_files"]
     assert second_index["rebuilt_files"] == 0
+    assert second_report["chunk_cache"]["hits"] == second_index["indexed_files"]
+    assert second_report["chunk_cache"]["misses"] == 0
 
 
 def test_rank_chunks_uses_file_level_symbol_metadata() -> None:
@@ -575,6 +579,46 @@ def test_chunks_for_repo_carries_nearby_symbol_anchors_across_large_function_bod
     later_chunk = next(chunk for chunk in chunks if chunk.start_line >= 85)
 
     assert "handleUpload" in later_chunk.chunk_symbols
+
+
+def test_chunks_for_repo_reuses_persistent_redacted_chunk_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(tmp_path / "cache"))
+    source = tmp_path / "app.py"
+    source.write_text("API_KEY = 'secret-value'\ndef run():\n    return API_KEY\n", encoding="utf-8")
+    files = (source,)
+    index_result = build_repository_index(tmp_path, files)
+    cold_stats: dict[str, object] = {}
+    cold = chunks_for_repo(
+        tmp_path,
+        TokenCounter(),
+        files=files,
+        file_index=index_result.entries,
+        chunk_cache_stats=cold_stats,
+    )
+
+    original_read_text = Path.read_text
+
+    def fail_source_read(path: Path, *args, **kwargs):
+        if path == source:
+            raise AssertionError("warm chunk cache should not reopen source")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_source_read)
+    warm_stats: dict[str, object] = {}
+    warm = chunks_for_repo(
+        tmp_path,
+        TokenCounter(),
+        files=files,
+        file_index=index_result.entries,
+        chunk_cache_stats=warm_stats,
+    )
+
+    assert warm == cold
+    assert cold_stats == {"hits": 0, "misses": 1, "writes": 1, "enabled": True}
+    assert warm_stats == {"hits": 1, "misses": 0, "writes": 0, "enabled": True}
+    assert "secret-value" not in warm[0].text
 
 
 def test_context_package_selects_task_relevant_source(tmp_path: Path) -> None:

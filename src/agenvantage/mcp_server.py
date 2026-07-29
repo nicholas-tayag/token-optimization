@@ -712,6 +712,7 @@ def run_stdio_server(
     for line in reader:
         if not line.strip():
             continue
+        response: dict[str, Any] | None
         try:
             message = json.loads(line)
         except json.JSONDecodeError:

@@ -9,7 +9,6 @@ from agenvantage.provider_validation import (
     fixture_readiness_report,
     load_provider_validation_dataset,
     summarize_saved_provider_validation_report,
-    summarize_provider_validation_records,
 )
 from agenvantage.tokenizer import TokenCounter
 
@@ -122,7 +121,6 @@ def build_claim_status_report(
         ]
 
     real_cost = claim_audit.get("real_api_cost_savings", {})
-    experiment_latency = claim_audit.get("latency_improvement", {})
     production_latency = claim_audit.get("latency_improvement_in_production", {})
     broad_quality = claim_audit.get("broad_quality_retention", {})
     end_to_end = claim_audit.get("end_to_end_context_overload", {})

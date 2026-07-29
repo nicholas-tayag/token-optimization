@@ -7,7 +7,7 @@ import statistics
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -1980,6 +1980,7 @@ def reconcile_provider_costs(report: dict[str, Any], raw_costs_payload: Any) -> 
 
 
 def _otel_attribute(key: str, value: Any) -> dict[str, Any]:
+    payload: dict[str, Any]
     if isinstance(value, bool):
         payload = {"boolValue": value}
     elif isinstance(value, int) and not isinstance(value, bool):
