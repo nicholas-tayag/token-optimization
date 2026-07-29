@@ -100,3 +100,44 @@ It deliberately does not claim:
 Note: the preferred OpenAI developer-documentation MCP tool was unavailable in
 this session, so the official OpenAI documentation URL above was used directly.
 
+## July 2026 Practitioner Findings
+
+Recent public implementations and discussions converge on a few practical
+patterns that complement the deterministic planner:
+
+- GitHub Copilot describes repository indexing as semantic search over the
+  current repository state, not as a one-time prompt dump.
+- Local-first tools such as Indexed and ctx emphasize incremental updates,
+  searchable agent history, and keeping source data on the developer machine.
+- Community implementations frequently combine a compact repository map with
+  on-demand source reads. This is cheaper than embedding or transmitting every
+  file up front and gives the agent a recovery path when the first retrieval is
+  insufficient.
+- ContextBench and CORE-Bench frame retrieval quality as more than file-name
+  matching: agents must locate edit surfaces, supporting evidence, and
+  in-repository distractors while respecting the repository state.
+- Practitioner reports repeatedly recommend hierarchical retrieval: retrieve
+  small symbol-level anchors first, then expand to parent or neighboring
+  regions only when needed.
+
+AgenVantage now applies one of these findings directly: repository landmarks
+  are treated as contextual retrieval evidence during ranking, alongside path,
+  symbol, import, and text signals. This remains deterministic and local; it
+  does not copy proprietary code or require an embedding service.
+
+### Sources
+
+- GitHub, repository indexing for Copilot:
+  <https://docs.github.com/en/copilot/concepts/context/repository-indexing>
+- Indexed, local incremental repository context:
+  <https://indexed.sh/>
+- ctx, local coding-agent history search:
+  <https://ctx.rs/>
+- CORE-Bench, repository-level code retrieval:
+  <https://arxiv.org/abs/2606.11864>
+- ContextBench, context retrieval evaluation:
+  <https://arxiv.org/abs/2602.05892>
+- Anthropic, contextual retrieval:
+  <https://www.anthropic.com/engineering/contextual-retrieval>
+- CocoIndex, incremental indexing for long-horizon agents:
+  <https://github.com/cocoindex-io/cocoindex>

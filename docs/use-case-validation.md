@@ -59,7 +59,7 @@ grounding-file recall and provenance-section availability.
 
 Source of truth:
 
-- benchmark runner: [`/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py`](/Users/nicky/GithubRepos/token-optimization/benchmarks/use_case_validation.py)
+- benchmark runner: [`benchmarks/use_case_validation.py`](../benchmarks/use_case_validation.py)
 - generated snapshot: `artifacts/use-case-validation.json`
 
 Validation run on June 30, 2026 after adding answer-rubric scoring and

@@ -2,7 +2,16 @@
   "schema_version": 1,
   "roles": {
     "manager": {"default_model": null, "context_max_tokens": 8000},
-    "worker": {"provider": "codex", "default_model": "gpt-5.4-mini", "context_max_tokens": 6000},
+    "worker": {
+      "provider": "codex",
+      "default_model": "gpt-5.6-terra",
+      "models_by_tier": {
+        "low": "gpt-5.6-luna",
+        "standard": "gpt-5.6-terra",
+        "high": "gpt-5.6-sol"
+      },
+      "context_max_tokens": 6000
+    },
     "verifier": {"default_model": "gpt-4o-mini", "context_max_tokens": 4000}
   }
 }

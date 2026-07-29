@@ -70,8 +70,8 @@ Current state:
 
 References:
 
-- [`/Users/nicky/GithubRepos/token-optimization/docs/context-tooling-landscape.md`](/Users/nicky/GithubRepos/token-optimization/docs/context-tooling-landscape.md)
-- [`/Users/nicky/GithubRepos/token-optimization/docs/use-case-validation.md`](/Users/nicky/GithubRepos/token-optimization/docs/use-case-validation.md)
+- [`docs/context-tooling-landscape.md`](context-tooling-landscape.md)
+- [`docs/use-case-validation.md`](use-case-validation.md)
 
 ### Backlog 2: Symbol-Aware Retrieval
 

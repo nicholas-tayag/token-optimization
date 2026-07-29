@@ -99,6 +99,10 @@ def test_index_reuses_warm_entries_but_invalidates_same_size_content(
     second = build_repository_index(tmp_path, [path])
     assert first.stats["rebuilt_files"] == 1
     assert second.stats["reused_files"] == 1
+    assert second.stats["metadata_fast_path_reused_files"] == 1
+    assert second.stats["metadata_checked_files"] == 1
+    assert second.stats["hashes_avoided"] == 1
+    assert second.stats["content_hashes_validated"] == 0
     assert second.stats["rebuilt_files"] == 0
     old_hash = second.entries["src/value.ts"].content_hash
 
@@ -108,13 +112,67 @@ def test_index_reuses_warm_entries_but_invalidates_same_size_content(
     third = build_repository_index(tmp_path, [path])
 
     assert third.stats["reused_files"] == 0
+    assert third.stats["metadata_fast_path_reused_files"] == 0
     assert third.stats["rebuilt_files"] == 1
+    assert third.stats["content_hashes_validated"] == 1
     assert third.entries["src/value.ts"].content_hash != old_hash
     cache_payload = json.loads(Path(third.stats["cache_path"]).read_text(encoding="utf-8"))
     assert cache_payload["manifest"]["revision"] == third.stats["revision"]
     assert cache_payload["entries"]["src/value.ts"]["content_hash"] == third.entries[
         "src/value.ts"
     ].content_hash
+
+
+def test_index_hash_validates_metadata_change_before_reusing_entry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(tmp_path / "cache"))
+    path = tmp_path / "value.ts"
+    path.write_text("export const value = 'one';\n", encoding="utf-8")
+
+    build_repository_index(tmp_path, [path])
+    original_stat = path.stat()
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 1))
+    result = build_repository_index(tmp_path, [path])
+
+    assert result.stats["reused_files"] == 1
+    assert result.stats["metadata_fast_path_reused_files"] == 0
+    assert result.stats["content_hashes_validated"] == 1
+    assert result.stats["rebuilt_files"] == 0
+
+
+def test_index_fast_path_does_not_read_unchanged_files(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(tmp_path / "cache"))
+    path = tmp_path / "src" / "value.ts"
+    path.parent.mkdir()
+    path.write_text("export const value = 'one';\n", encoding="utf-8")
+
+    build_repository_index(tmp_path, [path])
+
+    def fail_if_read(_path: Path) -> bytes:
+        raise AssertionError("unchanged files should use metadata fast-path reuse")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_if_read)
+    result = build_repository_index(tmp_path, [path])
+
+    assert result.stats["metadata_fast_path_reused_files"] == 1
+    assert result.stats["content_hashes_validated"] == 0
+
+
+def test_index_removes_deleted_files_from_warm_cache(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENVANTAGE_INDEX_ROOT", str(tmp_path / "cache"))
+    retained = tmp_path / "retained.ts"
+    deleted = tmp_path / "deleted.ts"
+    retained.write_text("export const retained = true;\n", encoding="utf-8")
+    deleted.write_text("export const deleted = true;\n", encoding="utf-8")
+
+    build_repository_index(tmp_path, [retained, deleted])
+    deleted.unlink()
+    result = build_repository_index(tmp_path, [retained])
+
+    assert set(result.entries) == {"retained.ts"}
+    assert result.stats["indexed_files"] == 1
+    assert result.stats["metadata_fast_path_reused_files"] == 1
 
 
 def test_index_classifies_discoverable_generated_and_vendor_files(tmp_path: Path, monkeypatch) -> None:

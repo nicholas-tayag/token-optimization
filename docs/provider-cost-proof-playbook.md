@@ -130,7 +130,7 @@ Record the exact model and pricing capture date used for the run.
 
 ### 2. Run The Live Validation
 
-Put your keys in [`/Users/nicky/GithubRepos/token-optimization/.env`](/Users/nicky/GithubRepos/token-optimization/.env)
+Put your keys in the repository `.env` file (never commit it)
 or export them manually.
 
 ```bash

@@ -3,7 +3,7 @@
 Status: **approved for autonomous implementation**  
 Audience: Codex / Claude Code overnight agent  
 Prepared: July 13, 2026  
-Repository: `/Users/nicky/GithubRepos/token-optimization`  
+Repository: `<repository-root>`
 Companion docs:
 [`prd-hierarchical-agent-development.md`](prd-hierarchical-agent-development.md),
 [`prd-context-performance-platform.md`](prd-context-performance-platform.md),
@@ -33,7 +33,7 @@ CONSTRAINTS:
   - Commit each completed wave with a clear message. Do not force-push.
 
 SETUP:
-  cd /Users/nicky/GithubRepos/token-optimization
+  cd <repository-root>
   source .venv/bin/activate || make setup
   .venv/bin/pytest -q   # baseline must be green before starting
 
@@ -305,7 +305,7 @@ Manager review (`agenvantage orchestrate review --package T1.1`) must return
 ## 7. Testing Protocol (mandatory after each wave)
 
 ```bash
-cd /Users/nicky/GithubRepos/token-optimization
+cd <repository-root>
 source .venv/bin/activate
 .venv/bin/pytest -q
 .venv/bin/python benchmarks/feature_work_validation.py --summary

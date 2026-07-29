@@ -1,4 +1,4 @@
-from agenvantage.context_planner import detect_task_shapes, normalize_concepts, plan_context
+from agenvantage.context_planner import normalize_concepts, plan_context
 
 
 def names(plan):

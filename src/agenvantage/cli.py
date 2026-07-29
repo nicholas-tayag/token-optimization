@@ -16,7 +16,6 @@ from agenvantage import __version__
 from agenvantage.agent_launcher import resolve_agent_command
 from agenvantage.agent_integrations import (
     SUPPORTED_TARGETS,
-    agent_skill_status,
     install_agent_skill,
 )
 from agenvantage.config import PackConfig, load_pack_config
@@ -39,7 +38,6 @@ from agenvantage.orchestrator import (
 )
 from agenvantage.paired_codex_validation import (
     build_adhoc_paired_case,
-    codex_jsonl_to_provider_records,
     default_compare_output_dir,
     format_compare_summary,
     run_paired_codex_validation,
@@ -92,7 +90,6 @@ from agenvantage.provider_validation import (
     run_provider_validation,
     summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
-    summarize_provider_validation_records,
 )
 from agenvantage.presets import (
     DEFAULT_PRESET,
@@ -118,7 +115,16 @@ from agenvantage.tokenizer import TokenCounter
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_PATH = _PACKAGE_ROOT / "viz" / "index.html"
-_DEFAULT_FIXTURE = _PACKAGE_ROOT / "examples" / "synthetic_oncall_context.json"
+
+
+def _default_fixture_path(name: str) -> Path:
+    source_path = _PACKAGE_ROOT / "examples" / name
+    if source_path.is_file():
+        return source_path
+    return Path(sys.prefix) / "share" / "agenvantage" / "examples" / name
+
+
+_DEFAULT_FIXTURE = _default_fixture_path("synthetic_oncall_context.json")
 _DEFAULT_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "provider_validation_cases.json"
 _DEFAULT_FEATURE_PROVIDER_FIXTURE = _PACKAGE_ROOT / "examples" / "feature_work_validation_cases.json"
 _DEFAULT_PAIRED_CODEX_FIXTURE = _PACKAGE_ROOT / "examples" / "paired_codex_validation_cases.json"
@@ -335,7 +341,7 @@ def _parser() -> argparse.ArgumentParser:
         "--fixture",
         type=Path,
         default=_DEFAULT_FIXTURE,
-        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE.relative_to(_PACKAGE_ROOT)}).",
+        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE}).",
     )
     demo.add_argument(
         "--budget",
@@ -370,7 +376,7 @@ def _parser() -> argparse.ArgumentParser:
         "--fixture",
         type=Path,
         default=_DEFAULT_FIXTURE,
-        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE.relative_to(_PACKAGE_ROOT)}).",
+        help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE}).",
     )
     run.add_argument(
         "--budget",
@@ -1146,11 +1152,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Print a readable Markdown summary instead of JSON.",
     )
 
-    provider = subparsers.add_parser(
+    provider_parser = subparsers.add_parser(
         "provider",
         help="Import provider-reported usage into local traces.",
     )
-    provider_subparsers = provider.add_subparsers(dest="provider_command", required=True)
+    provider_subparsers = provider_parser.add_subparsers(dest="provider_command", required=True)
     provider_import = provider_subparsers.add_parser(
         "import",
         help="Import saved provider usage records or OTLP telemetry for one or more traces.",
@@ -1941,7 +1947,6 @@ def _build_pack_artifacts(
     default_preset: str = DEFAULT_PRESET,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     settings = _resolve_pack_settings(args, default_preset=default_preset)
-    preset = settings["preset"]
     repos = settings["repos"]
     counter = TokenCounter(settings["model"])
     discipline = getattr(args, "discipline", "full")
@@ -3603,8 +3608,9 @@ def _run_orchestrate(args: argparse.Namespace) -> None:
             package,
             execute=args.execute,
             worker_provider=args.worker_provider or worker_role.get("provider") or "codex",
-            worker_model=args.worker_model or worker_role.get("default_model"),
+            worker_model=args.worker_model,
             worker_executable=args.worker_executable,
+            worker_role=worker_role,
         )
         if args.as_json:
             print(json.dumps(result, indent=2))

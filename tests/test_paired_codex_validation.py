@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from agenvantage.paired_codex_validation import (
     build_adhoc_paired_case,
     compute_treatment_delta,

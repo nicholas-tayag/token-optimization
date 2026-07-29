@@ -184,7 +184,6 @@ def _extract(task: str, explicit: Iterable[str] | None, pattern: re.Pattern[str]
 
 
 def _slots(task: str, shapes: tuple[str, ...]) -> tuple[EvidenceSlot, ...]:
-    text = task.lower()
     task_units = _task_units(task)
     feature = "feature" in shapes or "compound" in shapes
     slots: list[EvidenceSlot] = []

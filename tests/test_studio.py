@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
-
-import pytest
 
 from agenvantage.observability import record_pack_trace, write_observability_dashboard
 from agenvantage.studio import (
     build_doctor_payload,
     build_studio_status,
     graph_policy_chip,
-    render_context_preview,
-    render_setup_panel,
-    render_studio_hub,
     studio_links,
     studio_root,
     write_studio_pages,
