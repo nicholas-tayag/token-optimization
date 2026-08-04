@@ -67,6 +67,7 @@ _SUPPORTED_NAMES = {
     ".env.template",
     "constraints.txt",
     "dockerfile",
+    "justfile",
     "makefile",
     "package.json",
     "pipfile",
