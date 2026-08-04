@@ -133,12 +133,14 @@ def test_source_files_include_plain_config_suffixes(tmp_path: Path) -> None:
     (tmp_path / "gunicorn.conf").write_text("workers=3\n", encoding="utf-8")
     (tmp_path / "alembic.ini").write_text("[alembic]\nscript_location = migrations\n", encoding="utf-8")
     (tmp_path / "mypy.cfg").write_text("[mypy]\npython_version = 3.12\n", encoding="utf-8")
+    (tmp_path / ".editorconfig").write_text("root = true\n[*]\ncharset = utf-8\n", encoding="utf-8")
 
     files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
 
     assert "gunicorn.conf" in files
     assert "alembic.ini" in files
     assert "mypy.cfg" in files
+    assert ".editorconfig" in files
 
 
 def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:

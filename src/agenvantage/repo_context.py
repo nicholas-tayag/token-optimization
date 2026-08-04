@@ -61,6 +61,7 @@ _SUPPORTED_SUFFIXES = {
     ".yml",
 }
 _SUPPORTED_NAMES = {
+    ".editorconfig",
     ".env.example",
     ".env.sample",
     ".env.template",
