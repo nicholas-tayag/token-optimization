@@ -111,6 +111,24 @@ def test_source_files_include_readme_and_container_build_variants(tmp_path: Path
     assert "Containerfile.dev" in files
 
 
+def test_source_files_include_common_dependency_manifests(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text("httpx==0.28.0\n", encoding="utf-8")
+    (tmp_path / "constraints.txt").write_text("urllib3<3\n", encoding="utf-8")
+    (tmp_path / "Pipfile").write_text("[packages]\nhttpx='*'\n", encoding="utf-8")
+    (tmp_path / "Pipfile.lock").write_text("{\"_meta\":{}}\n", encoding="utf-8")
+    (tmp_path / "poetry.lock").write_text("[[package]]\nname='httpx'\n", encoding="utf-8")
+    (tmp_path / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert "requirements.txt" in files
+    assert "constraints.txt" in files
+    assert "Pipfile" in files
+    assert "Pipfile.lock" in files
+    assert "poetry.lock" in files
+    assert "uv.lock" in files
+
+
 def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     (tmp_path / ".gitignore").write_text("ignored.ts\n", encoding="utf-8")

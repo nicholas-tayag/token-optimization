@@ -61,12 +61,18 @@ _SUPPORTED_NAMES = {
     ".env.example",
     ".env.sample",
     ".env.template",
+    "constraints.txt",
     "dockerfile",
     "makefile",
     "package.json",
+    "pipfile",
+    "pipfile.lock",
+    "poetry.lock",
+    "requirements.txt",
     "readme",
     "pyproject.toml",
     "readme.md",
+    "uv.lock",
 }
 _SUPPORTED_NAME_PREFIXES = (
     "containerfile.",
