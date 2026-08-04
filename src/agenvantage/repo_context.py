@@ -41,6 +41,7 @@ _SUPPORTED_SUFFIXES = {
     ".go",
     ".graphql",
     ".html",
+    ".ini",
     ".java",
     ".js",
     ".json",
@@ -49,6 +50,8 @@ _SUPPORTED_SUFFIXES = {
     ".mjs",
     ".py",
     ".rs",
+    ".cfg",
+    ".conf",
     ".sh",
     ".sql",
     ".toml",
@@ -195,7 +198,7 @@ _TEST_PATH_MARKERS = (
     "test/",
     "qa/",
 )
-_CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml"}
+_CONFIG_SUFFIXES = {".cfg", ".conf", ".ini", ".json", ".toml", ".yaml", ".yml"}
 _CONFIG_NAMES = {
     "package.json",
     "pyproject.toml",
