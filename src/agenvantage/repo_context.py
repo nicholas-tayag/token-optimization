@@ -83,6 +83,11 @@ _SAFE_ENV_EXAMPLE_NAMES = frozenset(
 )
 _IGNORED_PARTS = {
     ".git",
+    ".mypy_cache",
+    ".nox",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
     ".venv",
     "__pycache__",
     "artifacts",

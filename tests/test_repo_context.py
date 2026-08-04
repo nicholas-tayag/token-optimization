@@ -132,6 +132,30 @@ def test_source_files_include_untracked_non_ignored_git_files(tmp_path: Path) ->
     assert "ignored.ts" not in files
 
 
+def test_source_files_exclude_common_tool_caches(tmp_path: Path) -> None:
+    (tmp_path / ".pytest_cache").mkdir()
+    (tmp_path / ".pytest_cache" / "state.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".ruff_cache").mkdir()
+    (tmp_path / ".ruff_cache" / "lint.py").write_text("print('cache')\n", encoding="utf-8")
+    (tmp_path / ".mypy_cache").mkdir()
+    (tmp_path / ".mypy_cache" / "types.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".tox").mkdir()
+    (tmp_path / ".tox" / "pyproject.toml").write_text("[testenv]\n", encoding="utf-8")
+    (tmp_path / ".nox").mkdir()
+    (tmp_path / ".nox" / "run.py").write_text("print('nox')\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('real')\n", encoding="utf-8")
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert "src/app.py" in files
+    assert ".pytest_cache/state.json" not in files
+    assert ".ruff_cache/lint.py" not in files
+    assert ".mypy_cache/types.json" not in files
+    assert ".tox/pyproject.toml" not in files
+    assert ".nox/run.py" not in files
+
+
 def test_context_package_can_include_git_provenance(tmp_path: Path) -> None:
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     subprocess.run(
