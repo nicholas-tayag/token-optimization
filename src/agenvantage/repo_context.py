@@ -58,6 +58,9 @@ _SUPPORTED_SUFFIXES = {
     ".yml",
 }
 _SUPPORTED_NAMES = {
+    ".env.example",
+    ".env.sample",
+    ".env.template",
     "dockerfile",
     "makefile",
     "package.json",
@@ -70,6 +73,13 @@ _SUPPORTED_NAME_PREFIXES = (
     "dockerfile.",
     "makefile.",
     "readme.",
+)
+_SAFE_ENV_EXAMPLE_NAMES = frozenset(
+    {
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+    }
 )
 _IGNORED_PARTS = {
     ".git",
@@ -557,9 +567,9 @@ def _eligible_file(path: Path, repo: Path) -> bool:
     lowered_parts = {part.lower() for part in relative.parts}
     if lowered_parts & _IGNORED_PARTS:
         return False
-    if path.name.lower().startswith(".env"):
-        return False
     lowered_name = path.name.lower()
+    if lowered_name.startswith(".env") and lowered_name not in _SAFE_ENV_EXAMPLE_NAMES:
+        return False
     return (
         path.suffix.lower() in _SUPPORTED_SUFFIXES
         or lowered_name in _SUPPORTED_NAMES

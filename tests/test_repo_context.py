@@ -49,6 +49,22 @@ def test_source_files_exclude_env_and_dependency_directories(tmp_path: Path) -> 
     assert "artifacts/feature-work-validation.json" not in files
 
 
+def test_source_files_include_safe_env_examples(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("SECRET=live\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text("SECRET=local\n", encoding="utf-8")
+    (tmp_path / ".env.example").write_text("API_BASE=https://example.test\n", encoding="utf-8")
+    (tmp_path / ".env.sample").write_text("FEATURE_FLAG=false\n", encoding="utf-8")
+    (tmp_path / ".env.template").write_text("TOKEN=\n", encoding="utf-8")
+
+    files = {path.relative_to(tmp_path).as_posix() for path in source_files(tmp_path)}
+
+    assert ".env" not in files
+    assert ".env.local" not in files
+    assert ".env.example" in files
+    assert ".env.sample" in files
+    assert ".env.template" in files
+
+
 def test_source_files_include_shell_scripts(tmp_path: Path) -> None:
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "deploy.sh").write_text(
