@@ -106,6 +106,23 @@ agenvantage mcp
 
 Run the test suite with `pytest` or `make test`.
 
+## Repository defaults
+
+If you keep reaching for the same `pack` flags, add a local `.agenvantage.toml` file at the repository root:
+
+```toml
+[pack]
+budget = 6000
+preset = "feature"
+top_k = 20
+include_glob = ["src/**", "tests/**"]
+exclude_glob = ["dist/**", "coverage/**"]
+```
+
+`include_glob` and `exclude_glob` accept a string or a list of strings. AgenVantage now rejects non-string entries instead of silently coercing them, which makes bad config easier to spot.
+
+For local secrets, AgenVantage will also load the nearest `.env` file it finds while walking upward from the current working directory. Existing environment variables still win, and unquoted inline comments like `OPENAI_API_KEY=value # local dev` are ignored.
+
 ## Research notes
 
 - [Repository-context research](docs/repository-context-research.md)
