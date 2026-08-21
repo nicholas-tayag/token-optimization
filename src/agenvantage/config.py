@@ -70,7 +70,12 @@ def _as_str_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     if isinstance(value, (list, tuple)):
-        return tuple(str(item) for item in value)
+        items: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("expected every list item to be a string")
+            items.append(item)
+        return tuple(items)
     raise ValueError("expected a string or list of strings")
 
 

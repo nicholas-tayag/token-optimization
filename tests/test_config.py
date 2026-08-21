@@ -86,6 +86,8 @@ def test_load_pack_config_rejects_bad_types(tmp_path: Path) -> None:
         "[pack]\ngraph_hops = 3\n",
         '[pack]\ngraph_timeout = "slow"\n',
         "[pack]\ngraph_json = 42\n",
+        "[pack]\ninclude_glob = [42]\n",
+        "[pack]\nexclude_glob = [true]\n",
     ],
 )
 def test_load_pack_config_rejects_invalid_graph_settings(
