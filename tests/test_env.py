@@ -42,3 +42,24 @@ def test_load_dotenv_sets_missing_values_without_overriding_existing(
     assert os.environ["OPENAI_API_KEY"] == "dotenv-openai"
     assert os.environ["OPENAI_ADMIN_KEY"] == "existing-admin"
     assert os.environ["CUSTOM_VALUE"] == "quoted-value"
+
+
+def test_load_dotenv_ignores_unquoted_inline_comments(tmp_path: Path, monkeypatch) -> None:
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "\n".join(
+            [
+                "PLAIN=value # trailing comment",
+                'QUOTED="value # kept"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("PLAIN", raising=False)
+    monkeypatch.delenv("QUOTED", raising=False)
+
+    load_dotenv(tmp_path)
+
+    assert os.environ["PLAIN"] == "value"
+    assert os.environ["QUOTED"] == "value # kept"
