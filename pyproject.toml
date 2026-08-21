@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agenvantage"
 version = "0.1.0"
-description = "Observable context optimization experiments for reliable AI agents."
+description = "Local agent context planning, prompt optimization, and token observability."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

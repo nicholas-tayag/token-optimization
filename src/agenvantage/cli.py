@@ -91,6 +91,7 @@ from agenvantage.provider_validation import (
     summarize_normalized_provider_validation_payload,
     summarize_saved_provider_validation_report,
 )
+from agenvantage.prompt_optimizer import append_optimization_log, optimize_prompt
 from agenvantage.presets import (
     DEFAULT_PRESET,
     IMPLEMENTATION_DISCIPLINES,
@@ -378,6 +379,18 @@ def _parser() -> argparse.ArgumentParser:
         default=_DEFAULT_FIXTURE,
         help=f"Scenario JSON file (default: {_DEFAULT_FIXTURE}).",
     )
+
+    optimize = subparsers.add_parser(
+        "optimize-prompt",
+        help="Clean and structure a user-authored prompt before repository retrieval.",
+    )
+    source = optimize.add_mutually_exclusive_group(required=True)
+    source.add_argument("--text", help="Prompt text to optimize locally.")
+    source.add_argument("--file", type=Path, help="Read prompt text from a file.")
+    optimize.add_argument("--mode", choices=("auto", "general", "codex", "pr-review"), default="auto")
+    optimize.add_argument("--model", default=_DEFAULT_PACK_MODEL, help="Tokenizer model for local estimates.")
+    optimize.add_argument("--json", dest="as_json", action="store_true")
+    optimize.add_argument("--no-log", action="store_true", help="Do not append to .agenvantage/prompt-optimizations.jsonl.")
     run.add_argument(
         "--budget",
         type=int,
@@ -3976,6 +3989,29 @@ def _run_studio_demo(args: argparse.Namespace) -> None:
         print(hub_uri)
 
 
+def _run_optimize_prompt(args: argparse.Namespace) -> None:
+    prompt = args.text if args.text is not None else args.file.read_text(encoding="utf-8")
+    result = optimize_prompt(prompt, mode=args.mode, counter=TokenCounter(args.model))
+    if not args.no_log:
+        append_optimization_log(result, Path(".agenvantage") / "prompt-optimizations.jsonl")
+    payload = result.to_dict()
+    if args.as_json:
+        print(json.dumps(payload, indent=2))
+        return
+    print("AgenVantage prompt optimizer")
+    print("")
+    print(f"Mode: {result.mode}")
+    print(f"Local estimate: {result.original_tokens:,} -> {result.optimized_tokens:,} tokens")
+    print(f"Estimated local reduction: {result.estimated_savings_tokens:,} tokens ({result.estimated_savings_percent}%)")
+    print(f"Clarity score: {result.clarity_score}/100")
+    if result.missing_info:
+        print(f"Missing signals: {', '.join(result.missing_info)}")
+    print("")
+    print(result.optimized_prompt)
+    print("")
+    print("Claim boundary: local tokenizer estimate; provider billing and answer quality require separate validation.")
+
+
 def main() -> None:
     load_dotenv()
     args = _parser().parse_args()
@@ -4059,6 +4095,9 @@ def main() -> None:
         return
     if args.command == "orchestrate":
         _run_orchestrate(args)
+        return
+    if args.command == "optimize-prompt":
+        _run_optimize_prompt(args)
         return
 
     _run_experiment(

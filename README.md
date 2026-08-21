@@ -1,12 +1,13 @@
 # AgenVantage
 
-**A research and experimental tool for deciding what an AI coding assistant needs to see.**
+**A local agent context and token observability tool for developers.**
 
-AgenVantage prepares focused, token-budgeted context packages from local repositories before a model call. It shows what was selected, what was left out, and why.
+AgenVantage prepares focused, token-budgeted context packages from local repositories before a model call, then records the local token and provider-usage evidence needed to evaluate the tradeoff. It also cleans up the task prompt before retrieval, so users can see both the instruction they wrote and the repository evidence the agent received.
 
 ## What it offers
 
 - Packs relevant repository files, symbols, imports, diffs, tests, and configuration for a coding task.
+- Cleans and structures task prompts locally with `optimize-prompt` without making an extra model call.
 - Supports `explain`, `feature`, `review`, `debug`, `change`, and `compare` workflows.
 - Produces readable Markdown handoffs and machine-readable decision manifests.
 - Works across one or more local repositories.
@@ -29,6 +30,18 @@ The current tool includes:
 - A lightweight MCP server with `prepare_context`, `expand_context`, `search_graph`, and `context_status` tools.
 - Local experiment harnesses for policy comparison, feature-work validation, provider-usage normalization, and context observability.
 - Cache-aware sessions that separate stable repository context from changing task instructions.
+- A deterministic prompt optimizer that removes filler and duplicate sentences, detects workflow mode, reports missing task signals, and estimates local prompt-token reduction.
+
+## Product scope
+
+AgenVantage is one local control plane for agent input efficiency:
+
+1. **Task shaping:** turn an informal request into a concise, testable instruction.
+2. **Repository grounding:** select the smallest defensible set of files, symbols, tests, configuration, and provenance.
+3. **Session reuse:** keep stable context separate from dynamic task packets for cache-aware workflows.
+4. **Observability:** show local token estimates, selection decisions, cache behavior, provider usage, latency, and quality annotations in one traceable record.
+
+The project does not claim that a shorter local prompt automatically reduces provider billing or preserves answer quality. Those claims require provider-reported usage and downstream quality evidence. The local optimizer is deterministic by design; an AI rewrite is intentionally not part of the default path because it adds latency, cost, and another source of nondeterminism.
 
 ## Research and active experiments
 
@@ -80,6 +93,7 @@ Try it on another repository:
 cd /path/to/your-repo
 agenvantage compare --task "Fix the bug and add a regression test"
 agenvantage pack --preset feature --task "Add a small feature" --handoff-json
+agenvantage optimize-prompt --text "Fix the bug in the repo and run tests"
 ```
 
 Install the optional local integrations:
