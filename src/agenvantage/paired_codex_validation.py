@@ -327,21 +327,23 @@ def parse_codex_jsonl_usage(text: str) -> dict[str, Any]:
         if not usage:
             continue
         totals["turn_count"] += 1
-        input_tokens = int(
+        input_tokens = _usage_token_count(
             usage.get("input_tokens")
             or usage.get("prompt_tokens")
             or usage.get("total_input_tokens")
             or 0
         )
-        cached = int(
+        cached = _usage_token_count(
             usage.get("cached_input_tokens")
             or usage.get("cache_read_input_tokens")
             or (usage.get("input_tokens_details") or {}).get("cached_tokens")
             or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
             or 0
         )
-        output_tokens = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-        reasoning = int(
+        output_tokens = _usage_token_count(
+            usage.get("output_tokens") or usage.get("completion_tokens") or 0
+        )
+        reasoning = _usage_token_count(
             usage.get("reasoning_output_tokens")
             or usage.get("reasoning_tokens")
             or (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
@@ -355,6 +357,15 @@ def parse_codex_jsonl_usage(text: str) -> dict[str, Any]:
         totals["input_tokens"] - totals["cached_input_tokens"], 0
     )
     return totals
+
+
+def _usage_token_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _codex_exec_prefix(codex_executable: str | None = None) -> list[str]:

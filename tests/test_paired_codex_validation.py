@@ -50,6 +50,31 @@ def test_parse_codex_jsonl_usage_sums_turn_completed_events() -> None:
     assert usage["reasoning_output_tokens"] == 60
 
 
+def test_parse_codex_jsonl_usage_ignores_invalid_token_values() -> None:
+    payload = json.dumps(
+        {
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": "not-a-number",
+                "cached_input_tokens": -5,
+                "output_tokens": True,
+                "reasoning_output_tokens": "7",
+            },
+        }
+    )
+
+    usage = parse_codex_jsonl_usage(payload)
+
+    assert usage == {
+        "turn_count": 1,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 7,
+    }
+
+
 def test_compute_treatment_delta_reports_percent_change() -> None:
     delta = compute_treatment_delta(
         {"input_tokens": 1000, "wall_time_seconds": 200},
