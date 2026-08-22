@@ -362,6 +362,8 @@ def parse_codex_jsonl_usage(text: str) -> dict[str, Any]:
 def _usage_token_count(value: Any) -> int:
     if isinstance(value, bool):
         return 0
+    if isinstance(value, float) and not value.is_integer():
+        return 0
     try:
         return max(int(value), 0)
     except (TypeError, ValueError):

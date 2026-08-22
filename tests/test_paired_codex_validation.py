@@ -75,6 +75,20 @@ def test_parse_codex_jsonl_usage_ignores_invalid_token_values() -> None:
     }
 
 
+def test_parse_codex_jsonl_usage_ignores_fractional_token_counts() -> None:
+    payload = json.dumps(
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 2.5, "cached_input_tokens": 3.0},
+        }
+    )
+
+    usage = parse_codex_jsonl_usage(payload)
+
+    assert usage["input_tokens"] == 0
+    assert usage["cached_input_tokens"] == 3
+
+
 def test_compute_treatment_delta_reports_percent_change() -> None:
     delta = compute_treatment_delta(
         {"input_tokens": 1000, "wall_time_seconds": 200},
