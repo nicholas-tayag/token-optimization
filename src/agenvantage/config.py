@@ -105,9 +105,9 @@ def load_pack_config(search_paths: list[Path]) -> PackConfig:
     graph_timeout = pack.get("graph_timeout")
     graphify_executable = pack.get("graphify_executable")
 
-    if budget is not None and not isinstance(budget, int):
+    if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool)):
         raise ValueError(f"pack.budget in {config_path} must be an integer.")
-    if top_k is not None and not isinstance(top_k, int):
+    if top_k is not None and (not isinstance(top_k, int) or isinstance(top_k, bool)):
         raise ValueError(f"pack.top_k in {config_path} must be an integer.")
     if model is not None and not isinstance(model, str):
         raise ValueError(f"pack.model in {config_path} must be a string.")

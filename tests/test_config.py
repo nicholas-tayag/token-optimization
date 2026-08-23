@@ -88,6 +88,8 @@ def test_load_pack_config_rejects_bad_types(tmp_path: Path) -> None:
         "[pack]\ngraph_json = 42\n",
         "[pack]\ninclude_glob = [42]\n",
         "[pack]\nexclude_glob = [true]\n",
+        "[pack]\nbudget = true\n",
+        "[pack]\ntop_k = false\n",
     ],
 )
 def test_load_pack_config_rejects_invalid_graph_settings(
