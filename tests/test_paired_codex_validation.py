@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from agenvantage.paired_codex_validation import (
     build_adhoc_paired_case,
     compute_treatment_delta,
+    load_paired_codex_dataset,
     parse_codex_jsonl_usage,
     run_paired_codex_validation,
 )
@@ -97,6 +100,25 @@ def test_compute_treatment_delta_reports_percent_change() -> None:
 
     assert delta["input_tokens"] == -40.0
     assert delta["wall_time_seconds"] == -25.0
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ([], "dataset must be a JSON object"),
+        ({"default_runner": []}, "default_runner must be a JSON object"),
+        ({"cases": {}}, "cases must be a JSON array"),
+        ({"cases": ["not-a-case"]}, "each paired Codex case must be a JSON object"),
+    ],
+)
+def test_load_paired_codex_dataset_rejects_invalid_structures(
+    tmp_path: Path, payload: object, message: str
+) -> None:
+    fixture = tmp_path / "cases.json"
+    fixture.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_paired_codex_dataset(fixture)
 
 
 def test_run_paired_codex_validation_local_only(tmp_path: Path) -> None:

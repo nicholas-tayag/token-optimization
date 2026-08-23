@@ -42,7 +42,13 @@ class PairedCodexRunner:
 
 def load_paired_codex_dataset(path: Path) -> tuple[PairedCodexRunner, list[PairedCodexCase]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    runner_payload = payload.get("default_runner") or {}
+    if not isinstance(payload, dict):
+        raise ValueError("paired Codex dataset must be a JSON object")
+    runner_payload = payload.get("default_runner")
+    if runner_payload is None:
+        runner_payload = {}
+    if not isinstance(runner_payload, dict):
+        raise ValueError("default_runner must be a JSON object")
     runner = PairedCodexRunner(
         provider=str(runner_payload.get("provider") or "codex"),
         model=str(runner_payload.get("model") or "gpt-5.4-mini"),
@@ -50,7 +56,12 @@ def load_paired_codex_dataset(path: Path) -> tuple[PairedCodexRunner, list[Paire
         sandbox=str(runner_payload.get("sandbox") or "workspace-write"),
     )
     cases: list[PairedCodexCase] = []
-    for item in payload.get("cases", []):
+    case_payloads = payload.get("cases", [])
+    if not isinstance(case_payloads, list):
+        raise ValueError("cases must be a JSON array")
+    for item in case_payloads:
+        if not isinstance(item, dict):
+            raise ValueError("each paired Codex case must be a JSON object")
         cases.append(
             PairedCodexCase(
                 case_id=str(item["case_id"]),
