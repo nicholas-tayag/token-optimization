@@ -81,6 +81,8 @@ def test_custom_candidate_id_preserves_first_candidate_and_metadata() -> None:
         ({"rank_constant": 0}, "rank_constant"),
         ({"rank_constant": float("inf")}, "rank_constant"),
         ({"top_k": -1}, "top_k"),
+        ({"top_k": True}, "top_k"),
+        ({"top_k": "2"}, "top_k"),
         ({"weights": {"missing": 1.0}}, "unknown source"),
         ({"weights": {"source": -1.0}}, "weight"),
     ],

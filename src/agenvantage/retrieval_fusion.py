@@ -83,7 +83,9 @@ def weighted_reciprocal_rank_fusion(
 
     if not isfinite(rank_constant) or rank_constant <= 0:
         raise ValueError("rank_constant must be a finite number greater than zero")
-    if top_k is not None and top_k < 0:
+    if top_k is not None and (
+        not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 0
+    ):
         raise ValueError("top_k must be non-negative or None")
 
     source_weights = weights or {}
