@@ -99,7 +99,13 @@ def weighted_reciprocal_rank_fusion(
 
     for source, candidates in ranked_lists.items():
         weight = source_weights.get(source, 1.0)
-        if not isfinite(weight) or weight < 0:
+        if isinstance(weight, bool):
+            raise ValueError(f"weight for source {source!r} must be finite and non-negative")
+        try:
+            is_valid_weight = isfinite(weight) and weight >= 0
+        except TypeError:
+            is_valid_weight = False
+        if not is_valid_weight:
             raise ValueError(f"weight for source {source!r} must be finite and non-negative")
         if weight == 0:
             continue

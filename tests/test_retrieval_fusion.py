@@ -85,6 +85,8 @@ def test_custom_candidate_id_preserves_first_candidate_and_metadata() -> None:
         ({"top_k": "2"}, "top_k"),
         ({"weights": {"missing": 1.0}}, "unknown source"),
         ({"weights": {"source": -1.0}}, "weight"),
+        ({"weights": {"source": True}}, "weight"),
+        ({"weights": {"source": "heavy"}}, "weight"),
     ],
 )
 def test_rejects_invalid_configuration(kwargs: dict, message: str) -> None:
