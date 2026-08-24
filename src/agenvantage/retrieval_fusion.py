@@ -81,7 +81,12 @@ def weighted_reciprocal_rank_fusion(
     dependencies are used.
     """
 
-    if not isfinite(rank_constant) or rank_constant <= 0:
+    if (
+        not isinstance(rank_constant, (int, float))
+        or isinstance(rank_constant, bool)
+        or not isfinite(rank_constant)
+        or rank_constant <= 0
+    ):
         raise ValueError("rank_constant must be a finite number greater than zero")
     if top_k is not None and (
         not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 0
