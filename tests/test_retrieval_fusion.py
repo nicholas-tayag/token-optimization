@@ -89,6 +89,7 @@ def test_custom_candidate_id_preserves_first_candidate_and_metadata() -> None:
         ({"weights": {"source": -1.0}}, "weight"),
         ({"weights": {"source": True}}, "weight"),
         ({"weights": {"source": "heavy"}}, "weight"),
+        ({"weights": []}, "weights must be a mapping"),
     ],
 )
 def test_rejects_invalid_configuration(kwargs: dict, message: str) -> None:

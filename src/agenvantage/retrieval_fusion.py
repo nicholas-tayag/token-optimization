@@ -93,6 +93,8 @@ def weighted_reciprocal_rank_fusion(
     ):
         raise ValueError("top_k must be non-negative or None")
 
+    if weights is not None and not isinstance(weights, Mapping):
+        raise ValueError("weights must be a mapping or None")
     source_weights = weights or {}
     unknown_sources = set(source_weights).difference(ranked_lists)
     if unknown_sources:
